@@ -152,8 +152,14 @@ impl FaissBackend {
             });
         }
         let n_query = queries_scaled.nrows();
-        let queries = arr2_rows_to_f32(queries_scaled);
+        let queries = {
+            let span = crate::tracy::zone(tracy_client::span_location!("knn.faiss.prepare"));
+            span.emit_value(n_query as u64);
+            arr2_rows_to_f32(queries_scaled)
+        };
         let (distances, labels) = {
+            let span = crate::tracy::zone(tracy_client::span_location!("knn.faiss.search"));
+            span.emit_value(n_query as u64);
             let mut distances = vec![0.0_f32; n_query.saturating_mul(k_eff)];
             let mut labels = vec![0_i64; n_query.saturating_mul(k_eff)];
             if k_eff > 0 && n_query > 0 {
@@ -173,8 +179,13 @@ impl FaissBackend {
             }
             (distances, labels)
         };
-        let (distances, labels) = unpack_batch_search(n_query, k_eff, &distances, &labels);
-        Ok(pad_neighbor_cols_to_search_k(distances, labels, search_k))
+        let output = {
+            let span = crate::tracy::zone(tracy_client::span_location!("knn.faiss.unpack"));
+            span.emit_value(n_query as u64);
+            let (distances, labels) = unpack_batch_search(n_query, k_eff, &distances, &labels);
+            pad_neighbor_cols_to_search_k(distances, labels, search_k)
+        };
+        Ok(output)
     }
 }
 

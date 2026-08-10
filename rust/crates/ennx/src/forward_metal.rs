@@ -7,9 +7,9 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use metal::{Buffer, ComputePipelineState, MTLSize};
+use metal::{Buffer, ComputePipelineState};
 
-use crate::apple_gpu::Runtime;
+use crate::apple_gpu::{thread_group, Runtime};
 use crate::forward_program::{KdaControlRequest, KdaMoeLayerRequest, KdaPackedLinear};
 use crate::trials::{Search, Trial};
 use crate::weights::ComputeBackend;
@@ -501,7 +501,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(5, Some(&self.recurrence_state), 0);
         encoder.set_buffer(6, Some(&self.post_kda), 0);
         set_bytes(encoder, 7, &params);
-        encoder.dispatch_threads(group(columns), group(256));
+        encoder.dispatch_threads(thread_group(columns), thread_group(256));
         encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
@@ -526,7 +526,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(5, Some(linear), 0);
         set_bytes(encoder, 6, seed);
         set_bytes(encoder, 7, &self.params);
-        encoder.dispatch_threads(group(threads * 32), group(256));
+        encoder.dispatch_threads(thread_group(threads * 32), thread_group(256));
         Ok(())
     }
 
@@ -546,7 +546,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(3, Some(output), 0);
         encoder.set_buffer(4, Some(linear), 0);
         set_bytes(encoder, 5, seed);
-        encoder.dispatch_threads(group(elements), group(256));
+        encoder.dispatch_threads(thread_group(elements), thread_group(256));
         Ok(())
     }
 
@@ -638,7 +638,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(1, Some(&self.attention_norm), 0);
         encoder.set_buffer(2, Some(&self.normalized), 0);
         set_bytes(encoder, 3, &self.params);
-        encoder.dispatch_threads(group(tokens), group(1));
+        encoder.dispatch_threads(thread_group(tokens), thread_group(1));
 
         self.encode_packed_projection(
             encoder,
@@ -657,7 +657,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(4, Some(&self.biases), 0);
         encoder.set_buffer(5, Some(&self.qkv_conv_linear), 0);
         set_bytes(encoder, 6, &seed);
-        encoder.dispatch_threads(group(qkv_width), group(256));
+        encoder.dispatch_threads(thread_group(qkv_width), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_split_qkv_16k")?);
         encoder.set_buffer(0, Some(&self.qkv), 0);
@@ -665,15 +665,15 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(2, Some(&self.key), 0);
         encoder.set_buffer(3, Some(&self.value), 0);
         set_bytes(encoder, 4, &self.kda_params);
-        encoder.dispatch_threads(group(qkv_elements), group(256));
+        encoder.dispatch_threads(thread_group(qkv_elements), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_normalize_qk")?);
         encoder.set_buffer(0, Some(&self.query), 0);
         encoder.set_buffer(1, Some(&self.key), 0);
         set_bytes(encoder, 2, &self.kda_params);
         encoder.dispatch_threads(
-            group(u64::from(self.kda_params.batch) * u64::from(self.kda_params.heads)),
-            group(32),
+            thread_group(u64::from(self.kda_params.batch) * u64::from(self.kda_params.heads)),
+            thread_group(32),
         );
 
         self.encode_packed_projection(
@@ -691,7 +691,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(2, Some(&self.output_state), 0);
         encoder.set_buffer(3, Some(&self.raw_beta), 0);
         set_bytes(encoder, 4, &self.kda_control_params);
-        encoder.dispatch_threads(group(tokens * control_width), group(256));
+        encoder.dispatch_threads(thread_group(tokens * control_width), thread_group(256));
 
         self.encode_packed_projection(
             encoder,
@@ -718,7 +718,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(4, Some(&self.gate), 0);
         encoder.set_buffer(5, Some(&self.beta), 0);
         set_bytes(encoder, 6, &self.kda_control_params);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_decode_step")?);
         encoder.set_buffer(0, Some(&self.query), 0);
@@ -729,7 +729,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(5, Some(&self.recurrence_state), 0);
         encoder.set_buffer(6, Some(&self.post_kda), 0);
         set_bytes(encoder, 7, &self.kda_params);
-        encoder.dispatch_threads(group(recurrence_columns), group(256));
+        encoder.dispatch_threads(thread_group(recurrence_columns), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_postprocess_16k")?);
         encoder.set_buffer(0, Some(&self.post_kda), 0);
@@ -737,7 +737,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(2, Some(&self.output_norm), 0);
         encoder.set_buffer(3, Some(&self.kda_gated), 0);
         set_bytes(encoder, 4, &self.kda_control_params);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
 
         self.encode_packed_projection(
             encoder,
@@ -753,14 +753,14 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(1, Some(&self.update), 0);
         encoder.set_buffer(2, Some(&self.hidden), 0);
         set_bytes(encoder, 3, &self.params);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("decoder_rms_norm")?);
         encoder.set_buffer(0, Some(&self.hidden), 0);
         encoder.set_buffer(1, Some(&self.moe_norm), 0);
         encoder.set_buffer(2, Some(&self.normalized), 0);
         set_bytes(encoder, 3, &self.params);
-        encoder.dispatch_threads(group(tokens), group(1));
+        encoder.dispatch_threads(thread_group(tokens), thread_group(1));
 
         encoder.set_compute_pipeline_state(self.pipeline("moe_router_topk_simd")?);
         encoder.set_buffer(0, Some(&self.normalized), 0);
@@ -772,7 +772,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(6, Some(&self.router), 0);
         set_bytes(encoder, 7, &seed);
         set_bytes(encoder, 8, &self.params);
-        encoder.dispatch_thread_groups(group(tokens), group(512));
+        encoder.dispatch_thread_groups(thread_group(tokens), thread_group(512));
 
         encoder.set_compute_pipeline_state(self.pipeline("moe_gate_up_simd")?);
         encoder.set_buffer(0, Some(&self.normalized), 0);
@@ -785,7 +785,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(7, Some(&self.expert_up), 0);
         set_bytes(encoder, 8, &seed);
         set_bytes(encoder, 9, &self.params);
-        encoder.dispatch_threads(group(expert_activations * 32), group(256));
+        encoder.dispatch_threads(thread_group(expert_activations * 32), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("moe_down_simd")?);
         encoder.set_buffer(0, Some(&self.expert_activation), 0);
@@ -798,14 +798,14 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(7, Some(&self.update), 0);
         set_bytes(encoder, 8, &seed);
         set_bytes(encoder, 9, &self.params);
-        encoder.dispatch_threads(group(hidden * 32), group(256));
+        encoder.dispatch_threads(thread_group(hidden * 32), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("decoder_residual")?);
         encoder.set_buffer(0, Some(&self.hidden), 0);
         encoder.set_buffer(1, Some(&self.update), 0);
         encoder.set_buffer(2, Some(&self.hidden), 0);
         set_bytes(encoder, 3, &self.params);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
         Ok(())
     }
 
@@ -923,7 +923,10 @@ impl KdaMoeMetalExecutor {
             std::mem::size_of::<MetalDecoderParams>() as u64,
             (&params as *const MetalDecoderParams).cast::<c_void>(),
         );
-        encoder.dispatch_threads(group((batch * sequence_length) as u64), group(256));
+        encoder.dispatch_threads(
+            thread_group((batch * sequence_length) as u64),
+            thread_group(256),
+        );
         encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
@@ -952,7 +955,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(6, Some(&self.router), 0);
         set_bytes(encoder, 7, &seed);
         set_bytes(encoder, 8, &self.params);
-        encoder.dispatch_thread_groups(group(tokens), group(512));
+        encoder.dispatch_thread_groups(thread_group(tokens), thread_group(512));
 
         encoder.set_compute_pipeline_state(self.pipeline("moe_gate_up_simd")?);
         encoder.set_buffer(0, Some(&self.normalized), 0);
@@ -965,7 +968,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(7, Some(&self.expert_up), 0);
         set_bytes(encoder, 8, &seed);
         set_bytes(encoder, 9, &self.params);
-        encoder.dispatch_threads(group(expert_activations * 32), group(256));
+        encoder.dispatch_threads(thread_group(expert_activations * 32), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("moe_down_simd")?);
         encoder.set_buffer(0, Some(&self.expert_activation), 0);
@@ -978,14 +981,14 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(7, Some(&self.update), 0);
         set_bytes(encoder, 8, &seed);
         set_bytes(encoder, 9, &self.params);
-        encoder.dispatch_threads(group(hidden * 32), group(256));
+        encoder.dispatch_threads(thread_group(hidden * 32), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("decoder_residual")?);
         encoder.set_buffer(0, Some(&self.hidden), 0);
         encoder.set_buffer(1, Some(&self.update), 0);
         encoder.set_buffer(2, Some(&self.hidden), 0);
         set_bytes(encoder, 3, &self.params);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
         encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
@@ -1026,7 +1029,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(4, Some(&self.qkv), 0);
         encoder.set_buffer(5, Some(&self.qkv_linear), 0);
         set_bytes(encoder, 6, &seed);
-        encoder.dispatch_threads(group(qkv_threads), group(256));
+        encoder.dispatch_threads(thread_group(qkv_threads), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_project_packed_16k")?);
         encoder.set_buffer(0, Some(&self.normalized), 0);
@@ -1036,7 +1039,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(4, Some(&self.control), 0);
         encoder.set_buffer(5, Some(&self.control_linear), 0);
         set_bytes(encoder, 6, &seed);
-        encoder.dispatch_threads(group(tokens * control_width), group(256));
+        encoder.dispatch_threads(thread_group(tokens * control_width), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_split_qkv_16k")?);
         encoder.set_buffer(0, Some(&self.qkv), 0);
@@ -1044,7 +1047,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(2, Some(&self.key), 0);
         encoder.set_buffer(3, Some(&self.value), 0);
         set_bytes(encoder, 4, &self.kda_params);
-        encoder.dispatch_threads(group(qkv_elements), group(256));
+        encoder.dispatch_threads(thread_group(qkv_elements), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_split_control_16k")?);
         encoder.set_buffer(0, Some(&self.control), 0);
@@ -1052,7 +1055,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(2, Some(&self.output_state), 0);
         encoder.set_buffer(3, Some(&self.raw_beta), 0);
         set_bytes(encoder, 4, &self.kda_control_params);
-        encoder.dispatch_threads(group(tokens * control_width), group(256));
+        encoder.dispatch_threads(thread_group(tokens * control_width), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_project_packed_16k")?);
         encoder.set_buffer(0, Some(&self.forget_state), 0);
@@ -1062,7 +1065,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(4, Some(&self.raw_gate), 0);
         encoder.set_buffer(5, Some(&self.forget_linear), 0);
         set_bytes(encoder, 6, &seed);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_project_packed_16k")?);
         encoder.set_buffer(0, Some(&self.output_state), 0);
@@ -1072,7 +1075,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(4, Some(&self.output_gate), 0);
         encoder.set_buffer(5, Some(&self.output_gate_linear), 0);
         set_bytes(encoder, 6, &seed);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_make_gate_beta_16k")?);
         encoder.set_buffer(0, Some(&self.raw_gate), 0);
@@ -1082,7 +1085,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(4, Some(&self.gate), 0);
         encoder.set_buffer(5, Some(&self.beta), 0);
         set_bytes(encoder, 6, &self.kda_control_params);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_recurrence_16k")?);
         encoder.set_buffer(0, Some(&self.query), 0);
@@ -1093,7 +1096,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(5, Some(&self.post_kda), 0);
         encoder.set_buffer(6, Some(&self.recurrence_state), 0);
         set_bytes(encoder, 7, &self.kda_params);
-        encoder.dispatch_threads(group(recurrence_threads), group(256));
+        encoder.dispatch_threads(thread_group(recurrence_threads), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_postprocess_16k")?);
         encoder.set_buffer(0, Some(&self.post_kda), 0);
@@ -1101,7 +1104,7 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(2, Some(&self.output_norm), 0);
         encoder.set_buffer(3, Some(&self.kda_gated), 0);
         set_bytes(encoder, 4, &self.kda_control_params);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("kda_project_packed_16k")?);
         encoder.set_buffer(0, Some(&self.kda_gated), 0);
@@ -1111,14 +1114,14 @@ impl KdaMoeMetalExecutor {
         encoder.set_buffer(4, Some(&self.update), 0);
         encoder.set_buffer(5, Some(&self.output_linear), 0);
         set_bytes(encoder, 6, &seed);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
 
         encoder.set_compute_pipeline_state(self.pipeline("decoder_residual")?);
         encoder.set_buffer(0, Some(&self.hidden), 0);
         encoder.set_buffer(1, Some(&self.update), 0);
         encoder.set_buffer(2, Some(&self.hidden), 0);
         set_bytes(encoder, 3, &self.params);
-        encoder.dispatch_threads(group(hidden), group(256));
+        encoder.dispatch_threads(thread_group(hidden), thread_group(256));
         encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
@@ -1317,7 +1320,10 @@ impl KdaMoeMetalModel {
         encoder.set_buffer(5, Some(&head.embedding_linear), 0);
         set_bytes(encoder, 6, &perturbation);
         set_bytes(encoder, 7, &head.params);
-        encoder.dispatch_threads(group(u64::from(head.params.hidden_width)), group(256));
+        encoder.dispatch_threads(
+            thread_group(u64::from(head.params.hidden_width)),
+            thread_group(256),
+        );
 
         for layer in &self.layers {
             layer.encode_decode_layer(encoder, seed)?;
@@ -1328,7 +1334,7 @@ impl KdaMoeMetalModel {
         encoder.set_buffer(1, Some(&head.final_norm), 0);
         encoder.set_buffer(2, Some(&first.normalized), 0);
         set_bytes(encoder, 3, &first.params);
-        encoder.dispatch_threads(group(1), group(1));
+        encoder.dispatch_threads(thread_group(1), thread_group(1));
 
         first.encode_packed_projection(
             encoder,
@@ -1342,7 +1348,7 @@ impl KdaMoeMetalModel {
         encoder.set_buffer(0, Some(&head.logits), 0);
         encoder.set_buffer(1, Some(&head.next_token), 0);
         set_bytes(encoder, 2, &head.params.vocab_size);
-        encoder.dispatch_thread_groups(group(1), group(256));
+        encoder.dispatch_thread_groups(thread_group(1), thread_group(256));
         encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
@@ -1521,12 +1527,4 @@ fn set_bytes<T>(encoder: &metal::ComputeCommandEncoderRef, slot: u64, value: &T)
         std::mem::size_of::<T>() as u64,
         (value as *const T).cast::<c_void>(),
     );
-}
-
-fn group(width: u64) -> MTLSize {
-    MTLSize {
-        width,
-        height: 1,
-        depth: 1,
-    }
 }

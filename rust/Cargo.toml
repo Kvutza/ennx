@@ -23,6 +23,8 @@ numpy = "0.22"
 pyo3 = { version = "0.22", features = ["extension-module"] }
 rand = "0.8"
 thiserror = "1.0"
+tracy-client = "=0.18.4"
+tracy-client-sys = { version = "=0.28.0", default-features = false, features = ["enable"] }
 
 [profile.release]
 opt-level = 3

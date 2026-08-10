@@ -177,6 +177,7 @@ impl ENNSurrogate {
     }
 
     fn run_fitter(&mut self, rng: &mut rand::rngs::StdRng) -> Result<(), ENNError> {
+        let _span = crate::tracy::zone(tracy_client::span_location!("surrogate.run_fitter"));
         let model = self
             .model
             .as_ref()
@@ -212,6 +213,8 @@ impl ENNSurrogate {
         yvar_new: Option<&ArrayView2<f64>>,
         rng: &mut rand::rngs::StdRng,
     ) -> Result<(), ENNError> {
+        let span = crate::tracy::zone(tracy_client::span_location!("surrogate.fit_append"));
+        span.emit_value(x_new.nrows() as u64);
         // Large disk tells (stress seed chunks) must not run neighbor-based
         // hyperparameter search: each fit query faults mmap pages and peak RSS
         // grows with N. Tiny disk tells (--tell-all) must also skip once params
@@ -333,6 +336,8 @@ impl Surrogate for ENNSurrogate {
         yvar: Option<&ArrayView2<f64>>,
         rng: &mut dyn RngCore,
     ) -> Result<(), ENNError> {
+        let span = crate::tracy::zone(tracy_client::span_location!("surrogate.fit"));
+        span.emit_value(x.nrows() as u64);
         let mut seed_bytes = [0u8; 32];
         rng.fill_bytes(&mut seed_bytes);
         let mut local_rng = rand::rngs::StdRng::from_seed(seed_bytes);
@@ -399,6 +404,8 @@ impl Surrogate for ENNSurrogate {
     }
 
     fn predict(&self, x: &ArrayView2<f64>) -> Result<SurrogatePrediction, ENNError> {
+        let span = crate::tracy::zone(tracy_client::span_location!("surrogate.predict"));
+        span.emit_value(x.nrows() as u64);
         let model = self
             .model
             .as_ref()
@@ -436,6 +443,8 @@ impl Surrogate for ENNSurrogate {
         num_samples: usize,
         rng: &mut dyn RngCore,
     ) -> Result<Array3<f64>, ENNError> {
+        let span = crate::tracy::zone(tracy_client::span_location!("surrogate.sample"));
+        span.emit_value(x.nrows() as u64);
         let model = self
             .model
             .as_ref()

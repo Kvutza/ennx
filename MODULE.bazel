@@ -5,6 +5,7 @@ module(
 
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "openmp", version = "21.1.5.bcr.2")
+bazel_dep(name = "apple_support", version = "1.24.2")
 bazel_dep(name = "rules_cc", version = "0.2.17")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 bazel_dep(name = "rules_python", version = "2.2.0")
@@ -24,9 +25,9 @@ http_archive = use_repo_rule(
 http_archive(
     name = "faiss_src",
     build_file = "//bazel/faiss:BUILD.faiss.bazel",
-    sha256 = "561376d1a44771bf1230fabeef9c81643468009b45a585382cf38d3a7a94990a",
-    strip_prefix = "faiss-1.12.0",
-    urls = ["https://github.com/facebookresearch/faiss/archive/refs/tags/v1.12.0.tar.gz"],
+    sha256 = "7f3c4ed9aec3bd7524382862f5fcbd4d8984e2a8979ff3bdb2c0bcea5144149e",
+    strip_prefix = "faiss-1.14.3",
+    urls = ["https://github.com/facebookresearch/faiss/archive/refs/tags/v1.14.3.tar.gz"],
 )
 
 http_archive(

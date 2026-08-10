@@ -59,3 +59,20 @@ kiss_unit_refs!(
 );
 
 kiss_unit_refs!(kiss_multi_tr_refs, SharingPolicy, default, restart_region,);
+
+#[test]
+fn kiss_tracy_metal_refs() {
+    #[allow(non_snake_case)]
+    fn Batch() {}
+    #[allow(non_snake_case)]
+    fn Encoder() {}
+    fn deref() {}
+    fn drop() {}
+    fn setup() {}
+
+    Batch();
+    Encoder();
+    deref();
+    drop();
+    setup();
+}

@@ -8,6 +8,8 @@ mod usearch_backend;
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 mod metal_index;
+#[cfg(all(target_os = "macos", feature = "metal"))]
+mod metal_plan;
 #[cfg(feature = "opencl")]
 mod opencl_index;
 
@@ -15,12 +17,96 @@ use ndarray::{Array2, ArrayView2};
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Duration;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use std::time::Instant;
 
 use crate::index::{IndexDriver, IndexError};
 
 pub(crate) use faiss_backend::FaissBackend;
+
+/// Metal KNN execution diagram used by the experimental parity surface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KnnPlan {
+    /// Validate equivalent diagrams and retain the fastest Tracy-measured plan.
+    Measured,
+    /// Materialize tile distances before selecting local neighbors.
+    Split,
+    /// Fuse tile distance and local top-k computation.
+    Fused,
+    /// Batch fused tile scans and reduce their neighbor lists as a tree.
+    Tree,
+    /// Use shared query tiles inside the fused tree scan.
+    Tiled,
+    /// Cooperatively reduce dimensions before tree top-k selection.
+    Simd,
+    /// Tile the Gram identity across query and row blocks before tree selection.
+    Gram,
+    /// Fuse general tile top-k and pairwise-reduce lists through `k=2048`.
+    Wide,
+}
+
+/// Tracy timestamp summary for the latest Metal KNN search.
+#[derive(Clone, Debug)]
+pub struct KnnProfile {
+    pub rows: usize,
+    pub queries: usize,
+    pub dims: usize,
+    pub k: usize,
+    pub plan: &'static str,
+    pub gpu: Duration,
+    pub scan: Duration,
+    pub select: Duration,
+    pub reduce: Duration,
+}
+
+/// Unstable low-level KNN surface for backend parity and performance work.
+pub struct KnnIndex(KnnBackend);
+
+impl KnnIndex {
+    /// Builds an index using the measured execution plan.
+    pub fn new(train: &ArrayView2<f64>, driver: IndexDriver) -> Result<Self, IndexError> {
+        Ok(Self(KnnBackend::new(train.ncols(), driver, train)?))
+    }
+
+    /// Builds an index with a requested execution plan.
+    pub fn with_plan(
+        train: &ArrayView2<f64>,
+        driver: IndexDriver,
+        plan: KnnPlan,
+    ) -> Result<Self, IndexError> {
+        Ok(Self(KnnBackend::new_plan(
+            train.ncols(),
+            driver,
+            train,
+            plan,
+        )?))
+    }
+
+    /// Returns the number of indexed rows.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Finds the `k` exact nearest neighbors for each query row.
+    pub fn search(
+        &self,
+        queries: &ArrayView2<f64>,
+        k: usize,
+    ) -> Result<(Array2<f64>, Array2<i64>), IndexError> {
+        self.0.search(queries, k, k)
+    }
+
+    /// Returns the execution plan selected by the last search.
+    pub fn plan(&self) -> &'static str {
+        self.0.plan()
+    }
+
+    /// Returns Tracy GPU-stage timings from the latest Metal search.
+    pub fn profile(&self) -> Option<KnnProfile> {
+        self.0.profile()
+    }
+}
 
 #[cfg(any(feature = "usearch", feature = "usearch-native"))]
 use usearch_backend::USearchBackend;
@@ -105,6 +191,20 @@ impl KnnBackend {
         driver: IndexDriver,
         train_scaled: &ArrayView2<f64>,
     ) -> Result<Self, IndexError> {
+        Self::new_plan(num_dim, driver, train_scaled, KnnPlan::Measured)
+    }
+
+    fn new_plan(
+        num_dim: usize,
+        driver: IndexDriver,
+        train_scaled: &ArrayView2<f64>,
+        plan: KnnPlan,
+    ) -> Result<Self, IndexError> {
+        if plan != KnnPlan::Measured && !matches!(driver, IndexDriver::Metal | IndexDriver::Agx) {
+            return Err(IndexError::InvalidParameter(
+                "explicit KNN plans require the Metal or AGX driver".to_string(),
+            ));
+        }
         match driver {
             IndexDriver::Exact => Ok(Self::Faiss(Mutex::new(FaissBackend::new(
                 num_dim,
@@ -131,9 +231,10 @@ impl KnnBackend {
             IndexDriver::Agx => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
-                    Ok(Self::Metal(Mutex::new(MetalIndex::new_agx(
+                    Ok(Self::Metal(Mutex::new(MetalIndex::new_agx_plan(
                         num_dim,
                         train_scaled,
+                        plan,
                     )?)))
                 }
                 #[cfg(not(all(target_os = "macos", feature = "metal")))]
@@ -162,9 +263,10 @@ impl KnnBackend {
             IndexDriver::Metal => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
-                    return Ok(Self::Metal(Mutex::new(MetalIndex::new(
+                    return Ok(Self::Metal(Mutex::new(MetalIndex::new_plan(
                         num_dim,
                         train_scaled,
+                        plan,
                     )?)));
                 }
                 #[cfg(not(all(target_os = "macos", feature = "metal")))]
@@ -207,6 +309,30 @@ impl KnnBackend {
             Self::Metal(inner) => inner.lock().expect("knn mutex poisoned").len(),
             #[cfg(feature = "opencl")]
             Self::OpenCl(inner) => inner.lock().expect("knn mutex poisoned").len(),
+        }
+    }
+
+    fn plan(&self) -> &'static str {
+        match self {
+            Self::Faiss(_) => "exact",
+            #[cfg(all(target_os = "macos", feature = "metal"))]
+            Self::Auto(_) => "auto",
+            #[cfg(any(feature = "usearch", feature = "usearch-native"))]
+            Self::USearch(_) => "usearch",
+            #[cfg(all(target_os = "macos", feature = "metal"))]
+            Self::Metal(inner) => inner.lock().expect("knn mutex poisoned").plan(),
+            #[cfg(feature = "opencl")]
+            Self::OpenCl(_) => "opencl",
+        }
+    }
+
+    fn profile(&self) -> Option<KnnProfile> {
+        match self {
+            #[cfg(all(target_os = "macos", feature = "metal"))]
+            Self::Auto(inner) => inner.lock().expect("knn mutex poisoned").gpu.profile(),
+            #[cfg(all(target_os = "macos", feature = "metal"))]
+            Self::Metal(inner) => inner.lock().expect("knn mutex poisoned").profile(),
+            _ => None,
         }
     }
 
@@ -312,6 +438,8 @@ impl KnnBackend {
         k_eff: usize,
         search_k: usize,
     ) -> Result<(Array2<f64>, Array2<i64>), IndexError> {
+        let span = crate::tracy::zone(tracy_client::span_location!("knn.search"));
+        span.emit_value(queries_scaled.nrows() as u64);
         match self {
             Self::Faiss(inner) => {
                 inner

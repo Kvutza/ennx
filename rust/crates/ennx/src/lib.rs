@@ -37,6 +37,9 @@ pub mod posterior;
 pub mod stats;
 pub mod strategy;
 pub mod surrogate;
+pub mod tracy;
+#[cfg(all(target_os = "macos", feature = "metal"))]
+mod tracy_metal;
 pub mod traits;
 pub mod trials;
 pub mod trust_region;
@@ -81,8 +84,8 @@ pub use model::{EnnIndexAccess, EnnRowAccess, ModelOptions};
 pub use morbo_trust_region::{MorboTRSettings, MorboTrustRegion, Rescalarize};
 pub use optimizer::obs_access::ObsAccess;
 pub use optimizer::{
-    MultiTrustRegionConfig, MultiTrustRegionState, ObservationDelta, Optimizer, RegionBatch,
-    RegionCandidate, SharingPolicy, Telemetry,
+    MultiTrustRegionConfig, MultiTrustRegionState, ObservationDelta, Optimizer, ProgramTrial,
+    RegionBatch, RegionCandidate, SharingPolicy, Telemetry,
 };
 pub use optimizer_factory::{
     create_optimizer_enn, create_optimizer_enn_multi_tr, create_optimizer_lhd,

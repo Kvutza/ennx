@@ -1,0 +1,12 @@
+melville = "../../melville"
+workspace = "../../melville-eval"
+task = "../../melville/task.md"
+verifier = "! rg -q 'greedy_candidate' native/diffusion/diffusion.cpp && rg -q 'cxx_test' native/diffusion/BUCK && ./ctl buck2 build //native/diffusion:diffusion-engine && ./ctl buck2 test //native/diffusion/..."
+reset = "jj workspace update-stale && jj restore --from @-"
+model = "qwen-diffusion"
+turns = 8
+rounds = 4
+candidates = 32
+seed = 20260810
+radius = 0.1
+history = 128

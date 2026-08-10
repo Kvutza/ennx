@@ -1,6 +1,4 @@
-use ennx::experimental::{
-    apply_dense, dense_dist2, dense_linear, DenseLeaf, DenseTerm, DenseView,
-};
+use ennx::experimental::{apply_dense, dense_dist2, dense_linear, DenseLeaf, DenseTerm, DenseView};
 use ennx::ComputeBackend;
 
 fn input() -> (Vec<f32>, Vec<DenseLeaf>, Vec<DenseTerm>) {
@@ -22,7 +20,10 @@ fn zig_changes_the_complete_pytree() {
     let (base, leaves, terms) = input();
     let result = apply_dense(&base, &leaves, &terms, ComputeBackend::Cpu).unwrap();
     assert_eq!(result.changed, base.len());
-    assert!(base.iter().zip(result.values).all(|(left, right)| *left != right));
+    assert!(base
+        .iter()
+        .zip(result.values)
+        .all(|(left, right)| *left != right));
 
     let origin: Vec<DenseTerm> = Vec::new();
     assert!(dense_dist2(&leaves, &terms, &origin).unwrap() > 0.0);

@@ -1,6 +1,6 @@
 use crate::util::insert_neighbor;
 
-use super::{Ask, Leaf, make_steps, materialize, score, trial_distance};
+use super::{make_steps, materialize, score, trial_distance, Ask, Leaf};
 
 const MAX_DEPTH: usize = 8;
 
@@ -87,7 +87,7 @@ pub(super) fn cpu_ask(
 
 #[cfg(test)]
 mod tests {
-    use super::{Center, check};
+    use super::{check, Center};
 
     #[test]
     fn validates_topological_centers() {

@@ -46,6 +46,8 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
         params: &ENNParams,
         flags: &PosteriorFlags,
     ) -> Result<ENNNormal, ENNError> {
+        let span = crate::tracy::zone(tracy_client::span_location!("posterior.compute"));
+        span.emit_value(x.nrows() as u64);
         let (mu, se, se_epi, se_ale, idx) = if !flags.observation_noise && !self.has_yvar() {
             compute_posterior_light(self, x, params, flags)?
         } else {
@@ -86,6 +88,8 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
         paramss: &[ENNParams],
         flags: &PosteriorFlags,
     ) -> Result<ENNNormal, ENNError> {
+        let span = crate::tracy::zone(tracy_client::span_location!("posterior.batch"));
+        span.emit_value(x.nrows() as u64);
         if paramss.is_empty() {
             return Err(ENNError::InvalidParameter(
                 "paramss must be non-empty".to_string(),
@@ -152,6 +156,8 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
         function_seeds: &[i64],
         flags: &PosteriorFlags,
     ) -> Result<(Array3<f64>, Vec<Vec<usize>>), ENNError> {
+        let span = crate::tracy::zone(tracy_client::span_location!("posterior.draw"));
+        span.emit_value(x.nrows() as u64);
         let internals = compute_posterior_internals(self, x, params, flags)?;
         let mut draws = draw_from_internals(self, &internals, function_seeds)?;
         if self.has_bounded_outputs() {

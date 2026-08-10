@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use metal::{
     BinaryArchiveDescriptor, Buffer, CommandQueue, CompileOptions, ComputePipelineDescriptor,
-    ComputePipelineState, Device, MTLResourceOptions, URL,
+    ComputePipelineState, Device, MTLResourceOptions, MTLSize, URL,
 };
 
 static RUNTIME: OnceLock<Result<Arc<Runtime>, String>> = OnceLock::new();
@@ -31,12 +31,21 @@ pub fn device_info() -> Result<DeviceInfo, String> {
     Runtime::shared().map(|runtime| runtime.info().clone())
 }
 
+pub(crate) fn thread_group(width: u64) -> MTLSize {
+    MTLSize {
+        width,
+        height: 1,
+        depth: 1,
+    }
+}
+
 pub(crate) struct Runtime {
     pub(crate) device: Device,
     pub(crate) queue: CommandQueue,
     info: DeviceInfo,
     pipelines: Mutex<HashMap<(u64, String), ComputePipelineState>>,
     schedules: Mutex<HashMap<u64, usize>>,
+    tracy: Mutex<crate::tracy_metal::Pool>,
 }
 
 impl Runtime {
@@ -56,12 +65,14 @@ impl Runtime {
             name,
         };
         let queue = device.new_command_queue();
+        let tracy = crate::tracy_metal::Pool::new(&device)?;
         Ok(Self {
             device,
             queue,
             info,
             pipelines: Mutex::new(HashMap::new()),
             schedules: Mutex::new(HashMap::new()),
+            tracy: Mutex::new(tracy),
         })
     }
 
@@ -185,6 +196,13 @@ impl Runtime {
         )
     }
 
+    pub(crate) fn trace(&self, passes: usize) -> Result<crate::tracy_metal::Batch, String> {
+        self.tracy
+            .lock()
+            .map_err(|_| "Tracy Metal pool poisoned".to_string())?
+            .batch(&self.device, passes)
+    }
+
     pub(crate) fn schedule<F>(
         &self,
         family: &str,
@@ -216,6 +234,66 @@ impl Runtime {
         let choice = best
             .map(|(candidate, _)| candidate)
             .ok_or_else(|| format!("no valid Apple GPU schedule for {family} {shape:?}"))?;
+        self.schedules
+            .lock()
+            .map_err(|_| "Apple GPU schedule cache poisoned")?
+            .insert(key, choice);
+        Ok(choice)
+    }
+
+    pub(crate) fn race<F>(
+        &self,
+        family: &str,
+        shape: &[usize],
+        candidates: usize,
+        rounds: usize,
+        mut evaluate: F,
+    ) -> Result<usize, String>
+    where
+        F: FnMut(usize) -> Result<Option<Duration>, String>,
+    {
+        let key = source_hash(&format!("{family}:{shape:?}"));
+        if let Some(choice) = self
+            .schedules
+            .lock()
+            .map_err(|_| "Apple GPU schedule cache poisoned")?
+            .get(&key)
+        {
+            return Ok(*choice);
+        }
+        if candidates == 0 || rounds == 0 {
+            return Err("Apple GPU race must have candidates and rounds".to_string());
+        }
+        let mut times = vec![Vec::with_capacity(rounds); candidates];
+        let mut valid = vec![true; candidates];
+        for round in 0..rounds {
+            for offset in 0..candidates {
+                let candidate = (round + offset) % candidates;
+                if !valid[candidate] {
+                    continue;
+                }
+                if let Some(elapsed) = evaluate(candidate)? {
+                    times[candidate].push(elapsed);
+                } else {
+                    valid[candidate] = false;
+                    times[candidate].clear();
+                }
+            }
+        }
+        let mut best = None;
+        for (candidate, elapsed) in times.iter_mut().enumerate() {
+            if !valid[candidate] || elapsed.is_empty() {
+                continue;
+            }
+            elapsed.sort_unstable();
+            let median = elapsed[elapsed.len() / 2];
+            if best.is_none_or(|(_, current)| median < current) {
+                best = Some((candidate, median));
+            }
+        }
+        let choice = best
+            .map(|(candidate, _)| candidate)
+            .ok_or_else(|| format!("no valid Apple GPU race for {family} {shape:?}"))?;
         self.schedules
             .lock()
             .map_err(|_| "Apple GPU schedule cache poisoned")?

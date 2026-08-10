@@ -7,3 +7,19 @@ cc_test(
     srcs = ["faiss_index_smoke.cc"],
     deps = ["@faiss_src//:faiss_c"],
 )
+
+cc_test(
+    name = "faiss_metal_smoke",
+    srcs = ["//:faiss_metal_test"],
+    copts = [
+        "-x",
+        "objective-c++",
+        "-std=c++20",
+    ],
+    data = ["@faiss_src//:metal_shader"],
+    env = {
+        "FAISS_METALLIB_PATH": "$(rootpath @faiss_src//:metal_shader)",
+    },
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@faiss_src//:faiss_metal"],
+)

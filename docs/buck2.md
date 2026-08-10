@@ -14,3 +14,6 @@ files and Pixi tasks.
 
 Development builds use `opt-level=1` in the `dev` isolation directory. Wheels
 use `opt-level=3` in `release`; both graphs stay warm independently.
+
+See [Tracy](tracy.md) for the default-on Rust profiler integration and the
+Buck2 profiling workload.

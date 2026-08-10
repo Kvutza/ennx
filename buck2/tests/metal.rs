@@ -1,12 +1,15 @@
+use ennx::experimental::{Bf16Tree, DenseLeaf, DenseTerm};
 use ennx::forward_metal::{
     KdaMoeMetalArena, KdaMoeMetalExecutor, KdaMoeMetalKdaVectors, KdaMoeMetalModel,
     KdaMoeMetalWeights,
 };
 use ennx::{
-    AcquisitionKind, ComputeBackend, ForwardProgram, KdaControlRequest, KdaForwardRequest,
-    KdaMoeLayerRequest, KdaPackedLinear, KdaTensorLayout, ResidentBoState, WeightAsk, WeightLeaf,
-    WeightSearch,
+    compute_posterior_internals, AcquisitionKind, ComputeBackend, ENNParams,
+    EpistemicNearestNeighbors, ForwardProgram, IndexDriver, KdaControlRequest, KdaForwardRequest,
+    KdaMoeLayerRequest, KdaPackedLinear, KdaTensorLayout, PosteriorFlags, ResidentBoState,
+    WeightAsk, WeightLeaf, WeightSearch,
 };
+use ndarray::Array2;
 
 fn leaves() -> Vec<WeightLeaf> {
     vec![
@@ -68,6 +71,94 @@ fn agx_matches_cpu() {
     assert_eq!(agx.0, cpu.0);
     assert!((agx.1 - cpu.1).abs() <= 1.0e-5);
     assert_eq!(agx.2, cpu.2);
+}
+
+#[test]
+fn knn_matches_exact() {
+    let rows = Array2::from_shape_fn((137, 7), |(i, j)| {
+        ((i * 37 + j * 19 + 5) % 509) as f64 / 509.0
+    });
+    let values = Array2::from_shape_fn((137, 3), |(i, j)| {
+        ((i * 13 + j * 23 + 7) % 521) as f64 / 97.0
+    });
+    let queries = Array2::from_shape_fn((29, 7), |(i, j)| {
+        ((i * 31 + j * 11 + 3) % 503) as f64 / 503.0
+    });
+    let flags = PosteriorFlags::new().with_tie_break_neighbors(false);
+    let exact_model = EpistemicNearestNeighbors::new(
+        rows.clone(),
+        values.clone(),
+        None,
+        false,
+        IndexDriver::Exact,
+    )
+    .unwrap();
+
+    for neighbors in [1, 3, 8, 10, 16, 17, 31, 64] {
+        let params = ENNParams::new(neighbors, 0.7, 0.13).unwrap();
+        let expected =
+            compute_posterior_internals(&exact_model, &queries.view(), &params, &flags).unwrap();
+        for driver in [IndexDriver::Metal, IndexDriver::Agx] {
+            let model =
+                EpistemicNearestNeighbors::new(rows.clone(), values.clone(), None, false, driver)
+                    .unwrap();
+            let actual =
+                compute_posterior_internals(&model, &queries.view(), &params, &flags).unwrap();
+            assert_eq!(actual.idx, expected.idx, "{driver:?}, k={neighbors}");
+            assert!(actual
+                .mu
+                .iter()
+                .zip(expected.mu.iter())
+                .all(|(actual, expected)| (actual - expected).abs() <= 1.0e-5));
+            assert!(actual
+                .se
+                .iter()
+                .zip(expected.se.iter())
+                .all(|(actual, expected)| (actual - expected).abs() <= 1.0e-5));
+        }
+    }
+}
+
+#[test]
+fn bf16_pytree_matches_cpu() {
+    let base = [0.5f32, -1.0, 2.0, 0.25, 4.0, -2.0, 0.75, -0.125]
+        .map(|value| (value.to_bits() >> 16) as u16);
+    let leaves = vec![
+        DenseLeaf::new(11, 0, 4, 0.5).unwrap(),
+        DenseLeaf::new(29, 4, 4, 1.25).unwrap(),
+    ];
+    let terms = [
+        DenseTerm::new(0x1234_5678_9abc_def0, 0.01).unwrap(),
+        DenseTerm::new(91, -0.0025).unwrap(),
+    ];
+    let mut cpu = Bf16Tree::new(base.to_vec(), leaves.clone(), ComputeBackend::Cpu).unwrap();
+    assert_eq!(cpu.candidate(), base);
+    cpu.materialize(&terms).unwrap();
+    for backend in [ComputeBackend::Metal, ComputeBackend::Agx] {
+        let mut tree = Bf16Tree::new(base.to_vec(), leaves.clone(), backend).unwrap();
+        assert_eq!(tree.candidate(), base);
+        tree.materialize(&terms).unwrap();
+        assert_eq!(tree.candidate(), cpu.candidate());
+    }
+}
+
+#[test]
+fn bf16_pytree_preserves_sub_ulp_directions() {
+    let base = [1.0f32, -2.0, 4.0, -8.0].map(|value| (value.to_bits() >> 16) as u16);
+    let leaves = vec![DenseLeaf::new(11, 0, base.len(), 1.0e-6).unwrap()];
+    let terms = [DenseTerm::new(17, 1.0e-6).unwrap()];
+    let mut cpu = Bf16Tree::new(base.to_vec(), leaves.clone(), ComputeBackend::Cpu).unwrap();
+    cpu.materialize(&terms).unwrap();
+    assert!(cpu
+        .candidate()
+        .iter()
+        .zip(base)
+        .all(|(candidate, base)| *candidate != base));
+    for backend in [ComputeBackend::Metal, ComputeBackend::Agx] {
+        let mut tree = Bf16Tree::new(base.to_vec(), leaves.clone(), backend).unwrap();
+        tree.materialize(&terms).unwrap();
+        assert_eq!(tree.candidate(), cpu.candidate());
+    }
 }
 
 fn linear(input_width: usize, output_width: usize, bits: u8) -> KdaPackedLinear {
@@ -304,24 +395,20 @@ fn kda_decode_advances_persistent_state() {
         executor.recurrence_state(),
         [vec![1.0; 4], vec![0.0; 12]].concat()
     );
-    assert!(
-        executor
-            .kda_decode_output()
-            .iter()
-            .all(|&value| value == 0x3800)
-    ); // IEEE f16 0.5 after the 1/sqrt(key_width) query scale
+    assert!(executor
+        .kda_decode_output()
+        .iter()
+        .all(|&value| value == 0x3800)); // IEEE f16 0.5 after the 1/sqrt(key_width) query scale
 
     executor.kda_decode_step().unwrap();
     assert_eq!(
         executor.recurrence_state(),
         [vec![1.5; 4], vec![0.0; 12]].concat()
     );
-    assert!(
-        executor
-            .kda_decode_output()
-            .iter()
-            .all(|&value| value == 0x3a00)
-    ); // IEEE f16 0.75 after the 1/sqrt(key_width) query scale
+    assert!(executor
+        .kda_decode_output()
+        .iter()
+        .all(|&value| value == 0x3a00)); // IEEE f16 0.75 after the 1/sqrt(key_width) query scale
 }
 
 #[test]
@@ -354,12 +441,10 @@ fn single_token_layer_decode_stays_resident() {
         )
     };
     assert!(hidden.iter().all(|value| value & 0x7c00 != 0x7c00));
-    assert!(
-        executor
-            .recurrence_state()
-            .iter()
-            .all(|value| value.is_finite())
-    );
+    assert!(executor
+        .recurrence_state()
+        .iter()
+        .all(|value| value.is_finite()));
 
     let mut model = KdaMoeMetalModel::new(vec![executor]).unwrap();
     model

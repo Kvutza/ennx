@@ -3,6 +3,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+mod tune;
+
 fn main() -> ExitCode {
     match run() {
         Ok(code) => ExitCode::from(code),
@@ -29,11 +31,15 @@ fn run() -> Result<u8, String> {
         "ci" => ci(&root),
         "buck" => buck(&root, &args[1..]),
         "bazel" => bazel(&root, &args[1..]),
+        "tune" => tune::run(&root, &args[1..]),
         "version" | "--version" | "-V" => {
             println!("ennx dev-cli 0.0.0");
             Ok(0)
         }
-        command => Err(format!("unknown ennx command {command:?}\n\n{}", help_text())),
+        command => Err(format!(
+            "unknown ennx command {command:?}\n\n{}",
+            help_text()
+        )),
     }
 }
 
@@ -50,8 +56,20 @@ fn buck(root: &Path, args: &[String]) -> Result<u8, String> {
 
 fn bazel(root: &Path, args: &[String]) -> Result<u8, String> {
     match args.first().map(String::as_str) {
-        Some("test") => command(root, "bazel", ["test", "//rust/crates/ennx:ennx_test", "--config=constrained"]),
-        Some("build") => command(root, "bazel", ["build", "//rust/crates/ennx:ennx", "--config=constrained"]),
+        Some("test") => command(
+            root,
+            "bazel",
+            [
+                "test",
+                "//rust/crates/ennx:ennx_test",
+                "--config=constrained",
+            ],
+        ),
+        Some("build") => command(
+            root,
+            "bazel",
+            ["build", "//rust/crates/ennx:ennx", "--config=constrained"],
+        ),
         Some(command) => Err(format!("unknown ennx bazel command {command:?}")),
         None => Err("missing ennx bazel command".to_string()),
     }
@@ -138,9 +156,9 @@ where
         .current_dir(root)
         .status()
         .map_err(|error| format!("failed to run {program}: {error}"))?;
-    Ok(status.code().map_or(1, |code| {
-        u8::try_from(code).unwrap_or(1)
-    }))
+    Ok(status
+        .code()
+        .map_or(1, |code| u8::try_from(code).unwrap_or(1)))
 }
 
 fn repo_root() -> Result<PathBuf, String> {
@@ -166,6 +184,7 @@ fn help_text() -> &'static str {
   ennx wheel
   ennx verify
   ennx ci
+  ennx tune CONFIG.toml
   ennx buck build|test|wheel|ci
   ennx bazel build|test"
 }

@@ -1,10 +1,12 @@
+load(":faiss.bzl", "faiss_native")
+
 http_archive(
     name = "faiss-source",
-    sha256 = "561376d1a44771bf1230fabeef9c81643468009b45a585382cf38d3a7a94990a",
-    strip_prefix = "faiss-1.12.0",
+    sha256 = "7f3c4ed9aec3bd7524382862f5fcbd4d8984e2a8979ff3bdb2c0bcea5144149e",
+    strip_prefix = "faiss-1.14.3",
     target_compatible_with = ["prelude//os/constraints:macos"],
     urls = [
-        "https://github.com/facebookresearch/faiss/archive/refs/tags/v1.12.0.tar.gz",
+        "https://github.com/facebookresearch/faiss/archive/refs/tags/v1.14.3.tar.gz",
     ],
 )
 
@@ -28,11 +30,6 @@ http_archive(
     urls = [
         "https://static.crates.io/crates/usearch/2.26.0/download",
     ],
-)
-
-python_bootstrap_binary(
-    name = "build-faiss-tool",
-    main = "build_faiss.py",
 )
 
 rust_binary(
@@ -60,29 +57,10 @@ genrule(
     visibility = ["PUBLIC"],
 )
 
-genrule(
+faiss_native(
     name = "faiss-build",
-    default_outs = ["libfaiss.a"],
-    outs = {
-        "faiss": ["libfaiss.a"],
-        "omp-header": ["omp.h"],
-        "openmp": ["libomp.dylib"],
-    },
-    srcs = [
-        ":faiss-source",
-        ":llvm-openmp-conda",
-    ],
-    cmd = " ".join([
-        "$(exe :build-faiss-tool)",
-        "--source",
-        "$(location :faiss-source)",
-        "--openmp",
-        "$(location :llvm-openmp-conda)",
-        "--out-dir",
-        "$OUT",
-        "--jobs",
-        "4",
-    ]),
+    openmp = ":llvm-openmp-conda",
+    source = ":faiss-source",
     target_compatible_with = ["prelude//os/constraints:macos"],
     visibility = ["PUBLIC"],
 )
@@ -113,6 +91,30 @@ prebuilt_cxx_library(
     preferred_linkage = "static",
     static_lib = ":faiss-build[faiss]",
     static_pic_lib = ":faiss-build[faiss]",
+    target_compatible_with = ["prelude//os/constraints:macos"],
+    visibility = ["PUBLIC"],
+)
+
+prebuilt_cxx_library(
+    name = "faiss-metal-macos",
+    exported_deps = [":faiss-macos"],
+    exported_linker_flags = [
+        "-framework",
+        "Foundation",
+        "-framework",
+        "Metal",
+        "-framework",
+        "MetalKit",
+        "-framework",
+        "MetalPerformanceShaders",
+    ],
+    exported_preprocessor_flags = [
+        "-I$(location :faiss-source)",
+    ],
+    force_static = True,
+    preferred_linkage = "static",
+    static_lib = ":faiss-build[metal]",
+    static_pic_lib = ":faiss-build[metal]",
     target_compatible_with = ["prelude//os/constraints:macos"],
     visibility = ["PUBLIC"],
 )
@@ -164,8 +166,35 @@ alias(
 
 cxx_test(
     name = "faiss-link",
-    compiler_flags = ["-std=c++17"],
+    compiler_flags = ["-std=c++20"],
     srcs = ["faiss_link.cpp"],
     deps = [":faiss"],
+    target_compatible_with = ["prelude//os/constraints:macos"],
+)
+
+cxx_test(
+    name = "faiss-metal",
+    srcs = ["faiss_metal_test.cpp"],
+    compiler_flags = [
+        "-x",
+        "objective-c++",
+        "-std=c++20",
+    ],
+    deps = [":faiss-metal-macos"],
+    env = {
+        "FAISS_METALLIB_PATH": "$(location :faiss-build[metallib])",
+    },
+    target_compatible_with = ["prelude//os/constraints:macos"],
+)
+
+cxx_binary(
+    name = "faiss-metal-bench",
+    srcs = ["faiss_metal_bench.cpp"],
+    compiler_flags = [
+        "-x",
+        "objective-c++",
+        "-std=c++20",
+    ],
+    deps = [":faiss-metal-macos"],
     target_compatible_with = ["prelude//os/constraints:macos"],
 )

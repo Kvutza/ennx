@@ -12,8 +12,10 @@ mod metal;
 #[cfg(feature = "opencl")]
 mod opencl;
 
+mod bf16;
 mod linear;
 
+pub use bf16::Bf16Tree;
 pub use linear::{linear, DenseLinear, DenseView};
 
 #[repr(C)]
@@ -47,6 +49,15 @@ impl DenseLeaf {
 pub struct DenseTerm {
     pub seed: u64,
     pub coefficient: f32,
+}
+
+/// Stable leaf key for a named tensor shared with external model runtimes.
+pub fn tensor_key(name: &str) -> u64 {
+    name.as_bytes()
+        .iter()
+        .fold(1_469_598_103_934_665_603, |key, byte| {
+            (key ^ u64::from(*byte)).wrapping_mul(1_099_511_628_211)
+        })
 }
 
 impl DenseTerm {
@@ -169,7 +180,7 @@ fn validate(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<(
     Ok(())
 }
 
-fn validate_leaves(leaves: &[DenseLeaf], expected: Option<usize>) -> Result<(), String> {
+pub(super) fn validate_leaves(leaves: &[DenseLeaf], expected: Option<usize>) -> Result<(), String> {
     if leaves.is_empty() {
         return Err("at least one dense leaf is required".into());
     }
@@ -198,7 +209,7 @@ fn validate_leaves(leaves: &[DenseLeaf], expected: Option<usize>) -> Result<(), 
     Ok(())
 }
 
-fn validate_terms(terms: &[DenseTerm]) -> Result<(), String> {
+pub(super) fn validate_terms(terms: &[DenseTerm]) -> Result<(), String> {
     if terms.iter().any(|term| !term.coefficient.is_finite()) {
         return Err("dense coefficients must be finite".into());
     }
@@ -206,7 +217,7 @@ fn validate_terms(terms: &[DenseTerm]) -> Result<(), String> {
 }
 
 #[cfg(any(all(target_os = "macos", feature = "metal"), feature = "opencl"))]
-fn tiles(leaves: &[DenseLeaf]) -> Result<Vec<DenseTile>, String> {
+pub(super) fn tiles(leaves: &[DenseLeaf]) -> Result<Vec<DenseTile>, String> {
     let mut tiles = Vec::new();
     for (leaf_index, leaf) in leaves.iter().enumerate() {
         let leaf_index = u32::try_from(leaf_index).map_err(|_| "dense leaf count exceeds u32")?;
@@ -225,7 +236,7 @@ fn tiles(leaves: &[DenseLeaf]) -> Result<Vec<DenseTile>, String> {
     Ok(tiles)
 }
 
-fn has_direction(terms: &[DenseTerm]) -> bool {
+pub(super) fn has_direction(terms: &[DenseTerm]) -> bool {
     terms.iter().enumerate().any(|(index, term)| {
         !terms[..index]
             .iter()
@@ -434,6 +445,14 @@ mod tests {
         for (element, expected) in expected.into_iter().enumerate() {
             assert_eq!(sign(0x1234_5678_9abc_def0, 11, element as u64), expected);
         }
+    }
+
+    #[test]
+    fn tensor_keys_are_stable() {
+        assert_eq!(
+            tensor_key("blk.27.attn_q.weight"),
+            3_843_877_851_495_245_630
+        );
     }
 
     #[test]

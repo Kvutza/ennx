@@ -2,10 +2,10 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use metal::{ComputePipelineState, MTLSize};
+use metal::ComputePipelineState;
 
 use super::{tiles, DenseLeaf, DenseTerm};
-use crate::apple_gpu::Runtime;
+use crate::apple_gpu::{thread_group, Runtime};
 
 const SOURCE: &str = concat!(include_str!("ops.metal"), "\n", include_str!("dense.metal"));
 const THREADS: u64 = 256;
@@ -76,7 +76,7 @@ impl Context {
             size_of::<u32>() as u64,
             (&term_count as *const u32).cast::<c_void>(),
         );
-        encoder.dispatch_thread_groups(group(tiles.len() as u64), group(THREADS));
+        encoder.dispatch_thread_groups(thread_group(tiles.len() as u64), thread_group(THREADS));
         encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
@@ -88,13 +88,5 @@ impl Context {
 
     fn buffer<T>(&self, values: &[T]) -> metal::Buffer {
         self.runtime.buffer_with(values)
-    }
-}
-
-fn group(width: u64) -> MTLSize {
-    MTLSize {
-        width,
-        height: 1,
-        depth: 1,
     }
 }

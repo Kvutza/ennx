@@ -331,6 +331,8 @@ fn ask_turbo(
     telemetry: &mut Telemetry,
     rng: &mut dyn RngCore,
 ) -> Result<Array2<f64>, ENNError> {
+    let span = crate::tracy::zone(tracy_client::span_location!("strategy.ask_turbo"));
+    span.emit_value(num_arms as u64);
     optimizer.trust_region_mut().resample_on_propose(rng);
     optimizer.trust_region_mut().set_num_arms(num_arms);
 
@@ -362,20 +364,26 @@ fn ask_turbo(
     let num_candidates = config.num_candidates(num_dim, num_arms);
     telemetry.num_candidates = num_candidates;
 
-    let x_cand_unit = generate_candidates(
-        || (lower_1d.clone(), upper_1d.clone()),
-        &x_center.view(),
-        ls_ref.as_ref(),
-        num_candidates,
-        config.candidate_rv,
-        rng,
-        optimizer.sobol_engine_mut(),
-        config.num_pert,
-    )?;
+    let x_cand_unit = {
+        let _span = crate::tracy::zone(tracy_client::span_location!("strategy.candidates"));
+        generate_candidates(
+            || (lower_1d.clone(), upper_1d.clone()),
+            &x_center.view(),
+            ls_ref.as_ref(),
+            num_candidates,
+            config.candidate_rv,
+            rng,
+            optimizer.sobol_engine_mut(),
+            config.num_pert,
+        )?
+    };
 
     // Select arms using acquisition function (with timing)
     let start = std::time::Instant::now();
-    let selected = select_arms(optimizer, &x_cand_unit.view(), num_arms, rng)?;
+    let selected = {
+        let _span = crate::tracy::zone(tracy_client::span_location!("strategy.acquisition"));
+        select_arms(optimizer, &x_cand_unit.view(), num_arms, rng)?
+    };
     telemetry.dt_sel = start.elapsed().as_secs_f64();
 
     Ok(selected)

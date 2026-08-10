@@ -1,12 +1,12 @@
-load("//buck2:reindeer_rules.bzl", "app_rust_library")
+load("//buck2:reindeer_rules.bzl", "app_rust_binary", "app_rust_library")
 
 cxx_library(
     name = "faiss-bridge",
     srcs = ["src/faiss_bridge.cpp"],
     compiler_flags = select({
-        "//:windows-x86_64": ["/std:c++17"],
+        "//:windows-x86_64": ["/std:c++20"],
         "DEFAULT": [
-            "-std=c++17",
+            "-std=c++20",
             "-Wno-deprecated-declarations",
         ],
     }),
@@ -58,10 +58,130 @@ app_rust_library(
         "//rust:sobol",
         "//rust:thiserror",
         "//rust:toml",
+        "//rust:tracy-client",
+        "//rust:tracy-client-sys",
     ] + select({
         "//:linux-arm64": ["//buck2/accelerators:opencl3"],
         "//:linux-x86_64": ["//buck2/accelerators:opencl3"],
         "//:macos-arm64": ["//buck2/accelerators:metal"],
         "//:windows-x86_64": ["//buck2/accelerators:opencl3"],
     }),
+)
+
+app_rust_library(
+    name = "ennx_bench",
+    srcs = glob([
+        "src/**/*.cl",
+        "src/**/*.metal",
+        "src/**/*.rs",
+    ]),
+    crate = "ennx",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    features = [
+        "metal",
+        "usearch-native",
+    ],
+    deps = [
+        ":faiss-bridge",
+        ":usearch-bridge",
+        "//rust/crates/bpann:bpann",
+        "//rust:memmap2",
+        "//rust:ndarray",
+        "//rust:rand",
+        "//rust:rayon",
+        "//rust:serde",
+        "//rust:sobol",
+        "//rust:thiserror",
+        "//rust:toml",
+        "//rust:tracy-client",
+        "//rust:tracy-client-sys",
+        "//buck2/accelerators:metal",
+    ],
+    target_compatible_with = ["prelude//os/constraints:macos"],
+)
+
+app_rust_binary(
+    name = "posterior_frontier",
+    srcs = ["examples/posterior_frontier.rs"],
+    crate = "posterior_frontier",
+    crate_root = "examples/posterior_frontier.rs",
+    edition = "2021",
+    deps = [
+        ":ennx",
+        "//rust:ndarray",
+    ] + select({
+        "//:macos-arm64": ["//buck2/native:openmp-macos"],
+        "DEFAULT": [],
+    }),
+    rpath = True,
+    runtime_dependency_handling = "symlink",
+    rustc_flags = select({
+        "//:macos-arm64": [
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/out",
+        ],
+        "DEFAULT": [],
+    }),
+)
+
+app_rust_binary(
+    name = "trial_bench",
+    srcs = ["examples/trial_bench.rs"],
+    crate = "trial_bench",
+    crate_root = "examples/trial_bench.rs",
+    edition = "2021",
+    deps = [":ennx"] + select({
+        "//:macos-arm64": ["//buck2/native:openmp-macos"],
+        "DEFAULT": [],
+    }),
+    rpath = True,
+    runtime_dependency_handling = "symlink",
+    rustc_flags = select({
+        "//:macos-arm64": [
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/out",
+        ],
+        "DEFAULT": [],
+    }),
+)
+
+app_rust_binary(
+    name = "knn_frontier",
+    srcs = ["examples/knn_frontier.rs"],
+    crate = "knn_frontier",
+    crate_root = "examples/knn_frontier.rs",
+    edition = "2021",
+    deps = [
+        ":ennx_bench",
+        "//rust:ndarray",
+    ] + select({
+        "//:macos-arm64": ["//buck2/native:openmp-macos"],
+        "DEFAULT": [],
+    }),
+    rpath = True,
+    runtime_dependency_handling = "symlink",
+    rustc_flags = select({
+        "//:macos-arm64": [
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/openmp/lib",
+        ],
+        "DEFAULT": [],
+    }),
+)
+
+rust_test(
+    name = "knn_metal_test",
+    srcs = ["tests/knn_metal.rs"],
+    crate = "knn_metal_test",
+    crate_root = "tests/knn_metal.rs",
+    edition = "2021",
+    deps = [
+        ":ennx_bench",
+        "//rust:ndarray",
+        "//buck2/native:openmp-macos",
+    ],
+    rpath = True,
+    runtime_dependency_handling = "symlink",
+    rustc_flags = [
+        "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/openmp/lib",
+    ],
+    target_compatible_with = ["prelude//os/constraints:macos"],
 )

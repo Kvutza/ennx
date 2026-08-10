@@ -26,6 +26,8 @@ ENNX_CRATES = [
     "sobol",
     "thiserror",
     "toml",
+    "tracy-client",
+    "tracy-client-sys",
 ]
 
 ENNX_TEST_CRATES = ENNX_CRATES + [
@@ -46,8 +48,8 @@ cc_library(
     name = "faiss_bridge",
     srcs = ["src/faiss_bridge.cpp"],
     copts = select({
-        "@platforms//os:windows": ["/std:c++17"],
-        "//conditions:default": ["-std=c++17"],
+        "@platforms//os:windows": ["/std:c++20"],
+        "//conditions:default": ["-std=c++20"],
     }),
     deps = ["@faiss_src//:faiss"],
 )
@@ -174,6 +176,32 @@ rust_binary(
     deps = [
         ":ennx_opencl",
     ],
+)
+
+rust_binary(
+    name = "knn_frontier_metal",
+    srcs = ["examples/knn_frontier.rs"],
+    aliases = aliases(normal_dev = True),
+    crate_name = "knn_frontier_metal",
+    crate_root = "examples/knn_frontier.rs",
+    edition = crate_edition(),
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":ennx_metal",
+    ] + ennx_crate_deps(["ndarray"]),
+)
+
+rust_test(
+    name = "knn_metal_test",
+    srcs = ["tests/knn_metal.rs"],
+    aliases = aliases(normal_dev = True),
+    crate_name = "knn_metal_test",
+    crate_root = "tests/knn_metal.rs",
+    edition = crate_edition(),
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":ennx_metal",
+    ] + ennx_crate_deps(["ndarray"]),
 )
 
 rust_test(

@@ -79,6 +79,8 @@ pub fn generate_candidates<R: Rng + ?Sized>(
     sobol_engine: Option<&mut SobolEngine>,
     num_pert: usize,
 ) -> Result<Array2<f64>, ENNError> {
+    let span = crate::tracy::zone(tracy_client::span_location!("candidates.generate"));
+    span.emit_value(num_candidates as u64);
     let (lower_1d, upper_1d) = compute_bounds_1d();
 
     let num_dim = x_center.len();

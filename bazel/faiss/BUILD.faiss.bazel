@@ -1,10 +1,9 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@ennx//bazel/faiss:faiss.bzl", "faiss_metal")
 
 package(default_visibility = ["//visibility:public"])
 
-# FAISS 1.12.0 is pinned to match faiss-sys 0.7.0.  Build the native library
-# directly with Bazel so Rust never invokes faiss-sys's host-discovering CMake
-# build script.
+# Build FAISS 1.14.3 directly with Bazel.
 
 OMP_COPTS = select({
     "@platforms//os:linux": ["-fopenmp"],
@@ -22,9 +21,9 @@ OMP_DEPS = select({
 })
 
 CXX_COPTS = select({
-    "@platforms//os:windows": ["/std:c++17"],
+    "@platforms//os:windows": ["/std:c++20"],
     "//conditions:default": [
-        "-std=c++17",
+        "-std=c++20",
         "-Wno-deprecated-declarations",
         "-Wno-unknown-pragmas",
     ],
@@ -59,7 +58,9 @@ FAISS_HEADERS = glob(
     ["faiss/**/*.h"],
     exclude = [
         "faiss/gpu/**",
+        "faiss/gpu_metal/**",
         "faiss/python/**",
+        "faiss/svs/**",
     ],
 )
 
@@ -68,12 +69,44 @@ FAISS_SRCS = glob(
     exclude = [
         "faiss/cppcontrib/**",
         "faiss/gpu/**",
+        "faiss/gpu_metal/**",
+        "faiss/impl/approx_topk/*.cpp",
+        "faiss/impl/binary_hamming/*.cpp",
+        "faiss/impl/fast_scan/impl-*.cpp",
+        "faiss/impl/hnsw/avx*.cpp",
+        "faiss/impl/pq_code_distance/avx*.cpp",
+        "faiss/impl/pq_code_distance/neon.cpp",
+        "faiss/impl/pq_code_distance/pq_code_distance-sve.cpp",
+        "faiss/impl/pq_code_distance/rvv.cpp",
+        "faiss/impl/scalar_quantizer/sq-*.cpp",
+        "faiss/impl/svs_io.cpp",
         "faiss/invlists/OnDiskInvertedLists.cpp",
         "faiss/python/**",
+        "faiss/svs/**",
+        "faiss/build.cpp",
+        "faiss/utils/distances_fused/avx512.cpp",
+        "faiss/utils/distances_fused/simdlib_based.cpp",
+        "faiss/utils/distances_fused/simdlib_based_neon.cpp",
+        "faiss/utils/hamming_distance/*.cpp",
+        "faiss/utils/simd_impl/*.cpp",
     ],
 ) + select({
     "@platforms//os:windows": [],
     "//conditions:default": ["faiss/invlists/OnDiskInvertedLists.cpp"],
+}) + select({
+    "@platforms//cpu:aarch64": [
+        "faiss/impl/fast_scan/impl-neon.cpp",
+        "faiss/impl/scalar_quantizer/sq-neon.cpp",
+        "faiss/impl/approx_topk/neon.cpp",
+        "faiss/impl/binary_hamming/neon.cpp",
+        "faiss/impl/pq_code_distance/neon.cpp",
+        "faiss/utils/simd_impl/distances_aarch64.cpp",
+        "faiss/utils/hamming_distance/hamming_neon.cpp",
+        "faiss/utils/simd_impl/partitioning_neon.cpp",
+        "faiss/utils/distances_fused/simdlib_based_neon.cpp",
+        "faiss/utils/simd_impl/rabitq_neon.cpp",
+    ],
+    "//conditions:default": [],
 })
 
 cc_library(
@@ -81,7 +114,10 @@ cc_library(
     srcs = FAISS_SRCS,
     hdrs = FAISS_HEADERS,
     copts = CXX_COPTS + OMP_COPTS,
-    defines = ["FINTEGER=int"],
+    defines = ["FINTEGER=int"] + select({
+        "@platforms//cpu:aarch64": ["COMPILE_SIMD_ARM_NEON"],
+        "//conditions:default": [],
+    }),
     includes = ["."],
     deps = [
         ":blas",
@@ -102,3 +138,5 @@ cc_library(
     includes = ["."],
     deps = [":faiss"] + OMP_DEPS,
 )
+
+faiss_metal()

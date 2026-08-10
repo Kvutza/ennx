@@ -16,7 +16,7 @@ mod layout;
 mod tree;
 
 pub use bpann_history::{BpannHistory, IndexedObservation, ObservationId};
-pub(crate) use layout::{Step, Tile, check_layout, make_steps, make_tiles};
+pub(crate) use layout::{check_layout, make_steps, make_tiles, Step, Tile};
 pub use tree::Center;
 
 const MAX_HISTORY: usize = 128;
@@ -285,6 +285,8 @@ impl Search {
         config: Ask,
         materialize_row: bool,
     ) -> Result<Trial, String> {
+        let span = crate::tracy::zone(tracy_client::span_location!("trials.ask"));
+        span.emit_value(seeds.len() as u64);
         if self.pending.is_some() {
             return Err("tell must finish the pending trial before ask".to_string());
         }
@@ -329,6 +331,8 @@ impl Search {
         seeds: &[u64],
         config: Ask,
     ) -> Result<Vec<(usize, f32)>, String> {
+        let span = crate::tracy::zone(tracy_client::span_location!("trials.multi"));
+        span.emit_value(seeds.len() as u64);
         if self.pending.is_some() {
             return Err("tell must finish the pending trial before ask".to_string());
         }
@@ -393,6 +397,8 @@ impl Search {
         seeds: &[u64],
         config: Ask,
     ) -> Result<Vec<(usize, f32)>, String> {
+        let span = crate::tracy::zone(tracy_client::span_location!("trials.tree"));
+        span.emit_value(seeds.len() as u64);
         tree::check(centers, region_centers, num_regions)?;
         if self.pending.is_some() {
             return Err("tell must finish the pending trial before ask".to_string());
@@ -536,6 +542,7 @@ impl Search {
     }
 
     pub fn tell(&mut self, trial: Trial, value: f32, accept: bool) -> Result<(), String> {
+        let _span = crate::tracy::zone(tracy_client::span_location!("trials.tell"));
         if !value.is_finite() {
             return Err("trial value must be finite".to_string());
         }
@@ -1054,7 +1061,7 @@ fn score(nearest: &[(f32, usize)], history: &[(usize, f32)], draw: f32, config: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::{Axis, array};
+    use ndarray::{array, Axis};
     use tempfile::TempDir;
 
     fn leaves() -> Vec<Leaf> {
@@ -1260,17 +1267,15 @@ mod tests {
             .unwrap();
         assert_eq!(resolved, vec![ObservationId(1), ObservationId(0)]);
         assert_eq!(search.history_len(), 2);
-        assert!(
-            search
-                .ask(
-                    &[31],
-                    Ask {
-                        neighbors: 2,
-                        ..Ask::default()
-                    }
-                )
-                .is_ok()
-        );
+        assert!(search
+            .ask(
+                &[31],
+                Ask {
+                    neighbors: 2,
+                    ..Ask::default()
+                }
+            )
+            .is_ok());
     }
 
     #[test]

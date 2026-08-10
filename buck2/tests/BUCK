@@ -5,6 +5,7 @@ rust_test(
     deps = [
         "//buck2/native:openmp-macos",
         "//rust/crates/ennx:ennx",
+        "//rust:ndarray",
     ],
     rpath = True,
     runtime_dependency_handling = "symlink",
@@ -52,6 +53,7 @@ test_suite(
         ":bpann",
         ":dense",
         ":opencl",
+        "//rust/crates/dev-cli:ennx-test",
     ] + select({
         "//:macos-arm64": [
             ":metal",

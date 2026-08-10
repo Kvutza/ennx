@@ -884,19 +884,15 @@ mod tests {
         assert_eq!(plans.len(), 10);
         assert_eq!(plans[1].kernel, "kda_project_packed_16k");
         assert_eq!(plans[1].grid.threads_per_group, 256);
-        assert!(
-            plans[1]
-                .tiles
-                .iter()
-                .any(|tile| tile.axis == WorkAxis::Input && tile.items == 64)
-        );
+        assert!(plans[1]
+            .tiles
+            .iter()
+            .any(|tile| tile.axis == WorkAxis::Input && tile.items == 64));
         assert_eq!(plans[3].kernel, "kda_recurrence_16k");
-        assert!(
-            plans[3]
-                .tiles
-                .iter()
-                .any(|tile| tile.axis == WorkAxis::Token && tile.items == 16_384)
-        );
+        assert!(plans[3]
+            .tiles
+            .iter()
+            .any(|tile| tile.axis == WorkAxis::Token && tile.items == 16_384));
     }
 
     #[test]

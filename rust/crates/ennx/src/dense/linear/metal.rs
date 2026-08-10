@@ -3,10 +3,10 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use metal::{ComputePipelineState, MTLSize};
+use metal::ComputePipelineState;
 
 use super::DenseView;
-use crate::apple_gpu::Runtime;
+use crate::apple_gpu::{thread_group, Runtime};
 use crate::dense::DenseTerm;
 
 const SOURCE: &str = concat!(
@@ -142,7 +142,7 @@ impl Context {
             size_of::<Params>() as u64,
             (&params as *const Params).cast::<c_void>(),
         );
-        encoder.dispatch_thread_groups(group(rows as u64), group(THREADS));
+        encoder.dispatch_thread_groups(thread_group(rows as u64), thread_group(THREADS));
         encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
@@ -219,20 +219,12 @@ impl Resident {
             size_of::<Params>() as u64,
             (&params as *const Params).cast::<c_void>(),
         );
-        encoder.dispatch_thread_groups(group(self.rows as u64), group(THREADS));
+        encoder.dispatch_thread_groups(thread_group(self.rows as u64), thread_group(THREADS));
         encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
         Ok(unsafe {
             std::slice::from_raw_parts(out_buffer.contents().cast::<f32>(), self.rows).to_vec()
         })
-    }
-}
-
-fn group(width: u64) -> MTLSize {
-    MTLSize {
-        width,
-        height: 1,
-        depth: 1,
     }
 }

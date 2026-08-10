@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use metal::{Buffer, ComputePipelineState, MTLSize};
 
-use super::{Ask, Center, Leaf, Step, Tile, make_steps, make_tiles};
-use crate::apple_gpu::Runtime;
+use super::{make_steps, make_tiles, Ask, Center, Leaf, Step, Tile};
+use crate::apple_gpu::{thread_group, Runtime};
 
 const THREADS: u64 = 256;
 const HISTORY_BATCH: usize = 8;
@@ -216,7 +216,8 @@ impl Engine {
         };
 
         let command = self.runtime.queue.new_command_buffer();
-        let encoder = command.new_compute_command_encoder();
+        let mut gpu = self.runtime.trace(3 + usize::from(materialize_row))?;
+        let encoder = gpu.encoder(command, "trials.distance")?;
         encoder.set_compute_pipeline_state(&self.distance);
         encoder.set_buffer(0, Some(&self.rows), 0);
         encoder.set_buffer(1, Some(&self.scratch.history_slots), 0);
@@ -226,50 +227,61 @@ impl Engine {
         encoder.set_buffer(5, Some(&self.scratch.partials), 0);
         encoder.set_buffer(6, Some(&self.scratch.centers), 0);
         encoder.set_buffer(7, Some(&self.scratch.candidate_centers), 0);
-        set_params(encoder, 8, &params);
-        encoder.dispatch_thread_groups(group(distance_groups), group(THREADS));
+        set_params(&encoder, 8, &params);
+        encoder.dispatch_thread_groups(thread_group(distance_groups), thread_group(THREADS));
+        drop(encoder);
 
+        let encoder = gpu.encoder(command, "trials.score")?;
         encoder.set_compute_pipeline_state(&self.score);
         encoder.set_buffer(0, Some(&self.scratch.partials), 0);
         encoder.set_buffer(1, Some(&self.scratch.outcomes), 0);
         encoder.set_buffer(2, Some(&self.scratch.draws), 0);
         encoder.set_buffer(3, Some(&self.scratch.scores), 0);
-        set_params(encoder, 4, &params);
+        set_params(&encoder, 4, &params);
         encoder.dispatch_thread_groups(
             MTLSize {
                 width: seeds.len() as u64,
                 height: 1,
                 depth: 1,
             },
-            group(THREADS),
+            thread_group(THREADS),
         );
+        drop(encoder);
 
+        let encoder = gpu.encoder(command, "trials.pick")?;
         encoder.set_compute_pipeline_state(&self.pick);
         encoder.set_buffer(0, Some(&self.scratch.scores), 0);
         encoder.set_buffer(1, Some(&self.scratch.choice), 0);
-        set_params(encoder, 2, &params);
-        encoder.dispatch_thread_groups(group(1), group(selection_threads(seeds.len())));
+        set_params(&encoder, 2, &params);
+        encoder.dispatch_thread_groups(
+            thread_group(1),
+            thread_group(selection_threads(seeds.len())),
+        );
+        drop(encoder);
 
         if materialize_row {
+            let encoder = gpu.encoder(command, "trials.write")?;
             encoder.set_compute_pipeline_state(&self.write);
             encoder.set_buffer(0, Some(&self.rows), 0);
             encoder.set_buffer(1, Some(&self.scratch.seeds), 0);
             encoder.set_buffer(2, Some(&self.scratch.choice), 0);
             encoder.set_buffer(3, Some(&self.scratch.leaves), 0);
             encoder.set_buffer(4, Some(&self.scratch.tiles), 0);
-            set_params(encoder, 5, &params);
+            set_params(&encoder, 5, &params);
             encoder.dispatch_thread_groups(
                 MTLSize {
                     width: params.tiles as u64,
                     height: 1,
                     depth: 1,
                 },
-                group(THREADS),
+                thread_group(THREADS),
             );
+            drop(encoder);
         }
-        encoder.end_encoding();
+        gpu.resolve(command);
         command.commit();
         command.wait_until_completed();
+        gpu.upload()?;
 
         let index = read_one::<u32>(&self.scratch.choice) as usize;
         let scores = read_slice::<f32>(&self.scratch.scores, seeds.len());
@@ -306,25 +318,28 @@ impl Engine {
         };
 
         let command = self.runtime.queue.new_command_buffer();
-        let encoder = command.new_compute_command_encoder();
+        let mut gpu = self.runtime.trace(1)?;
+        let encoder = gpu.encoder(command, "trials.write")?;
         encoder.set_compute_pipeline_state(&self.write);
         encoder.set_buffer(0, Some(&self.rows), 0);
         encoder.set_buffer(1, Some(&self.scratch.seeds), 0);
         encoder.set_buffer(2, Some(&self.scratch.choice), 0);
         encoder.set_buffer(3, Some(&self.scratch.leaves), 0);
         encoder.set_buffer(4, Some(&self.scratch.tiles), 0);
-        set_params(encoder, 5, &params);
+        set_params(&encoder, 5, &params);
         encoder.dispatch_thread_groups(
             MTLSize {
                 width: params.tiles as u64,
                 height: 1,
                 depth: 1,
             },
-            group(THREADS),
+            thread_group(THREADS),
         );
-        encoder.end_encoding();
+        drop(encoder);
+        gpu.resolve(command);
         command.commit();
         command.wait_until_completed();
+        gpu.upload()?;
         Ok(())
     }
 
@@ -426,7 +441,8 @@ impl Engine {
         };
 
         let command = self.runtime.queue.new_command_buffer();
-        let encoder = command.new_compute_command_encoder();
+        let mut gpu = self.runtime.trace(3)?;
+        let encoder = gpu.encoder(command, "trials.distance")?;
         encoder.set_compute_pipeline_state(&self.distance);
         encoder.set_buffer(0, Some(&self.rows), 0);
         encoder.set_buffer(1, Some(&self.scratch.history_slots), 0);
@@ -436,28 +452,32 @@ impl Engine {
         encoder.set_buffer(5, Some(&self.scratch.partials), 0);
         encoder.set_buffer(6, Some(&self.scratch.centers), 0);
         encoder.set_buffer(7, Some(&self.scratch.candidate_centers), 0);
-        set_params(encoder, 8, &params);
-        encoder.dispatch_thread_groups(group(distance_groups), group(THREADS));
+        set_params(&encoder, 8, &params);
+        encoder.dispatch_thread_groups(thread_group(distance_groups), thread_group(THREADS));
+        drop(encoder);
 
+        let encoder = gpu.encoder(command, "trials.score")?;
         encoder.set_compute_pipeline_state(&self.score);
         encoder.set_buffer(0, Some(&self.scratch.partials), 0);
         encoder.set_buffer(1, Some(&self.scratch.outcomes), 0);
         encoder.set_buffer(2, Some(&self.scratch.draws), 0);
         encoder.set_buffer(3, Some(&self.scratch.scores), 0);
-        set_params(encoder, 4, &params);
+        set_params(&encoder, 4, &params);
         encoder.dispatch_thread_groups(
             MTLSize {
                 width: seeds.len() as u64,
                 height: 1,
                 depth: 1,
             },
-            group(THREADS),
+            thread_group(THREADS),
         );
+        drop(encoder);
 
         let multi_tr_params = MultiTrParams {
             num_regions: to_u32(num_regions, "region count")?,
             candidates_per_region: to_u32(seeds_per_region, "candidates per region")?,
         };
+        let encoder = gpu.encoder(command, "trials.pick")?;
         encoder.set_compute_pipeline_state(&self.multi_tr_pick);
         encoder.set_buffer(0, Some(&self.scratch.scores), 0);
         encoder.set_buffer(1, Some(&self.scratch.choice), 0);
@@ -468,13 +488,14 @@ impl Engine {
             (&multi_tr_params as *const MultiTrParams).cast::<c_void>(),
         );
         encoder.dispatch_thread_groups(
-            group(num_regions as u64),
-            group(selection_threads(seeds_per_region)),
+            thread_group(num_regions as u64),
+            thread_group(selection_threads(seeds_per_region)),
         );
-
-        encoder.end_encoding();
+        drop(encoder);
+        gpu.resolve(command);
         command.commit();
         command.wait_until_completed();
+        gpu.upload()?;
 
         let choices = read_slice::<u32>(&self.scratch.choice, num_regions);
         let scores = read_slice::<f32>(&self.scratch.selected_scores, num_regions);
@@ -723,14 +744,6 @@ fn set_params(encoder: &metal::ComputeCommandEncoderRef, index: u64, params: &Pa
         size_of::<Params>() as u64,
         (params as *const Params).cast::<c_void>(),
     );
-}
-
-fn group(width: u64) -> MTLSize {
-    MTLSize {
-        width,
-        height: 1,
-        depth: 1,
-    }
 }
 
 fn to_u32(value: usize, name: &str) -> Result<u32, String> {
