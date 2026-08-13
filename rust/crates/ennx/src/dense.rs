@@ -78,7 +78,7 @@ pub struct DenseResult {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg(any(all(target_os = "macos", feature = "metal"), feature = "opencl"))]
-struct DenseTile {
+pub(super) struct DenseTile {
     leaf: u32,
     start: u32,
     len: u32,

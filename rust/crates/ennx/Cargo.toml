@@ -49,3 +49,7 @@ ndarray = { workspace = true, features = ["approx"] }
 numpy = "0.22"
 rand_chacha = "0.3"
 tempfile = "3"
+
+[[example]]
+name = "apple_gpu_frontier"
+required-features = ["metal"]

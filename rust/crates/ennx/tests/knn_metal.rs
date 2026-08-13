@@ -1,3 +1,5 @@
+#![cfg(all(target_os = "macos", feature = "metal"))]
+
 use ennx::experimental::{KnnIndex, KnnPlan};
 use ennx::IndexDriver;
 use ndarray::{array, Array2};

@@ -3,7 +3,9 @@ use crate::weights::ComputeBackend;
 use super::{has_direction, sign, validate_leaves, validate_terms, DenseLeaf, DenseTerm};
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
-use ::metal::Buffer;
+extern crate metal as metal_crate;
+#[cfg(all(target_os = "macos", feature = "metal"))]
+use metal_crate::Buffer;
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 mod metal;

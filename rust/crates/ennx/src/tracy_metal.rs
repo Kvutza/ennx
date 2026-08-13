@@ -143,16 +143,27 @@ impl Batch {
             std::slice::from_raw_parts(self.output.contents().cast::<u64>(), self.samples)
         };
         let mut first = None;
-        let mut last = LAST.load(Ordering::Relaxed);
+        let mut last = None;
         for sample in 0..self.spans.len() {
-            let (begin, end) = times(values[sample * 2], values[sample * 2 + 1], last)?;
+            let begin = values[sample * 2];
+            let end = values[sample * 2 + 1];
+            if begin == 0 || end == 0 {
+                continue;
+            }
+            let begin = timestamp(begin)?;
+            let end = timestamp(end)?;
             if end < begin {
                 return Err("invalid Metal duration sample".to_string());
             }
             first.get_or_insert(begin);
-            last = end;
+            last = Some(end);
         }
-        let first = first.ok_or("unresolved Metal duration")?;
+        let Some(first) = first else {
+            return Ok(Duration::ZERO);
+        };
+        let Some(last) = last else {
+            return Ok(Duration::ZERO);
+        };
         if last < first {
             return Err("invalid Metal duration envelope".to_string());
         }
