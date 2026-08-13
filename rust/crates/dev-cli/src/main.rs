@@ -31,6 +31,8 @@ fn run() -> Result<u8, String> {
         "ci" => ci(&root),
         "buck" => buck(&root, &args[1..]),
         "bazel" => bazel(&root, &args[1..]),
+        "rust" => rust(&root, &args[1..]),
+        "python" => python(&root, &args[1..]),
         "tune" => tune::run(&root, &args[1..]),
         "version" | "--version" | "-V" => {
             println!("ennx dev-cli 0.0.0");
@@ -75,8 +77,54 @@ fn bazel(root: &Path, args: &[String]) -> Result<u8, String> {
     }
 }
 
+fn rust(root: &Path, args: &[String]) -> Result<u8, String> {
+    match args.first().map(String::as_str) {
+        Some("fast") => rust_fast(root),
+        Some("full") => rust_full(root),
+        Some(command) => Err(format!("unknown ennx rust command {command:?}")),
+        None => Err("missing ennx rust command".to_string()),
+    }
+}
+
+fn python(root: &Path, args: &[String]) -> Result<u8, String> {
+    match args.first().map(String::as_str) {
+        Some("fast") => python_fast(root),
+        Some("verify") | Some("wheel") => verify(root),
+        Some(command) => Err(format!("unknown ennx python command {command:?}")),
+        None => Err("missing ennx python command".to_string()),
+    }
+}
+
 fn ci(root: &Path) -> Result<u8, String> {
     for step in [buck_build, buck_test, buck_wheel, verify] {
+        let code = step(root)?;
+        if code != 0 {
+            return Ok(code);
+        }
+    }
+    Ok(0)
+}
+
+fn rust_fast(root: &Path) -> Result<u8, String> {
+    for step in [
+        cargo_bpann_tests,
+        cargo_enn_no_default_tests,
+        cargo_enn_no_default_examples,
+    ] {
+        let code = step(root)?;
+        if code != 0 {
+            return Ok(code);
+        }
+    }
+    Ok(0)
+}
+
+fn rust_full(root: &Path) -> Result<u8, String> {
+    for step in [
+        cargo_bpann_tests,
+        cargo_enn_default_tests,
+        cargo_enn_default_examples,
+    ] {
         let code = step(root)?;
         if code != 0 {
             return Ok(code);
@@ -142,6 +190,106 @@ fn verify(root: &Path) -> Result<u8, String> {
     command(root, "tools/buck2-wheel-verify", std::iter::empty::<&str>())
 }
 
+fn cargo_bpann_tests(root: &Path) -> Result<u8, String> {
+    command(
+        root,
+        "cargo",
+        [
+            "test",
+            "--manifest-path",
+            "rust/Cargo.toml",
+            "-p",
+            "ennx-bpann",
+        ],
+    )
+}
+
+fn cargo_enn_no_default_tests(root: &Path) -> Result<u8, String> {
+    command(
+        root,
+        "cargo",
+        [
+            "test",
+            "--manifest-path",
+            "rust/Cargo.toml",
+            "-p",
+            "ennx",
+            "--no-default-features",
+            "--lib",
+            "--tests",
+            "--",
+            "--test-threads=1",
+        ],
+    )
+}
+
+fn cargo_enn_no_default_examples(root: &Path) -> Result<u8, String> {
+    command(
+        root,
+        "cargo",
+        [
+            "test",
+            "--manifest-path",
+            "rust/Cargo.toml",
+            "-p",
+            "ennx",
+            "--no-default-features",
+            "--examples",
+            "--no-run",
+        ],
+    )
+}
+
+fn cargo_enn_default_tests(root: &Path) -> Result<u8, String> {
+    command(
+        root,
+        "cargo",
+        [
+            "test",
+            "--manifest-path",
+            "rust/Cargo.toml",
+            "-p",
+            "ennx",
+            "--lib",
+            "--tests",
+            "--",
+            "--test-threads=1",
+        ],
+    )
+}
+
+fn cargo_enn_default_examples(root: &Path) -> Result<u8, String> {
+    command(
+        root,
+        "cargo",
+        [
+            "test",
+            "--manifest-path",
+            "rust/Cargo.toml",
+            "-p",
+            "ennx",
+            "--examples",
+            "--no-run",
+        ],
+    )
+}
+
+fn python_fast(root: &Path) -> Result<u8, String> {
+    command(
+        root,
+        "python",
+        [
+            "-m",
+            "pytest",
+            "-q",
+            "tests/test_turbo_config.py",
+            "tests/test_candidate_gen_direct.py",
+            "tests/test_encode.py",
+            "tests/test_quantization.py",
+        ],
+    )
+}
+
 fn buck2<const N: usize>(root: &Path, args: [&str; N]) -> Result<u8, String> {
     command(root, "./buck2w", args)
 }
@@ -184,7 +332,21 @@ fn help_text() -> &'static str {
   ennx wheel
   ennx verify
   ennx ci
+  ennx rust fast|full
+  ennx python fast|verify|wheel
   ennx tune CONFIG.toml
   ennx buck build|test|wheel|ci
   ennx bazel build|test"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::help_text;
+
+    #[test]
+    fn help_lists_language_gates() {
+        let help = help_text();
+        assert!(help.contains("ennx rust fast|full"));
+        assert!(help.contains("ennx python fast|verify|wheel"));
+    }
 }

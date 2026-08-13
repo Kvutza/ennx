@@ -146,7 +146,7 @@ its deployment target.
 ## Wheel
 
 ```sh
-pixi run -e ennx buck2-verify
+./ennx verify
 ```
 
 ```text
