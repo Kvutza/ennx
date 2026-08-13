@@ -1,13 +1,11 @@
-use ennx::experimental::{Bf16Tree, DenseLeaf, DenseTerm};
-use ennx::forward_metal::{
-    KdaMoeMetalArena, KdaMoeMetalExecutor, KdaMoeMetalKdaVectors, KdaMoeMetalModel,
-    KdaMoeMetalWeights,
+use ennx::experimental::{
+    AcquisitionKind, Bf16Tree, ComputeBackend, DenseLeaf, DenseTerm, ForwardProgram,
+    KdaControlRequest, KdaForwardRequest, KdaMoeLayerRequest, KdaMoeMetalArena,
+    KdaMoeMetalExecutor, KdaMoeMetalKdaVectors, KdaMoeMetalModel, KdaMoeMetalWeights,
+    KdaPackedLinear, KdaTensorLayout, ResidentBoState, WeightAsk, WeightLeaf, WeightSearch,
 };
 use ennx::{
-    compute_posterior_internals, AcquisitionKind, ComputeBackend, ENNParams,
-    EpistemicNearestNeighbors, ForwardProgram, IndexDriver, KdaControlRequest, KdaForwardRequest,
-    KdaMoeLayerRequest, KdaPackedLinear, KdaTensorLayout, PosteriorFlags, ResidentBoState,
-    WeightAsk, WeightLeaf, WeightSearch,
+    compute_posterior_internals, ENNParams, EpistemicNearestNeighbors, IndexDriver, PosteriorFlags,
 };
 use ndarray::Array2;
 

@@ -33,6 +33,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "dense_dist2": (".._rust", "dense_dist2"),
     "dense_linear": (".._rust", "dense_linear"),
     "DenseLinear": (".._rust", "DenseLinear"),
+    "quantize_int4": ("..quantization", "quantize_int4"),
+    "quantize_fp4_e2m1": ("..quantization", "quantize_fp4_e2m1"),
 }
 
 experimental = sys.modules[__name__]
@@ -75,6 +77,8 @@ __all__: list[str] = [
     "experimental",
     "make_multi_trust_region",
     "multi_trust_region",
+    "quantize_fp4_e2m1",
+    "quantize_int4",
     "select_region_candidates",
     "weight_int4_select_ucb",
     "weight_select_ucb",

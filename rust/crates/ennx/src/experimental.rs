@@ -1,7 +1,7 @@
 //! Experimental ENNX APIs.
 //!
 //! This module is the staging area for unstable lower-level surface area.
-//! Keep stable user-facing entry points in the crate root.
+//! Keep stable user-facing Rust entry points in [`crate::prelude`].
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub use crate::apple_gpu::{device_info as apple_gpu_info, DeviceInfo as AppleGpuInfo};
@@ -27,8 +27,13 @@ pub use crate::optimizer::{
     RegionBatch, RegionCandidate, SharingPolicy, Telemetry,
 };
 pub use crate::optimizer_factory::create_optimizer_enn_multi_tr;
+pub use crate::quantization::{quantize_fp4_e2m1, quantize_int4, FP4_E2M1_LUT};
 pub use crate::trials::{
-    Ask as WeightAsk, BpannHistory, Center as WeightCenter, Leaf as WeightLeaf,
-    Search as WeightSearch, Trial as WeightTrial,
+    Ask as WeightAsk, BpannHistory, Center as WeightCenter, EncodingType, IndexedObservation,
+    Leaf as WeightLeaf, ObservationId, Search as WeightSearch, Trial as WeightTrial,
 };
-pub use crate::weights::{ComputeBackend, WeightBlock, WeightSelectConfig, WeightSelectResult};
+pub use crate::weights::{
+    apply_sparse, blocks_for_words, draw_sparse, merge_values, missing_words, select_weights,
+    sparse_union, sparse_xor, take_words, AcquisitionKind, ComputeBackend, WeightBlock,
+    WeightSelectConfig, WeightSelectResult,
+};

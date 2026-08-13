@@ -40,6 +40,8 @@ pub fn pymodule_util(m: &Bound<'_, PyModule>) -> PyResult<()> {
         crate::py_util::arms_from_pareto_fronts_py,
         m
     )?)?;
+    m.add_function(wrap_pyfunction!(crate::py_util::q_int4_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::py_util::q_fp4_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::py_util::set_config_path_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::py_util::ensure_config_file_py, m)?)?;
     Ok(())

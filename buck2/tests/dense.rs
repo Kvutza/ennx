@@ -1,5 +1,6 @@
-use ennx::experimental::{apply_dense, dense_dist2, dense_linear, DenseLeaf, DenseTerm, DenseView};
-use ennx::ComputeBackend;
+use ennx::experimental::{
+    apply_dense, dense_dist2, dense_linear, ComputeBackend, DenseLeaf, DenseTerm, DenseView,
+};
 
 fn input() -> (Vec<f32>, Vec<DenseLeaf>, Vec<DenseTerm>) {
     (

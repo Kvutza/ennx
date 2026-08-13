@@ -99,6 +99,8 @@ class TestPublicAPIExports:
         assert inspect.isclass(experimental.MultiTrustRegion)
         assert inspect.isclass(experimental.ResidentBoSession)
         assert callable(experimental.create_optimizer_enn)
+        assert callable(experimental.quantize_int4)
+        assert callable(experimental.quantize_fp4_e2m1)
 
     def test_enum_types(self):
         """Enum types are available."""
@@ -117,3 +119,15 @@ class TestPublicAPIImmutability:
         import ennx
 
         assert set(ennx.__all__) == set(ennx._LAZY_ATTRS.keys())
+
+    def test_quantization_not_top_level(self):
+        import ennx
+
+        assert "quantize_int4" not in ennx.__all__
+        assert "quantize_fp4_e2m1" not in ennx.__all__
+
+    def test_top_level_quantization_warns(self):
+        import ennx
+
+        with pytest.warns(DeprecationWarning):
+            assert callable(ennx.quantize_int4)

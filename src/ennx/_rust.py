@@ -22,6 +22,8 @@ pareto_front_2d_maximize = _ext.util.pareto_front_2d_maximize
 calculate_sobol_indices = _ext.util.calculate_sobol_indices
 sobol_sequence = _ext.util.sobol_sequence
 arms_from_pareto_fronts = _ext.util.arms_from_pareto_fronts
+quantize_int4 = _ext.util.quantize_int4
+quantize_fp4_e2m1 = _ext.util.quantize_fp4_e2m1
 set_config_path = _ext.util.set_config_path
 ensure_config_file = _ext.util.ensure_config_file
 EpistemicNearestNeighbors = _ext.model.EpistemicNearestNeighbors
@@ -76,6 +78,8 @@ __all__ = [
     "hypervolume_2d_max",
     "normal_hash_batch_multi_seed_fast",
     "pareto_front_2d_maximize",
+    "quantize_fp4_e2m1",
+    "quantize_int4",
     "set_config_path",
     "sobol_sequence",
     "standardize_y",

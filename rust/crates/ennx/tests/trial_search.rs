@@ -1,7 +1,6 @@
-use ennx::experimental::{apply_dense, dense_linear, DenseLeaf, DenseLinear, DenseTerm, DenseView};
-use ennx::{
-    AcquisitionKind, BpannHistory, ComputeBackend, WeightAsk, WeightCenter, WeightLeaf,
-    WeightSearch,
+use ennx::experimental::{
+    apply_dense, dense_linear, AcquisitionKind, BpannHistory, ComputeBackend, DenseLeaf,
+    DenseLinear, DenseTerm, DenseView, WeightAsk, WeightCenter, WeightLeaf, WeightSearch,
 };
 use ndarray::{array, Axis};
 use tempfile::TempDir;

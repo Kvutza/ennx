@@ -1,7 +1,10 @@
 //! Utility functions Python bindings.
 
 use ndarray::Array1;
-use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayDyn, PyReadonlyArray1, PyReadonlyArray2};
+use numpy::{
+    IntoPyArray, PyArray1, PyArray2, PyArrayDyn, PyReadonlyArray1, PyReadonlyArray2,
+    PyReadonlyArrayDyn,
+};
 use pyo3::prelude::*;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -168,6 +171,32 @@ pub fn arms_from_pareto_fronts_py<'py>(
         }
     }
     Ok(out.into_pyarray_bound(py))
+}
+
+#[pyfunction(name = "quantize_int4")]
+#[pyo3(signature = (arr, scale=1.0))]
+pub fn q_int4_py<'py>(
+    py: Python<'py>,
+    arr: PyReadonlyArrayDyn<f32>,
+    scale: f32,
+) -> PyResult<Bound<'py, PyArray1<u8>>> {
+    let values = arr.as_array();
+    let packed =
+        py.allow_threads(|| ennx::experimental::quantize_int4(values.iter().copied(), scale));
+    Ok(Array1::from_vec(packed).into_pyarray_bound(py))
+}
+
+#[pyfunction(name = "quantize_fp4_e2m1")]
+#[pyo3(signature = (arr, scale=1.0))]
+pub fn q_fp4_py<'py>(
+    py: Python<'py>,
+    arr: PyReadonlyArrayDyn<f32>,
+    scale: f32,
+) -> PyResult<Bound<'py, PyArray1<u8>>> {
+    let values = arr.as_array();
+    let packed =
+        py.allow_threads(|| ennx::experimental::quantize_fp4_e2m1(values.iter().copied(), scale));
+    Ok(Array1::from_vec(packed).into_pyarray_bound(py))
 }
 
 /// Override ennx config path (`None` restores `~/.ennx/config.toml`).

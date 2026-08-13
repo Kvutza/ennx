@@ -10,6 +10,11 @@ Test
 
     bazel test //:check //:audit --config=release --config=constrained
 
+See docs/testing.md for the test tiers, generated-workload policy, and
+hardware/benchmark gates.
+
+See docs/api.md for the stable, experimental, and internal API boundary.
+
 Format
 
     bazel run @buildifier_prebuilt//:buildifier -- -r .

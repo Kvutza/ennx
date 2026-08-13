@@ -11,7 +11,7 @@ import numpy as np
 try:
     from ennx.ennx_rust import optimizer
 
-    from ennx import quantize_fp4_e2m1
+    from ennx.experimental import quantize_fp4_e2m1
 
     print("[✓] Successfully imported native ENNX components and quantization helpers.")
 except ImportError as e:

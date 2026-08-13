@@ -1,10 +1,8 @@
 use ennx::experimental::{
-    DenseLeaf, DenseLinear, DenseTerm, DenseView, apply_dense, dense_dist2, dense_linear,
-};
-use ennx::{
-    AcquisitionKind, BpannHistory, ComputeBackend, WeightAsk, WeightBlock, WeightLeaf,
-    WeightSearch, WeightSelectConfig, WeightTrial, apply_sparse, blocks_for_words, draw_sparse,
+    apply_dense, apply_sparse, blocks_for_words, dense_dist2, dense_linear, draw_sparse,
     merge_values, missing_words, select_weights, sparse_union, sparse_xor, take_words,
+    AcquisitionKind, BpannHistory, ComputeBackend, DenseLeaf, DenseLinear, DenseTerm, DenseView,
+    WeightAsk, WeightBlock, WeightLeaf, WeightSearch, WeightSelectConfig, WeightTrial,
 };
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
@@ -65,7 +63,8 @@ fn trial_leaves_with_encoding(
 ) -> PyResult<Vec<WeightLeaf>> {
     raw.into_iter()
         .map(|(offset, length, bits, mode, scale, weight, radius)| {
-            let encoding = ennx::EncodingType::parse(bits, mode.as_deref()).map_err(err)?;
+            let encoding =
+                ennx::experimental::EncodingType::parse(bits, mode.as_deref()).map_err(err)?;
             WeightLeaf::new_with_encoding(offset, length, bits, encoding, scale, weight, radius)
                 .map_err(err)
         })

@@ -16,14 +16,14 @@ From repo root:
 
 ```bash
 cd /path/to/repo
-pixi run -e ennx test
+./ennx python fast
 ```
 
 2. Build the wheel and run its isolated wheel smoke and API tests:
 
 ```bash
 cd /path/to/repo
-pixi run -e ennx buck2-verify
+./ennx verify
 ```
 
 Do not combine `PYTHONPATH=src` with an extension installed only in
@@ -33,6 +33,14 @@ Do not combine `PYTHONPATH=src` with an extension installed only in
 
 ```bash
 cd /path/to/repo/rust
-cargo test
+cargo test -p ennx-bpann
+cargo test -p ennx --lib --tests
 cargo clippy --all-targets --all-features -- -D warnings
 ```
+
+Prefer `./ennx rust fast` or `./ennx rust full` for normal repo testing. Use
+raw Cargo only when narrowing a Rust-only failure or checking Clippy directly.
+
+Do not use `cargo test --workspace` as the `ennx-py` gate. `ennx-py` is a
+PyO3 `cdylib`, and generic Cargo test binaries can fail to link Python C
+symbols on macOS even when the wheel builds and Python API tests pass.

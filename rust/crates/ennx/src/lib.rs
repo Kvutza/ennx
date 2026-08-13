@@ -21,19 +21,21 @@ pub mod fit;
 pub mod fitter;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub mod forward_metal;
-pub mod forward_program;
-pub mod forward_weights;
+mod forward_program;
+mod forward_weights;
 pub mod hash;
 pub mod hypervolume;
 pub mod incumbent_tracker;
 pub mod index;
-pub mod knn;
+mod knn;
 pub mod model;
 pub mod morbo_trust_region;
 pub mod optimizer;
 pub mod optimizer_factory;
 pub mod params;
 pub mod posterior;
+pub mod prelude;
+mod quantization;
 pub mod stats;
 pub mod strategy;
 pub mod surrogate;
@@ -41,11 +43,11 @@ pub mod tracy;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 mod tracy_metal;
 pub mod traits;
-pub mod trials;
+mod trials;
 pub mod trust_region;
 pub mod trust_region_config;
 pub mod util;
-pub mod weights;
+mod weights;
 pub mod y_bounds;
 
 #[cfg(test)]
@@ -69,12 +71,6 @@ pub use file_config::{
 };
 pub use fit::{subsample_loglik, subsample_loglik_model};
 pub use fitter::ENNFitter;
-pub use forward_program::{
-    ForwardEvaluator, ForwardOp, ForwardProgram, KdaControlRequest, KdaDispatch, KdaEncoder,
-    KdaForwardRequest, KdaMoeDispatch, KdaMoeLayerRequest, KdaPackedLinear, KdaTensorLayout,
-    KernelPlan, PackedAffinePlan, ResidentBoState, ResidentRound, WorkAxis, WorkGrid, WorkTile,
-};
-pub use forward_weights::PackedModel;
 pub use hash::{normal_hash_batch_multi_seed, normal_hash_batch_multi_seed_fast};
 pub use hypervolume::hypervolume_2d_max;
 pub use incumbent_tracker::IncrementalIncumbentTracker;
@@ -83,14 +79,8 @@ pub use model::EpistemicNearestNeighbors;
 pub use model::{EnnIndexAccess, EnnRowAccess, ModelOptions};
 pub use morbo_trust_region::{MorboTRSettings, MorboTrustRegion, Rescalarize};
 pub use optimizer::obs_access::ObsAccess;
-pub use optimizer::{
-    MultiTrustRegionConfig, MultiTrustRegionState, ObservationDelta, Optimizer, ProgramTrial,
-    RegionBatch, RegionCandidate, SharingPolicy, Telemetry,
-};
-pub use optimizer_factory::{
-    create_optimizer_enn, create_optimizer_enn_multi_tr, create_optimizer_lhd,
-    create_optimizer_zero,
-};
+pub use optimizer::{Optimizer, Telemetry};
+pub use optimizer_factory::{create_optimizer_enn, create_optimizer_lhd, create_optimizer_zero};
 pub use params::{ENNNormal, ENNParams, ParamsError, PosteriorFlags};
 pub use posterior::{
     compute_conditional_posterior_internals, compute_posterior_internals, WeightedPosteriorData,
@@ -99,17 +89,8 @@ pub use stats::WeightedStats;
 pub use strategy::Strategy;
 pub use surrogate::{ENNSurrogate, ENNSurrogateConfig, Surrogate, SurrogatePrediction};
 pub use traits::PosteriorComputation;
-pub use trials::{
-    Ask as WeightAsk, BpannHistory, Center as WeightCenter, EncodingType, IndexedObservation,
-    Leaf as WeightLeaf, ObservationId, Search as WeightSearch, Trial as WeightTrial,
-};
 pub use trust_region::{NoTrustRegion, TRLengthConfig, TrustRegionError, TurboTrustRegion};
 pub use trust_region_config::TrustRegionConfig;
 pub use util::{
     argmax_random_tie, calculate_sobol_indices, pareto_front_2d_maximize, standardize_y,
-};
-pub use weights::{
-    apply_sparse, blocks_for_words, draw_sparse, merge_values, missing_words, select_weights,
-    sparse_union, sparse_xor, take_words, AcquisitionKind, ComputeBackend, WeightBlock,
-    WeightSelectConfig, WeightSelectResult,
 };

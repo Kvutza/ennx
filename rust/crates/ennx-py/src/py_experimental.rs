@@ -1,16 +1,12 @@
-use ennx::PackedModel;
+use ennx::experimental::{
+    AcquisitionKind, ComputeBackend, ForwardProgram, PackedModel, ResidentBoState, ResidentRound,
+    WeightAsk, WeightLeaf,
+};
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use ennx::experimental::{
-    KdaControlRequest, KdaForwardRequest, KdaMoeLayerRequest, KdaPackedLinear, KdaTensorLayout,
-};
-#[cfg(all(target_os = "macos", feature = "metal"))]
-use ennx::forward_metal::{
-    KdaMoeMetalArena, KdaMoeMetalExecutor, KdaMoeMetalKdaVectors, KdaMoeMetalModel,
-    KdaMoeMetalWeights,
-};
-use ennx::{
-    AcquisitionKind, ComputeBackend, ForwardProgram, ResidentBoState, ResidentRound, WeightAsk,
-    WeightLeaf,
+    KdaControlRequest, KdaForwardRequest, KdaMoeLayerRequest, KdaMoeMetalArena,
+    KdaMoeMetalExecutor, KdaMoeMetalKdaVectors, KdaMoeMetalModel, KdaMoeMetalWeights,
+    KdaPackedLinear, KdaTensorLayout,
 };
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use numpy::PyReadonlyArray1;

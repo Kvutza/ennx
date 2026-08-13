@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use ennx::{ComputeBackend, WeightAsk, WeightLeaf, WeightSearch};
+use ennx::experimental::{ComputeBackend, WeightAsk, WeightLeaf, WeightSearch};
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();

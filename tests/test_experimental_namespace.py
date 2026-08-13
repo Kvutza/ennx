@@ -25,6 +25,18 @@ def test_experimental_multi_trust_region_namespace():
     assert ennx.__file__
 
 
+def test_experimental_quantization():
+    import numpy as np
+
+    import ennx.experimental as experimental
+
+    x = np.array([0.0, 1.0, 2.0], dtype=np.float32)
+    np.testing.assert_array_equal(experimental.quantize_int4(x), np.array([0x10, 0x02]))
+    np.testing.assert_array_equal(
+        experimental.quantize_fp4_e2m1(x), np.array([0x20, 0x04])
+    )
+
+
 def test_experimental_multi_trust_region_loop_round():
     import numpy as np
 

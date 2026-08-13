@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+
 from ._lazy import lazy_getattr
 
 _LAZY_ATTRS: dict[str, tuple[str, str]] = {
@@ -22,13 +24,24 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "CandidateRV": (".turbo.optimizer_config", "CandidateRV"),
     "InitStrategy": (".turbo.optimizer_config", "InitStrategy"),
     "AcqType": (".turbo.optimizer_config", "AcqType"),
-    "quantize_int4": (".quantization", "quantize_int4"),
-    "quantize_fp4_e2m1": (".quantization", "quantize_fp4_e2m1"),
 }
 
 
 
 def __getattr__(name: str):
+    if name in _DEPRECATED_ATTRS:
+        import warnings
+
+        rel_module, attr_name = _DEPRECATED_ATTRS[name]
+        module = importlib.import_module(rel_module, __package__)
+        attr = getattr(module, attr_name)
+        globals()[name] = attr
+        warnings.warn(
+            f"ennx.{name} is experimental; use ennx.experimental.{name}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return attr
     return lazy_getattr(
         name=name,
         module_name=__name__,
@@ -55,9 +68,12 @@ __all__: list[str] = [
     "create_optimizer_zero",
     "experimental",
     "lhd_only_config",
-    "quantize_fp4_e2m1",
-    "quantize_int4",
     "turbo_enn_config",
     "turbo_one_config",
     "turbo_zero_config",
 ]
+
+_DEPRECATED_ATTRS: dict[str, tuple[str, str]] = {
+    "quantize_int4": (".quantization", "quantize_int4"),
+    "quantize_fp4_e2m1": (".quantization", "quantize_fp4_e2m1"),
+}

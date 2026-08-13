@@ -566,7 +566,7 @@ pub fn create_optimizer_lhd_py(
 /// Python wrapper for MultiTrustRegion state machine
 #[pyclass(name = "MultiTrustRegion")]
 pub struct PyMultiTrustRegion {
-    inner: ennx::optimizer::multi_tr::MultiTrustRegionState,
+    inner: ennx::experimental::MultiTrustRegionState,
 }
 
 #[pymethods]
@@ -579,9 +579,7 @@ impl PyMultiTrustRegion {
         sharing_policy: &str,
         seed: u64,
     ) -> PyResult<Self> {
-        use ennx::optimizer::multi_tr::{
-            MultiTrustRegionConfig, MultiTrustRegionState, SharingPolicy,
-        };
+        use ennx::experimental::{MultiTrustRegionConfig, MultiTrustRegionState, SharingPolicy};
 
         let mut rng = StdRng::seed_from_u64(seed);
         let policy = match sharing_policy {
@@ -680,12 +678,14 @@ impl PyMultiTrustRegion {
     ) -> PyResult<Vec<(usize, usize, u64, f64)>> {
         let candidates = candidates
             .into_iter()
-            .map(|(index, region, seed, score)| ennx::RegionCandidate {
-                index,
-                region,
-                seed,
-                score,
-            })
+            .map(
+                |(index, region, seed, score)| ennx::experimental::RegionCandidate {
+                    index,
+                    region,
+                    seed,
+                    score,
+                },
+            )
             .collect::<Vec<_>>();
         let selected = self
             .inner
