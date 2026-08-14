@@ -20,3 +20,6 @@ cmp Cargo.Accelerators.lock buck2/accelerators/Cargo.lock
     --num-threads 4 \
     --console simple
 ./tools/buck2-wheel-verify
+ENNX_PYTHON_VERSION=3.12 \
+    ENNX_PYTHON="$repo_dir/.pixi/envs/ennx-py312/bin/python" \
+    ./tools/buck2-wheel-verify

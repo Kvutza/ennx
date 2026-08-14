@@ -4,14 +4,35 @@ set -eu
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_dir"
 
-python_bin=${ENNX_PYTHON:-"$repo_dir/.pixi/envs/ennx/bin/python"}
+python_version=${ENNX_PYTHON_VERSION:-3.13}
+case "$python_version" in
+    3.12)
+        python_abi=cp312
+        python_environment=ennx-py312
+        ;;
+    3.13)
+        python_abi=cp313
+        python_environment=ennx
+        ;;
+    *)
+        echo "unsupported Python version: $python_version" >&2
+        exit 1
+        ;;
+esac
+
+python_bin=${ENNX_PYTHON:-"$repo_dir/.pixi/envs/$python_environment/bin/python"}
+case "$python_bin" in
+    /*) ;;
+    *) python_bin="$repo_dir/$python_bin" ;;
+esac
 if [ ! -x "$python_bin" ]; then
-    echo "missing CPython 3.13 environment; run: pixi install -e ennx" >&2
+    echo "missing CPython $python_version environment; run: pixi install -e $python_environment" >&2
     exit 1
 fi
 
 build_output=$(./buck2w --isolation-dir release build //:wheel \
     --config ennx.profile=release \
+    --config "ennx.python_version=$python_version" \
     --local-only \
     --num-threads 4 \
     --console none \
@@ -21,6 +42,13 @@ if [ -z "$wheel_path" ] || [ ! -f "$wheel_path" ]; then
     echo "wheel output not found in: $build_output" >&2
     exit 1
 fi
+case $(basename "$wheel_path") in
+    *-"$python_abi"-"$python_abi"-*.whl) ;;
+    *)
+        echo "wheel has the wrong Python ABI: $wheel_path" >&2
+        exit 1
+        ;;
+esac
 
 verify_dir=$(mktemp -d "${TMPDIR:-/tmp}/ennx-buck2-wheel.XXXXXX")
 trap 'rm -rf "$verify_dir"' EXIT HUP INT TERM
@@ -63,10 +91,12 @@ case $(uname -s) in
         ;;
 esac
 
-PYTHONPATH="$verify_dir" "$python_bin" - <<'PY'
+ENNX_EXPECTED_PYTHON="$python_version" PYTHONPATH="$verify_dir" "$python_bin" - <<'PY'
+import os
 import sys
 
-assert sys.version_info[:2] == (3, 13)
+expected_python = tuple(int(part) for part in os.environ["ENNX_EXPECTED_PYTHON"].split("."))
+assert sys.version_info[:2] == expected_python
 assert "numpy" not in sys.modules
 from ennx import _rust
 from ennx import EpistemicNearestNeighbors

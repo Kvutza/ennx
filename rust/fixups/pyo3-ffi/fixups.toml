@@ -1,5 +1,1 @@
-[buildscript.run]
-env = {
-  PYO3_CROSS = "1",
-  PYO3_CROSS_PYTHON_VERSION = "3.13",
-}
+buildscript.run = true

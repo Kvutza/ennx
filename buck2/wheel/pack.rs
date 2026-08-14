@@ -10,6 +10,8 @@ struct Args {
     package: String,
     version: String,
     platform_tag: String,
+    python_abi: String,
+    python_requires: String,
     extension_suffix: String,
 }
 
@@ -27,6 +29,8 @@ fn args() -> Args {
         package: get("--package"),
         version: get("--version"),
         platform_tag: get("--platform-tag"),
+        python_abi: get("--python-abi"),
+        python_requires: get("--python-requires"),
         extension_suffix: get("--extension-suffix"),
     };
     assert!(values.next().is_none(), "unexpected argument");
@@ -240,7 +244,7 @@ fn main() -> io::Result<()> {
     );
 
     let dist_info = format!("{}-{}.dist-info", args.package, args.version);
-    let tag = format!("cp313-cp313-{}", args.platform_tag);
+    let tag = format!("{0}-{0}-{1}", args.python_abi, args.platform_tag);
     let mut wheel_files = BTreeMap::new();
     for source in files_below(&source_package)? {
         if source.extension().and_then(|value| value.to_str()) == Some("py") {
@@ -304,8 +308,8 @@ fn main() -> io::Result<()> {
     wheel_files.insert(
         format!("{dist_info}/METADATA"),
         format!(
-            "Metadata-Version: 2.3\nName: {}\nVersion: {}\nSummary: Epistemic Nearest Neighbors\nRequires-Python: >=3.13,<3.14\nRequires-Dist: numpy>=2.1\n\n",
-            args.package, args.version
+            "Metadata-Version: 2.3\nName: {}\nVersion: {}\nSummary: Epistemic Nearest Neighbors\nRequires-Python: {}\nRequires-Dist: numpy>=2.1\n\n",
+            args.package, args.version, args.python_requires
         )
         .into_bytes(),
     );

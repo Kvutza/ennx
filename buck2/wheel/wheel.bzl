@@ -6,12 +6,20 @@ def python_wheel(
         notice,
         package,
         platform_tag,
+        python_abi,
+        python_requires,
         python_srcs,
         runtime_libraries,
         target_compatible_with,
         version):
-    """Builds a deterministic CPython 3.13 wheel around a PyO3 shared library."""
-    filename = "{}-{}-cp313-cp313-{}.whl".format(package, version, platform_tag)
+    """Builds a deterministic version-specific CPython wheel."""
+    filename = "{}-{}-{}-{}-{}.whl".format(
+        package,
+        version,
+        python_abi,
+        python_abi,
+        platform_tag,
+    )
     native.genrule(
         name = name,
         srcs = python_srcs + runtime_libraries + [extension, license, notice],
@@ -28,6 +36,10 @@ def python_wheel(
             version,
             "--platform-tag",
             platform_tag,
+            "--python-abi",
+            python_abi,
+            "--python-requires",
+            "'{}'".format(python_requires),
             "--extension-suffix",
             extension_suffix,
         ]),

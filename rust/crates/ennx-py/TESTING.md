@@ -26,6 +26,12 @@ cd /path/to/repo
 ./ennx verify
 ```
 
+Run the same gate against the CPython 3.12 wheel with:
+
+```bash
+pixi run -e ennx-py312 buck2-verify-py312
+```
+
 Do not combine `PYTHONPATH=src` with an extension installed only in
 `site-packages`; the source package would shadow the installed wheel.
 

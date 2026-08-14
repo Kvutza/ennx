@@ -4,7 +4,6 @@ channels = ["conda-forge"]
 platforms = ["osx-arm64", "win-64", "linux-64", "linux-aarch64"]
 
 [feature.ennx.dependencies]
-python = "3.13.*"
 numpy = "*"
 scipy = "*"
 pytest = "*"
@@ -18,14 +17,22 @@ libfaiss = { version = "1.10.*", build = "cpu_openblas_*" }
 rust = "1.88.*"
 zig = ">=0.16.0,<0.17"
 
+[feature.py312.dependencies]
+python = "3.12.*"
+
+[feature.py313.dependencies]
+python = "3.13.*"
+
 [feature.ennx.tasks]
 test = "python -m pytest -q tests/test_turbo_config.py tests/test_candidate_gen_direct.py tests/test_encode.py tests/test_quantization.py"
 test-trials = "tools/buck2-wheel-verify"
 buck2-deps = "tools/buck2-deps"
 buck2-build = "./buck2w --isolation-dir dev build //rust/crates/bpann:bpann //rust/crates/ennx:ennx //rust/crates/ennx-py:ennx-py //rust/crates/dev-cli:ennx --local-only --num-threads 4 -M none"
 buck2-test = "./buck2w --isolation-dir dev test //buck2/tests:all --local-only --num-threads 4"
-buck2-wheel = "./buck2w --isolation-dir release build //:wheel --config ennx.profile=release --local-only --num-threads 4 --show-output"
+buck2-wheel = "./buck2w --isolation-dir release build //:wheel --config ennx.profile=release --config ennx.python_version=3.13 --local-only --num-threads 4 --show-output"
+buck2-wheel-py312 = "./buck2w --isolation-dir release build //:wheel --config ennx.profile=release --config ennx.python_version=3.12 --local-only --num-threads 4 --show-output"
 buck2-verify = "tools/buck2-wheel-verify"
+buck2-verify-py312 = "ENNX_PYTHON_VERSION=3.12 ENNX_PYTHON=.pixi/envs/ennx-py312/bin/python tools/buck2-wheel-verify"
 buck2-gates = "tools/buck2-gates"
 zig-build = "zig build"
 zig-test = "zig build test"
@@ -33,4 +40,5 @@ zig-abi = "tools/zig-abi"
 zig-check = "zig fmt --check build.zig zig/src zig/tests && zig build test && tools/zig-abi"
 
 [environments]
-ennx = { features = ["ennx"], no-default-feature = true }
+ennx = { features = ["ennx", "py313"], no-default-feature = true }
+ennx-py312 = { features = ["ennx", "py312"], no-default-feature = true }

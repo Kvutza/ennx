@@ -4,7 +4,8 @@ Build
 
     bazel build //:wheel --config=release
 
-The wheel is written to Bazel's output tree. It targets CPython 3.13.
+The Bazel wheel is written to Bazel's output tree and targets CPython 3.13.
+GitHub releases include CPython 3.12 and 3.13 wheels built with Buck2.
 
 Test
 
@@ -12,6 +13,8 @@ Test
 
 See docs/testing.md for the test tiers, generated-workload policy, and
 hardware/benchmark gates.
+
+See docs/colab.md for the hosted T4 CUDA development workflow.
 
 See docs/api.md for the stable, experimental, and internal API boundary.
 

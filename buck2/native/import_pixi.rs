@@ -31,15 +31,15 @@ fn runtime_library(name: &str) -> bool {
         || (name.starts_with("openblas") && name.ends_with(".dll"))
 }
 
-fn pixi_prefix() -> io::Result<PathBuf> {
+fn pixi_prefix(environment: &str) -> io::Result<PathBuf> {
     let cwd = env::current_dir()?;
     cwd.ancestors()
-        .map(|root| root.join(".pixi").join("envs").join("ennx"))
+        .map(|root| root.join(".pixi").join("envs").join(environment))
         .find(|prefix| prefix.is_dir())
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("no .pixi/envs/ennx above {}", cwd.display()),
+                format!("no .pixi/envs/{environment} above {}", cwd.display()),
             )
         })
 }
@@ -48,6 +48,7 @@ fn copy_windows_python_import_lib(
     prefix: &Path,
     native: &Path,
     lib_output: &Path,
+    python_abi: &str,
 ) -> io::Result<()> {
     let candidates = [prefix.join("libs"), native.join("libs"), native.join("lib")];
     for directory in candidates {
@@ -63,7 +64,7 @@ fn copy_windows_python_import_lib(
             }
         }
         libraries.sort_by_key(|(name, _)| {
-            if name.eq_ignore_ascii_case("python313.lib") {
+            if name.eq_ignore_ascii_case(&format!("python{}.lib", &python_abi[2..])) {
                 0
             } else if name
                 .strip_prefix("python")
@@ -93,8 +94,14 @@ fn copy_windows_python_import_lib(
 fn main() -> io::Result<()> {
     let mut args = env::args_os().skip(1);
     let output = PathBuf::from(args.next().expect("missing output path"));
+    let environment = args.next().expect("missing Pixi environment");
+    let python_abi = args
+        .next()
+        .expect("missing Python ABI")
+        .into_string()
+        .expect("Python ABI must be UTF-8");
     assert!(args.next().is_none(), "unexpected argument");
-    let prefix = pixi_prefix()?;
+    let prefix = pixi_prefix(&environment.to_string_lossy())?;
     let windows = cfg!(target_os = "windows");
     let native = if windows {
         prefix.join("Library")
@@ -116,7 +123,7 @@ fn main() -> io::Result<()> {
         }
     }
     if windows {
-        copy_windows_python_import_lib(&prefix, &native, &lib_output)?;
+        copy_windows_python_import_lib(&prefix, &native, &lib_output, &python_abi)?;
     }
     let bin_input = if windows {
         native.join("bin")

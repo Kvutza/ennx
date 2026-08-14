@@ -15,7 +15,7 @@ must be reproducible from a seed, workload shape, and backend selection.
 | Rust full | Rust core tests with default crate features and example compile checks. Run before pushing Rust/native changes. | `./ennx rust full` |
 | Python fast | Python API and optimizer smoke coverage. | `./ennx python fast` |
 | Project test | Buck2 smoke tests for Rust/native accelerator surfaces. | `./ennx test` |
-| Python wheel/API | Python tests that require the compiled PyO3 extension. | `./ennx verify` |
+| Python wheel/API | Python tests that require the compiled PyO3 extension. | `./ennx verify`; `pixi run -e ennx-py312 buck2-verify-py312` for CPython 3.12 |
 | Python optional | Tests requiring optional packages such as Torch/Gpytorch/click or source-tree extension setup. | Install the optional dependencies and built extension, then run the selected pytest group. |
 | Project CI | Default project build, Buck2 tests, wheel build, and wheel/API verification. | `./ennx ci` |
 | Bazel graph | Bazel release/audit path. | `bazel test //:check //:audit --config=release --config=constrained` |

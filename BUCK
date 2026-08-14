@@ -1,4 +1,10 @@
 load("//buck2/wheel:wheel.bzl", "python_wheel")
+load(
+    "//buck2:python.bzl",
+    "PYTHON_ABI",
+    "PYTHON_REQUIRES",
+    "python_extension_suffix",
+)
 
 config_setting(
     name = "linux-arm64",
@@ -68,11 +74,13 @@ filegroup(
 python_wheel(
     name = "wheel-linux-arm64",
     extension = "//rust/crates/ennx-py:ennx-py[shared]",
-    extension_suffix = ".cpython-313-aarch64-linux-gnu.so",
+    extension_suffix = python_extension_suffix("linux-aarch64"),
     license = "LICENSE",
     notice = "NOTICE",
     package = "ennx",
     platform_tag = "manylinux_2_28_aarch64",
+    python_abi = PYTHON_ABI,
+    python_requires = PYTHON_REQUIRES,
     python_srcs = glob(["src/ennx/**/*.py"]),
     runtime_libraries = ["//buck2/native:linux-native"],
     target_compatible_with = [
@@ -85,11 +93,13 @@ python_wheel(
 python_wheel(
     name = "wheel-linux-x86_64",
     extension = "//rust/crates/ennx-py:ennx-py[shared]",
-    extension_suffix = ".cpython-313-x86_64-linux-gnu.so",
+    extension_suffix = python_extension_suffix("linux-x86_64"),
     license = "LICENSE",
     notice = "NOTICE",
     package = "ennx",
     platform_tag = "manylinux_2_28_x86_64",
+    python_abi = PYTHON_ABI,
+    python_requires = PYTHON_REQUIRES,
     python_srcs = glob(["src/ennx/**/*.py"]),
     runtime_libraries = ["//buck2/native:linux-native"],
     target_compatible_with = [
@@ -102,11 +112,13 @@ python_wheel(
 python_wheel(
     name = "wheel-macos-arm64",
     extension = "//rust/crates/ennx-py:ennx-py[shared]",
-    extension_suffix = ".cpython-313-darwin.so",
+    extension_suffix = python_extension_suffix("macos-arm64"),
     license = "LICENSE",
     notice = "NOTICE",
     package = "ennx",
     platform_tag = "macosx_11_0_arm64",
+    python_abi = PYTHON_ABI,
+    python_requires = PYTHON_REQUIRES,
     python_srcs = glob(["src/ennx/**/*.py"]),
     runtime_libraries = ["//buck2/native:faiss-build[openmp]"],
     target_compatible_with = [
@@ -119,11 +131,13 @@ python_wheel(
 python_wheel(
     name = "wheel-windows-x86_64",
     extension = "//rust/crates/ennx-py:ennx-py[shared]",
-    extension_suffix = ".pyd",
+    extension_suffix = python_extension_suffix("windows-x86_64"),
     license = "LICENSE",
     notice = "NOTICE",
     package = "ennx",
     platform_tag = "win_amd64",
+    python_abi = PYTHON_ABI,
+    python_requires = PYTHON_REQUIRES,
     python_srcs = glob(["src/ennx/**/*.py"]),
     runtime_libraries = ["//buck2/native:windows-native"],
     target_compatible_with = [

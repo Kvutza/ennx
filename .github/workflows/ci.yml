@@ -48,7 +48,9 @@ jobs:
         with:
           pixi-version: latest
           cache: true
-          environments: ennx
+          environments: |
+            ennx
+            ennx-py312
           locked: true
 
       - name: Restore Buck2 cache
@@ -57,6 +59,9 @@ jobs:
           path: |
             .buck2-tools
             buck-out/dev
+            buck-out/release
+            buck-out/release-py312
+            buck-out/release-py313
           key: ${{ runner.os }}-buck2-${{ hashFiles('.buckconfig', '.buckroot', 'BUCK', 'buck2/**', 'rust/BUCK', 'rust/crates/**/BUCK', 'pixi.lock', 'rust/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-buck2-
@@ -70,7 +75,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev
 
       - name: Install environment
-        run: pixi install -e ennx --locked
+        run: |
+          pixi install -e ennx --locked
+          pixi install -e ennx-py312 --locked
 
       - name: Build and test
         if: inputs.target == 'all' || inputs.target == 'build-test'
@@ -86,18 +93,28 @@ jobs:
       - name: Build wheel
         if: inputs.target == 'all' || inputs.target == 'wheel'
         run: |
-          if [[ "${{ matrix.os }}" == windows-* ]]; then
-            pixi run -e ennx bash ./buck2w --isolation-dir release build //:wheel --config ennx.profile=release --local-only --num-threads 4 --show-output
-          else
-            pixi run -e ennx buck2-wheel
+          for spec in "3.12:ennx-py312" "3.13:ennx"; do
+            python_version=${spec%%:*}
+            environment=${spec#*:}
+            isolation=release-py${python_version//./}
+            pixi run -e "$environment" bash ./buck2w --isolation-dir "$isolation" \
+              build //:wheel \
+              --config ennx.profile=release \
+              --config "ennx.python_version=$python_version" \
+              --local-only --num-threads 4 --show-output
+          done
+          if [[ "${{ matrix.os }}" != windows-* ]]; then
+            pixi run -e ennx-py312 buck2-verify-py312
+            pixi run -e ennx buck2-verify
           fi
 
       - name: Collect wheel artifacts
         if: inputs.target == 'all' || inputs.target == 'wheel'
         run: |
           mkdir -p artifacts
-          find buck-out/release -type f -name 'ennx-*.whl' -exec cp {} artifacts/ \;
-          test -n "$(find artifacts -type f -print -quit)"
+          find buck-out/release-py312 buck-out/release-py313 \
+            -type f -name 'ennx-*.whl' -exec cp {} artifacts/ \;
+          test "$(find artifacts -type f -name 'ennx-*.whl' | wc -l | tr -d ' ')" -eq 2
 
       - name: Upload wheel artifacts
         if: inputs.target == 'all' || inputs.target == 'wheel'

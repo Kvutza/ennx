@@ -1,4 +1,5 @@
 load(":faiss.bzl", "faiss_native")
+load("//buck2:python.bzl", "PYTHON_ABI", "PYTHON_ENVIRONMENT")
 
 http_archive(
     name = "faiss-source",
@@ -43,7 +44,7 @@ genrule(
     name = "linux-native",
     srcs = ["//:pixi-lock"],
     out = "native",
-    cmd = "$(exe :import-pixi-tool) $OUT",
+    cmd = "$(exe :import-pixi-tool) $OUT {} {}".format(PYTHON_ENVIRONMENT, PYTHON_ABI),
     target_compatible_with = ["prelude//os/constraints:linux"],
     visibility = ["PUBLIC"],
 )
@@ -52,7 +53,7 @@ genrule(
     name = "windows-native",
     srcs = ["//:pixi-lock"],
     out = "native",
-    cmd = "$(exe :import-pixi-tool) $OUT",
+    cmd = "$(exe :import-pixi-tool) $OUT {} {}".format(PYTHON_ENVIRONMENT, PYTHON_ABI),
     target_compatible_with = ["prelude//os/constraints:windows"],
     visibility = ["PUBLIC"],
 )
