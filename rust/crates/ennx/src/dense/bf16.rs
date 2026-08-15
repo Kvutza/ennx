@@ -55,6 +55,7 @@ impl Bf16Tree {
                 }
             }
             ComputeBackend::OpenCl => return Err("OpenCL BF16 pytree is not available".into()),
+            ComputeBackend::Cuda => return Err("CUDA BF16 pytree is not available yet".into()),
         };
         Ok(Self { len, engine })
     }

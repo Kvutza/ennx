@@ -1,7 +1,37 @@
-#include <faiss/IndexFlat.h>
-
 #include <cstddef>
 #include <cstdint>
+
+#ifdef ENNX_FAISS_UNAVAILABLE
+
+namespace {
+constexpr char kFaissUnavailable[] =
+    "Faiss is unavailable in this native-free ENNx build";
+}
+
+extern "C" {
+
+void* enn_faiss_new(std::size_t) noexcept { return nullptr; }
+void enn_faiss_free(void*) noexcept {}
+int enn_faiss_reset(void*) noexcept { return 1; }
+int enn_faiss_add(void*, std::size_t, const float*) noexcept { return 1; }
+std::size_t enn_faiss_len(const void*) noexcept { return 0; }
+int enn_faiss_search(
+    void*,
+    std::size_t,
+    std::size_t,
+    const float*,
+    float*,
+    std::int64_t*) noexcept {
+    return 1;
+}
+const char* enn_faiss_last_error() noexcept { return kFaissUnavailable; }
+
+}
+
+#else
+
+#include <faiss/IndexFlat.h>
+
 #include <exception>
 #include <memory>
 #include <string>
@@ -113,3 +143,5 @@ const char* enn_faiss_last_error() noexcept {
 }
 
 }
+
+#endif

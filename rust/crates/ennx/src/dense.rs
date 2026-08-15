@@ -12,6 +12,9 @@ mod metal;
 #[cfg(feature = "opencl")]
 mod opencl;
 
+#[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+mod cuda;
+
 mod bf16;
 mod linear;
 
@@ -125,17 +128,44 @@ pub fn apply(
                 return Err("OpenCL dense directions are not available in this build".into());
             }
         }
+        ComputeBackend::Cuda => {
+            #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+            {
+                cuda::apply(base, leaves, terms)?
+            }
+            #[cfg(not(all(feature = "cuda", target_os = "linux", target_arch = "x86_64")))]
+            {
+                return Err("CUDA dense directions are not available in this build".into());
+            }
+        }
         ComputeBackend::Auto => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
                 metal::apply(base, leaves, terms, true)
                     .or_else(|_| metal::apply(base, leaves, terms, false))?
             }
-            #[cfg(all(feature = "opencl", not(all(target_os = "macos", feature = "metal"))))]
+            #[cfg(all(
+                feature = "cuda",
+                target_os = "linux",
+                target_arch = "x86_64",
+                not(all(target_os = "macos", feature = "metal"))
+            ))]
+            {
+                cuda::apply(base, leaves, terms)?
+            }
+            #[cfg(all(
+                feature = "opencl",
+                not(all(target_os = "macos", feature = "metal")),
+                not(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))
+            ))]
             {
                 opencl::apply(base, leaves, terms)?
             }
-            #[cfg(not(any(all(target_os = "macos", feature = "metal"), feature = "opencl")))]
+            #[cfg(not(any(
+                all(target_os = "macos", feature = "metal"),
+                all(feature = "cuda", target_os = "linux", target_arch = "x86_64"),
+                feature = "opencl"
+            )))]
             {
                 cpu(base, leaves, terms)?
             }

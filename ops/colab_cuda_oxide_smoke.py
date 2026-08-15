@@ -16,6 +16,7 @@ from pathlib import Path
 from cuda_oxide_toolchain import CUDA_OXIDE_REV, LLVM_MAJOR, RUST_TOOLCHAIN
 
 DEFAULT_WORKSPACE = Path("/content/cuda-oxide")
+DEFAULT_PROJECT = Path(__file__).resolve().parents[1] / "cuda"
 LLVM_KEY_URL = "https://apt.llvm.org/llvm-snapshot.gpg.key"
 TOOLCHAIN_STATE = Path.home() / ".cache/ennx/cuda-oxide-toolchain.json"
 
@@ -155,6 +156,12 @@ def _install_rust() -> tuple[Path, Path]:
             "rustc-dev",
             "--component",
             "llvm-tools",
+            "--component",
+            "rust-analyzer",
+            "--component",
+            "clippy",
+            "--component",
+            "rustfmt",
         ]
     )
     return cargo, rustup
@@ -250,6 +257,13 @@ def setup(workspace: Path) -> dict[str, object]:
         TOOLCHAIN_STATE.parent.mkdir(parents=True, exist_ok=True)
         TOOLCHAIN_STATE.write_text(json.dumps(expected_state, sort_keys=True) + "\n")
     timings["cargo_oxide"] = time.monotonic() - install_started
+    backend_started = time.monotonic()
+    _run(
+        [str(cargo), f"+{RUST_TOOLCHAIN}", "oxide", "setup"],
+        cwd=workspace,
+        env=_toolchain_env(),
+    )
+    timings["backend"] = time.monotonic() - backend_started
     return timings
 
 
@@ -265,12 +279,98 @@ def exercise(workspace: Path, command: list[str]) -> dict[str, object]:
     return {"command": command, "seconds": seconds}
 
 
+def exercise_project(project: Path, command: list[str]) -> dict[str, object]:
+    cargo = Path.home() / ".cargo/bin/cargo"
+    if not cargo.exists() or not project.is_dir():
+        raise RuntimeError("Run setup first and ensure the ENNx repository is present")
+    seconds = _run(
+        [str(cargo), f"+{RUST_TOOLCHAIN}", "oxide", *command],
+        cwd=project,
+        env=_toolchain_env(),
+    )
+    return {"command": command, "project": str(project), "seconds": seconds}
+
+
+def sanitize_project(project: Path) -> dict[str, object]:
+    executable = project / "target/release/ennx-cuda"
+    if not executable.is_file():
+        raise RuntimeError("Run the ennx command before the sanitizer")
+    command = [
+        "compute-sanitizer",
+        "--tool",
+        "memcheck",
+        "--error-exitcode",
+        "99",
+        str(executable),
+        "resident",
+    ]
+    seconds = _run(command, cwd=project, env=_toolchain_env())
+    return {"command": command, "project": str(project), "seconds": seconds}
+
+
+def exercise_python(project: Path) -> dict[str, object]:
+    repo = project.resolve().parent
+    rust = repo / "rust"
+    smoke = repo / "ops/cuda_python_smoke.py"
+    if not rust.is_dir() or not smoke.is_file():
+        raise RuntimeError("The CUDA project must be inside an ENNx checkout")
+
+    env = _toolchain_env()
+    env.update(
+        {
+            "ENNX_FAISS_UNAVAILABLE": "1",
+            "PYO3_PYTHON": sys.executable,
+            "RUSTUP_TOOLCHAIN": RUST_TOOLCHAIN,
+        }
+    )
+    cargo = Path.home() / ".cargo/bin/cargo"
+    build = [
+        str(cargo),
+        f"+{RUST_TOOLCHAIN}",
+        "oxide",
+        "build",
+        "--arch",
+        "sm_75",
+        "--device-codegen-crate",
+        "ennx_cuda_kernels",
+        "--",
+        "-p",
+        "ennx-py",
+        "--features",
+        "cuda",
+        "--release",
+    ]
+    build_seconds = _run(build, cwd=rust, env=env)
+    extension = rust / "target/release/libennx_rust.so"
+    smoke_command = [sys.executable, str(smoke), str(extension)]
+    smoke_seconds = _run(smoke_command, cwd=repo, env=env)
+    return {
+        "build": build,
+        "build_seconds": build_seconds,
+        "smoke": smoke_command,
+        "smoke_seconds": smoke_seconds,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "action", choices=["fingerprint", "setup", "doctor", "vecadd", "all"]
+        "action",
+        choices=[
+            "fingerprint",
+            "setup",
+            "doctor",
+            "vecadd",
+            "ennx",
+            "resident",
+            "sanitize",
+            "bench",
+            "python",
+            "all",
+        ],
     )
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
+    parser.add_argument("--project", type=Path, default=DEFAULT_PROJECT)
     args = parser.parse_args()
 
     result: dict[str, object] = {
@@ -284,6 +384,26 @@ def main() -> None:
         result["doctor"] = exercise(args.workspace, ["doctor"])
     if args.action in {"vecadd", "all"}:
         result["vecadd"] = exercise(args.workspace, ["run", "vecadd"])
+    if args.action in {"ennx", "all"}:
+        result["ennx"] = exercise_project(
+            args.project, ["run", "--arch", "sm_75", "--", "parity"]
+        )
+    if args.action in {"resident", "all"}:
+        result["resident"] = exercise_project(
+            args.project, ["run", "--arch", "sm_75", "--", "resident"]
+        )
+    if args.action in {"sanitize", "all"}:
+        if args.action == "sanitize":
+            result["resident"] = exercise_project(
+                args.project, ["run", "--arch", "sm_75", "--", "resident"]
+            )
+        result["sanitize"] = sanitize_project(args.project)
+    if args.action in {"bench", "all"}:
+        result["bench"] = exercise_project(
+            args.project, ["run", "--arch", "sm_75", "--", "bench"]
+        )
+    if args.action in {"python", "all"}:
+        result["python"] = exercise_python(args.project)
     result["ok"] = True
     print(json.dumps(result, indent=2))
 

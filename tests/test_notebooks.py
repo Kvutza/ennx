@@ -1,4 +1,6 @@
+import ast
 import importlib.util
+import json
 import os
 from pathlib import Path
 
@@ -132,3 +134,44 @@ def test_demo_turbo_enn_notebook():
 
 def test_demo_morbo_enn_notebook():
     run_notebook("examples/demo_morbo_enn.ipynb")
+
+
+def test_colab():
+    repo_root = Path(__file__).resolve().parent.parent
+    path = repo_root / "examples/colab_jax_cuda_ennx.ipynb"
+    notebook = json.loads(path.read_text(encoding="utf-8"))
+
+    assert notebook["nbformat"] == 4
+    assert notebook["metadata"]["accelerator"] == "GPU"
+    assert notebook["metadata"]["colab"]["gpuType"] == "T4"
+
+    code = []
+    for cell in notebook["cells"]:
+        if cell["cell_type"] != "code":
+            continue
+        assert cell["execution_count"] is None
+        assert cell["outputs"] == []
+        source = "".join(cell["source"])
+        compile(source, f"{path.name}:{cell['id']}", "exec")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                assert len(node.name.split("_")) <= 2
+        code.append(source)
+
+    source = "\n".join(code)
+    for required in (
+        '"jax[cuda12]"',
+        "cuda-v0.1.0",
+        "ennx-0.1.0%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
+        "@jax.jit",
+        "WeightSearch",
+        'backend="cuda"',
+        "search.ask(",
+        "search.row()",
+        "search.tell(",
+    ):
+        assert required in source
+
+    for removed in ("colab_cuda_oxide_smoke.py", "cargo oxide", "git clone"):
+        assert removed not in source

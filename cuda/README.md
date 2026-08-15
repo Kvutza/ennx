@@ -1,0 +1,87 @@
+# ENNx CUDA-Oxide
+
+This workspace contains ENNx CUDA kernels written in Rust with CUDA-Oxide. It
+is pinned to the same compiler revision and nightly as
+`ops/cuda_oxide_toolchain.py` and currently targets the T4's `sm_75` ISA.
+
+The kernels keep packed int4 or int8 trial rows resident on the device and run
+materialization, exact distance, ENN scoring, and winner selection. They
+preserve ENNx's trial semantics and are tested against an independent CPU
+implementation before any timing result is accepted.
+
+On a prepared Linux CUDA host:
+
+```bash
+cargo +nightly-2026-04-03 oxide run --arch sm_75 -- parity
+cargo +nightly-2026-04-03 oxide run --arch sm_75 -- resident
+cargo +nightly-2026-04-03 oxide run --arch sm_75 -- bench 16777216 100 4
+cargo +nightly-2026-04-03 oxide run --arch sm_75 -- \
+  trial-bench 1024 32 8192 20
+compute-sanitizer --tool memcheck --error-exitcode 99 \
+  target/release/ennx-cuda resident
+```
+
+`trial-bench` arguments are candidates, resident history rows, packed parameter
+elements, and iterations.
+
+## T4 execution path
+
+The `sm_75` trial scorer uses one 256-thread block per candidate. Candidate
+values are decoded once into shared-memory tiles, while eight warps accumulate
+distance against separate history rows. Warp reductions combine each row's
+partial distance without global atomics. A second kernel launches one block per
+trust region and performs deterministic argmax selection, so multi-region asks
+use one scoring launch and one selection launch instead of serial host calls.
+
+Compact trust-region center trees are resolved in the scoring kernel from a
+parent-linked representation. The host validates topology and limits center
+depth to eight before launch. Leaf bounds, packed-row dimensions, region
+layouts, and buffer capacities are also checked on the host; the resulting
+launch contracts permit unchecked indexing in the validated device hot path.
+
+On a Modal Tesla T4, the verified 1,024-candidate, 32-history, 8,192-element
+benchmark scores in 2.567 ms, compared with the original 6.687 ms baseline.
+An eight-region batch with 1,024 candidates per region completes in a median
+11.210 ms. Both measurements use FP32 distance and acquisition accumulation.
+The focused gate also checks CPU parity for eight suites and runs CUDA Compute
+Sanitizer over the trial path.
+
+T4 does not provide TMA, thread-block clusters, WGMMA, or the newer reduction
+instructions. Those belong in future `sm_80+` or `sm_90+` kernel families, not
+in the `sm_75` baseline.
+
+For Colab, run the wrappers from the repository root:
+
+```bash
+python ops/colab_cuda_oxide_smoke.py setup
+python ops/colab_cuda_oxide_smoke.py doctor
+python ops/colab_cuda_oxide_smoke.py ennx
+python ops/colab_cuda_oxide_smoke.py resident
+python ops/colab_cuda_oxide_smoke.py sanitize
+python ops/colab_cuda_oxide_smoke.py bench
+python ops/colab_cuda_oxide_smoke.py python
+```
+
+For the equivalent hosted T4 checks on Modal, run the focused Python gate or
+the full kernel suite:
+
+```bash
+modal run ops/modal_cuda_oxide_smoke.py::python_smoke
+modal run ops/modal_cuda_oxide_smoke.py::trial_smoke
+modal run ops/modal_cuda_oxide_smoke.py
+```
+
+CUDA events are the authoritative kernel timer. Tracy zones cover the parity
+and benchmark host paths. `TrialEngine::set_profiling(true)` records score,
+argmax, materialization, and total CUDA event times as Tracy plots; setting
+`ENNX_CUDA_PROFILE` enables the same plots outside the benchmark.
+
+## Integration order
+
+1. Materialize packed trial rows with exact CPU parity. Done.
+2. Port trial distance, scoring, and selection while rows remain on the GPU. Done.
+3. Add a resident CUDA compute backend and expose it through Python. Done.
+4. Batch regions and compact center trees to amortize launch overhead. Done.
+
+CUDA support is opt-in through the ENNx `cuda` Cargo feature so CUDA-Oxide's
+pinned nightly compiler remains outside normal CPU, Metal, and OpenCL builds.

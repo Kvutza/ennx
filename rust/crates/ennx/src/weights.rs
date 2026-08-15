@@ -44,6 +44,7 @@ pub enum ComputeBackend {
     Metal,
     Agx,
     OpenCl,
+    Cuda,
 }
 
 impl ComputeBackend {
@@ -54,8 +55,9 @@ impl ComputeBackend {
             "metal" => Ok(Self::Metal),
             "agx" => Ok(Self::Agx),
             "opencl" | "ocl" => Ok(Self::OpenCl),
+            "cuda" => Ok(Self::Cuda),
             other => Err(format!(
-                "unknown compute backend {other:?}; expected 'auto', 'cpu', 'metal', 'agx', or 'opencl'"
+                "unknown compute backend {other:?}; expected 'auto', 'cpu', 'metal', 'agx', 'opencl', or 'cuda'"
             )),
         }
     }
@@ -250,6 +252,12 @@ pub fn select_weights(
             {
                 return Err("OpenCL ENN backend is not available in this build".to_string());
             }
+        }
+        ComputeBackend::Cuda => {
+            return Err(
+                "CUDA materialized weight selection is not available; use resident trial search"
+                    .to_string(),
+            );
         }
         ComputeBackend::Auto => {
             #[cfg(all(target_os = "macos", feature = "metal"))]

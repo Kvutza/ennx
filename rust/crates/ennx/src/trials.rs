@@ -11,6 +11,9 @@ mod metal;
 #[cfg(feature = "opencl")]
 mod opencl;
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+mod cuda;
+
 mod bpann_history;
 mod layout;
 mod tree;
@@ -213,6 +216,8 @@ enum Engine {
     Metal(metal::Engine),
     #[cfg(feature = "opencl")]
     OpenCl(opencl::Engine),
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    Cuda(cuda::Engine),
 }
 
 pub struct Search {
@@ -365,6 +370,16 @@ impl Search {
                 &self.leaves,
                 config,
             ),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Engine::Cuda(engine) => engine.ask_multi_tr(
+                self.base,
+                &history,
+                num_regions,
+                seeds_per_region,
+                seeds,
+                &self.leaves,
+                config,
+            ),
             _ => {
                 let mut results = Vec::with_capacity(num_regions);
                 for r in 0..num_regions {
@@ -377,7 +392,7 @@ impl Search {
                         &seeds[start..end],
                         &self.leaves,
                         config,
-                        true,
+                        false,
                     )?;
                     results.push((start + index, score));
                 }
@@ -442,6 +457,17 @@ impl Search {
             ),
             #[cfg(feature = "opencl")]
             Engine::OpenCl(engine) => engine.ask_multi_tr_tree(
+                self.base,
+                &history,
+                seeds_per_region,
+                centers,
+                region_centers,
+                seeds,
+                &self.leaves,
+                config,
+            ),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Engine::Cuda(engine) => engine.ask_multi_tr_tree(
                 self.base,
                 &history,
                 seeds_per_region,
@@ -736,6 +762,16 @@ impl Engine {
                     Err("OpenCL trial search is not available in this build".to_string())
                 }
             }
+            ComputeBackend::Cuda => {
+                #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+                {
+                    Ok(Self::Cuda(cuda::Engine::new(base, leaves, slots)?))
+                }
+                #[cfg(not(all(target_os = "linux", target_arch = "x86_64", feature = "cuda")))]
+                {
+                    Err("CUDA trial search is not available in this build".to_string())
+                }
+            }
             ComputeBackend::Auto => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
@@ -743,6 +779,12 @@ impl Engine {
                         metal::Engine::new_agx(base, leaves, slots)
                             .or_else(|_| metal::Engine::new(base, leaves, slots))?,
                     ));
+                }
+                #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+                {
+                    if let Ok(engine) = cuda::Engine::new(base, leaves, slots) {
+                        return Ok(Self::Cuda(engine));
+                    }
                 }
                 #[cfg(all(feature = "opencl", not(all(target_os = "macos", feature = "metal"))))]
                 {
@@ -777,6 +819,10 @@ impl Engine {
             Self::OpenCl(engine) => {
                 engine.ask(base, history, trial, seeds, leaves, config, materialize_row)
             }
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(engine) => {
+                engine.ask(base, history, trial, seeds, leaves, config, materialize_row)
+            }
         }
     }
 
@@ -788,6 +834,8 @@ impl Engine {
             Self::Metal(engine) => Ok(engine.read(slot, row_bytes)),
             #[cfg(feature = "opencl")]
             Self::OpenCl(engine) => engine.read(slot, row_bytes),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(engine) => engine.read(slot),
         }
     }
 
@@ -805,6 +853,8 @@ impl Engine {
             }
             #[cfg(feature = "opencl")]
             Self::OpenCl(engine) => engine.write(slot, row),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(engine) => engine.write(slot, row),
         }
     }
 
@@ -829,6 +879,8 @@ impl Engine {
             Self::Metal(engine) => engine.materialize(base_slot, trial_slot, seed, &steps),
             #[cfg(feature = "opencl")]
             Self::OpenCl(engine) => engine.materialize(base_slot, trial_slot, seed, &steps),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(engine) => engine.materialize(base_slot, trial_slot, seed, &steps),
         }
     }
 }
