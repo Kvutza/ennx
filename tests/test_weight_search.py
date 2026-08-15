@@ -1,4 +1,7 @@
+import sys
+
 import numpy as np
+import pytest
 from ennx.ennx_rust import optimizer
 
 
@@ -39,6 +42,7 @@ def test_weight_search_keeps_state_across_ask_and_tell():
     assert not np.array_equal(cpu[3], _base())
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Metal backend requires macOS")
 def test_weight_search_metal_matches_cpu():
     cpu = _ask("cpu")
     metal = _ask("metal")

@@ -20,13 +20,13 @@ static IDS: AtomicU16 = AtomicU16::new(0);
 static LAST: AtomicI64 = AtomicI64::new(0);
 
 pub(crate) struct Pool {
-    counter: CounterSampleBuffer,
+    counter: Option<CounterSampleBuffer>,
     next: usize,
 }
 
 pub(crate) struct Batch {
-    counter: CounterSampleBuffer,
-    output: Buffer,
+    counter: Option<CounterSampleBuffer>,
+    output: Option<Buffer>,
     spans: Vec<(u16, u16, &'static str)>,
     start: usize,
     samples: usize,
@@ -39,14 +39,16 @@ pub(crate) struct Encoder<'a> {
 
 impl Pool {
     pub(crate) fn new(device: &Device) -> Result<Self, String> {
+        Self::with_counter_sampling(
+            device,
+            device.supports_counter_sampling(MTLCounterSamplingPoint::AtStageBoundary),
+        )
+    }
+
+    fn with_counter_sampling(device: &Device, enabled: bool) -> Result<Self, String> {
         setup(device)?;
-        if !device.supports_counter_sampling(MTLCounterSamplingPoint::AtStageBoundary) {
-            return Err("Metal stage-boundary counters are unavailable".to_string());
-        }
-        Ok(Self {
-            counter: counter(device)?,
-            next: 0,
-        })
+        let counter = enabled.then(|| counter(device)).transpose()?;
+        Ok(Self { counter, next: 0 })
     }
 
     pub(crate) fn batch(&mut self, device: &Device, passes: usize) -> Result<Batch, String> {
@@ -54,18 +56,25 @@ impl Pool {
             .checked_mul(2)
             .filter(|&count| count > 0 && count <= MAX_SAMPLES)
             .ok_or_else(|| format!("Tracy Metal pass count exceeds {}", MAX_SAMPLES / 2))?;
-        if self.next + samples > MAX_SAMPLES {
-            self.counter = counter(device)?;
-            self.next = 0;
-        }
-        let start = self.next;
-        self.next += samples;
-        let output = device.new_buffer(
-            (samples * size_of::<u64>()) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let start = if self.counter.is_some() {
+            if self.next + samples > MAX_SAMPLES {
+                self.counter = Some(counter(device)?);
+                self.next = 0;
+            }
+            let start = self.next;
+            self.next += samples;
+            start
+        } else {
+            0
+        };
+        let output = self.counter.as_ref().map(|_| {
+            device.new_buffer(
+                (samples * size_of::<u64>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            )
+        });
         Ok(Batch {
-            counter: self.counter.to_owned(),
+            counter: self.counter.as_ref().map(ToOwned::to_owned),
             output,
             spans: Vec::with_capacity(passes),
             start,
@@ -85,41 +94,47 @@ impl Batch {
             return Err("Tracy Metal pass count was underestimated".to_string());
         }
         let sample = self.start + offset;
-        let desc = ComputePassDescriptor::new();
-        let attachment = desc
-            .sample_buffer_attachments()
-            .object_at(0)
-            .ok_or("Metal counter attachment is unavailable")?;
-        attachment.set_sample_buffer(&self.counter);
-        attachment.set_start_of_encoder_sample_index(sample as u64);
-        attachment.set_end_of_encoder_sample_index((sample + 1) as u64);
+        let inner = if let Some(counter) = &self.counter {
+            let desc = ComputePassDescriptor::new();
+            let attachment = desc
+                .sample_buffer_attachments()
+                .object_at(0)
+                .ok_or("Metal counter attachment is unavailable")?;
+            attachment.set_sample_buffer(counter);
+            attachment.set_start_of_encoder_sample_index(sample as u64);
+            attachment.set_end_of_encoder_sample_index((sample + 1) as u64);
+            command.compute_command_encoder_with_descriptor(desc)
+        } else {
+            command.new_compute_command_encoder()
+        };
         let (start, end) = begin(name);
         self.spans.push((start, end, name));
-        Ok(Encoder {
-            inner: command.compute_command_encoder_with_descriptor(desc),
-            end,
-        })
+        Ok(Encoder { inner, end })
     }
 
     pub(crate) fn resolve(&self, command: &CommandBufferRef) {
+        let (Some(counter), Some(output)) = (&self.counter, &self.output) else {
+            return;
+        };
         let encoder = command.new_blit_command_encoder();
         encoder.resolve_counters(
-            &self.counter,
+            counter,
             NSRange::new(self.start as u64, self.samples as u64),
-            &self.output,
+            output,
             0,
         );
         encoder.end_encoding();
     }
 
     pub(crate) fn upload(&self) -> Result<(), String> {
-        let values = unsafe {
-            std::slice::from_raw_parts(self.output.contents().cast::<u64>(), self.samples)
-        };
+        let values = self.values();
         let mut last = LAST.load(Ordering::Relaxed);
         for (sample, &(start, end, name)) in self.spans.iter().enumerate() {
-            let (begin, finish) = times(values[sample * 2], values[sample * 2 + 1], last)
-                .map_err(|error| format!("{name}: {error}"))?;
+            let (begin, finish) = values
+                .map(|values| (values[sample * 2], values[sample * 2 + 1]))
+                .unwrap_or_default();
+            let (begin, finish) =
+                times(begin, finish, last).map_err(|error| format!("{name}: {error}"))?;
             last = finish;
             unsafe {
                 sys::___tracy_emit_gpu_time_serial(sys::___tracy_gpu_time_data {
@@ -139,8 +154,8 @@ impl Batch {
     }
 
     pub(crate) fn duration(&self) -> Result<Duration, String> {
-        let values = unsafe {
-            std::slice::from_raw_parts(self.output.contents().cast::<u64>(), self.samples)
+        let Some(values) = self.values() else {
+            return Ok(Duration::ZERO);
         };
         let mut first = None;
         let mut last = None;
@@ -172,13 +187,14 @@ impl Batch {
     }
 
     pub(crate) fn stages(&self) -> Result<Vec<(&'static str, Duration)>, String> {
-        let values = unsafe {
-            std::slice::from_raw_parts(self.output.contents().cast::<u64>(), self.samples)
-        };
+        let values = self.values();
         self.spans
             .iter()
             .enumerate()
             .map(|(sample, &(_, _, name))| {
+                let Some(values) = values else {
+                    return Ok((name, Duration::ZERO));
+                };
                 let begin = values[sample * 2];
                 let end = values[sample * 2 + 1];
                 if begin == 0 || end == 0 {
@@ -193,6 +209,12 @@ impl Batch {
                 Ok((name, duration))
             })
             .collect()
+    }
+
+    fn values(&self) -> Option<&[u64]> {
+        self.output.as_ref().map(|output| unsafe {
+            std::slice::from_raw_parts(output.contents().cast::<u64>(), self.samples)
+        })
     }
 }
 
@@ -319,6 +341,22 @@ mod tests {
         batch.resolve(command);
         command.commit();
         command.wait_until_completed();
+        assert_eq!(batch.stages().unwrap().len(), 1);
+        batch.upload().unwrap();
+    }
+
+    #[test]
+    fn gpu_without_counters() {
+        let device = metal::Device::system_default().unwrap();
+        let queue = device.new_command_queue();
+        let command = queue.new_command_buffer();
+        let mut pool = super::Pool::with_counter_sampling(&device, false).unwrap();
+        let mut batch = pool.batch(&device, 1).unwrap();
+        drop(batch.encoder(command, "tracy.no-counters").unwrap());
+        batch.resolve(command);
+        command.commit();
+        command.wait_until_completed();
+        assert_eq!(batch.duration().unwrap(), std::time::Duration::ZERO);
         assert_eq!(batch.stages().unwrap().len(), 1);
         batch.upload().unwrap();
     }
