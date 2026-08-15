@@ -158,19 +158,30 @@ impl Runtime {
             .new_binary_archive_with_descriptor(&archive_desc)
             .map_err(|error| format!("open AGX archive {}: {error}", path.display()))?;
         pipeline_desc.set_binary_archives(&[&archive]);
+        let mut use_archive = true;
         if !exists {
             archive
                 .add_compute_pipeline_functions_with_descriptor(&pipeline_desc)
                 .map_err(|error| format!("compile AGX archive: {error}"))?;
-            archive
-                .serialize_to_url(&url)
-                .map_err(|error| format!("write AGX archive {}: {error}", path.display()))?;
+            if let Err(error) = archive.serialize_to_url(&url) {
+                if archive_serialization_unavailable(&error.to_string()) {
+                    let _ = std::fs::remove_file(&path);
+                    use_archive = false;
+                } else {
+                    return Err(format!("write AGX archive {}: {error}", path.display()));
+                }
+            }
         }
 
-        let pipeline = self
-            .device
-            .new_compute_pipeline_state(&pipeline_desc)
-            .map_err(|error| format!("AGX archive miss for {name}: {error}"))?;
+        let pipeline = if use_archive {
+            self.device
+                .new_compute_pipeline_state(&pipeline_desc)
+                .map_err(|error| format!("AGX archive miss for {name}: {error}"))?
+        } else {
+            self.device
+                .new_compute_pipeline_state_with_function(&function)
+                .map_err(|error| format!("Metal pipeline {name}: {error}"))?
+        };
         self.pipelines
             .lock()
             .map_err(|_| "Apple GPU pipeline cache poisoned")?
@@ -319,6 +330,10 @@ fn archive_path(info: &DeviceInfo, source: &str, name: &str) -> Result<std::path
     Ok(directory.join(format!("{kernel:016x}.metalarc")))
 }
 
+fn archive_serialization_unavailable(error: &str) -> bool {
+    error.contains("binary archive contains no items eligible")
+}
+
 #[cfg(test)]
 fn has_agx_slice(bytes: &[u8]) -> bool {
     const FAT_MAGIC: u32 = 0xcafe_babe;
@@ -364,7 +379,18 @@ fn target_from_name(name: &str) -> Target {
 
 #[cfg(test)]
 mod tests {
-    use super::{device_info, has_agx_slice, source_hash, target_from_name, Runtime, Target};
+    use super::{
+        archive_serialization_unavailable, device_info, has_agx_slice, source_hash,
+        target_from_name, Runtime, Target,
+    };
+
+    #[test]
+    fn recognizes_unavailable_archive_serialization() {
+        assert!(archive_serialization_unavailable(
+            "The binary archive contains no items eligible to be serialized"
+        ));
+        assert!(!archive_serialization_unavailable("permission denied"));
+    }
 
     #[test]
     fn maps_m_series_names_to_native_generations() {
