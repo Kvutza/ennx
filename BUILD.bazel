@@ -95,7 +95,7 @@ py_wheel(
     requires = ["numpy>=2.1"],
     strip_path_prefixes = ["src"],
     summary = "Epistemic Nearest Neighbors",
-    version = "0.0.0",
+    version = "0.1.0",
     deps = [
         ":python_sources",
         ":wheel_extension",

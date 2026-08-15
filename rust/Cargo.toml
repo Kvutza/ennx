@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.88"
 license = "MIT"
@@ -17,7 +17,8 @@ keywords = ["bayesian", "optimization", "ENN", "turbo", "turbo-enn"]
 categories = ["science", "simulation"]
 
 [workspace.dependencies]
-ennx = { path = "crates/ennx", default-features = false }
+bpann = { package = "ennx-bpann", path = "crates/bpann", version = "=0.1.0" }
+ennx = { path = "crates/ennx", version = "=0.1.0", default-features = false }
 ndarray = "0.16"
 numpy = "0.22"
 pyo3 = { version = "0.22", features = ["extension-module"] }

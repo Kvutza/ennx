@@ -35,7 +35,7 @@ fn run() -> Result<u8, String> {
         "python" => python(&root, &args[1..]),
         "tune" => tune::run(&root, &args[1..]),
         "version" | "--version" | "-V" => {
-            println!("ennx dev-cli 0.0.0");
+            println!("ennx dev-cli 0.1.0");
             Ok(0)
         }
         command => Err(format!(

@@ -14,7 +14,7 @@ build = "build.rs"
 include = ["build.rs", "src/**", "Cargo.toml", "README.md", "LICENSE", "NOTICE"]
 
 [dependencies]
-bpann = { package = "ennx-bpann", version = "0.0.0", path = "../bpann" }
+bpann = { workspace = true }
 ndarray = { workspace = true }
 opencl3 = { version = "0.12.3", optional = true }
 rand = "0.8"

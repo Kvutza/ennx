@@ -87,7 +87,7 @@ python_wheel(
         "prelude//cpu/constraints:arm64",
         "prelude//os/constraints:linux",
     ],
-    version = "0.0.0",
+    version = "0.1.0",
 )
 
 python_wheel(
@@ -106,7 +106,7 @@ python_wheel(
         "prelude//cpu/constraints:x86_64",
         "prelude//os/constraints:linux",
     ],
-    version = "0.0.0",
+    version = "0.1.0",
 )
 
 python_wheel(
@@ -125,7 +125,7 @@ python_wheel(
         "prelude//cpu/constraints:arm64",
         "prelude//os/constraints:macos",
     ],
-    version = "0.0.0",
+    version = "0.1.0",
 )
 
 python_wheel(
@@ -144,7 +144,7 @@ python_wheel(
         "prelude//cpu/constraints:x86_64",
         "prelude//os/constraints:windows",
     ],
-    version = "0.0.0",
+    version = "0.1.0",
 )
 
 alias(
