@@ -92,32 +92,12 @@ alias(
     actual = select({
         "@platforms//os:linux": ":ennx_rust_opencl",
         "@platforms//os:macos": ":ennx_rust_metal",
-        "@platforms//os:windows": ":ennx_rust_opencl",
         "//conditions:default": ":ennx_rust_cpu",
     }),
 )
 
 copy_extension(
-    name = "python_extension_unix",
+    name = "python_extension",
     src = ":ennx_rust",
     output = "ennx_rust.so",
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
-)
-
-copy_extension(
-    name = "python_extension_windows",
-    src = ":ennx_rust",
-    output = "ennx_rust.pyd",
-    target_compatible_with = ["@platforms//os:windows"],
-)
-
-alias(
-    name = "python_extension",
-    actual = select({
-        "@platforms//os:windows": ":python_extension_windows",
-        "//conditions:default": ":python_extension_unix",
-    }),
 )

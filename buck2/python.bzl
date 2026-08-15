@@ -29,6 +29,4 @@ def python_extension_suffix(platform):
         return ".cpython-{}-x86_64-linux-gnu.so".format(_PYTHON.extension_infix)
     if platform == "macos-arm64":
         return ".cpython-{}-darwin.so".format(_PYTHON.extension_infix)
-    if platform == "windows-x86_64":
-        return ".pyd"
     fail("unsupported Python extension platform: {}".format(platform))

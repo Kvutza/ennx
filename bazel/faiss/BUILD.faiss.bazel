@@ -11,30 +11,22 @@ OMP_COPTS = select({
         "-Xclang",
         "-fopenmp",
     ],
-    "@platforms//os:windows": ["/openmp"],
     "//conditions:default": [],
 })
 
-OMP_DEPS = select({
-    "@platforms//os:windows": [],
-    "//conditions:default": ["@openmp//:openmp"],
-})
+OMP_DEPS = ["@openmp//:openmp"]
 
-CXX_COPTS = select({
-    "@platforms//os:windows": ["/std:c++20"],
-    "//conditions:default": [
-        "-std=c++20",
-        "-Wno-deprecated-declarations",
-        "-Wno-unknown-pragmas",
-    ],
-})
+CXX_COPTS = [
+    "-std=c++20",
+    "-Wno-deprecated-declarations",
+    "-Wno-unknown-pragmas",
+]
 
 cc_library(
     name = "blas",
     deps = select({
         "@platforms//os:linux": ["@ennx//bazel/openblas"],
         "@platforms//os:macos": [":sdk_blas"],
-        "@platforms//os:windows": ["@ennx//bazel/openblas"],
         "//conditions:default": [],
     }),
 )
@@ -90,10 +82,7 @@ FAISS_SRCS = glob(
         "faiss/utils/hamming_distance/*.cpp",
         "faiss/utils/simd_impl/*.cpp",
     ],
-) + select({
-    "@platforms//os:windows": [],
-    "//conditions:default": ["faiss/invlists/OnDiskInvertedLists.cpp"],
-}) + select({
+) + ["faiss/invlists/OnDiskInvertedLists.cpp"] + select({
     "@platforms//cpu:aarch64": [
         "faiss/impl/fast_scan/impl-neon.cpp",
         "faiss/impl/scalar_quantizer/sq-neon.cpp",

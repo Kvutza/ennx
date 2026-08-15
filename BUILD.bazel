@@ -41,28 +41,9 @@ filegroup(
 )
 
 copy_extension(
-    name = "wheel_extension_unix",
-    src = "//rust/crates/ennx-py:python_extension_unix",
-    output = "ennx/ennx_rust.so",
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
-)
-
-copy_extension(
-    name = "wheel_extension_windows",
-    src = "//rust/crates/ennx-py:python_extension_windows",
-    output = "ennx/ennx_rust.pyd",
-    target_compatible_with = ["@platforms//os:windows"],
-)
-
-alias(
     name = "wheel_extension",
-    actual = select({
-        "@platforms//os:windows": ":wheel_extension_windows",
-        "//conditions:default": ":wheel_extension_unix",
-    }),
+    src = "//rust/crates/ennx-py:python_extension",
+    output = "ennx/ennx_rust.so",
 )
 
 py_wheel(
@@ -87,7 +68,6 @@ py_wheel(
     platform = select({
         "@platforms//os:linux": "manylinux_2_28_x86_64",
         "@platforms//os:macos": "macosx_11_0_arm64",
-        "@platforms//os:windows": "win_amd64",
         "//conditions:default": "any",
     }),
     python_requires = ">=3.12,<3.14",

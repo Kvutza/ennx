@@ -8,7 +8,7 @@ wheel. Python uses the wheel. Bazel projects use the public targets.
 | Target | Contents |
 | --- | --- |
 | `//:cpu` | Pure CPU target (FAISS CPU + BPANN) |
-| `//:gpu` | Hardware-accelerated GPU target (Metal on macOS, OpenCL on Linux/Windows) |
+| `//:gpu` | Hardware-accelerated GPU target (Metal on macOS, OpenCL on Linux) |
 | `//:wheel` | Prebuilt Python `.whl` release package |
 | `//:audit` | Release wheel artifact verification test |
 | `//:check` | Canonical test suite |
@@ -35,9 +35,9 @@ The explicit `//:rust_opencl` target remains available for OpenCL development
 on macOS, while the default macOS wheel contains Metal rather than both GPU
 stacks.
 
-Linux and Windows select OpenCL rather than Metal. Bazel also fetches
-checksum-pinned OpenBLAS 0.3.32 source and builds a static library for those
-platforms. The build does not fall back to an ambient `-lopenblas`.
+Linux selects OpenCL rather than Metal. Bazel also fetches checksum-pinned
+OpenBLAS 0.3.32 source and builds a static library for Linux. The build does
+not fall back to an ambient `-lopenblas`.
 
 OpenBLAS uses its upstream CMake build through Bazel-managed
 `rules_foreign_cc` toolchains. The source, CMake, and Ninja inputs are resolved
@@ -52,8 +52,7 @@ modules cannot repin repositories inside a consumer's read-only module cache.
 The lockfiles cover:
 
 - `aarch64-apple-darwin`;
-- `x86_64-unknown-linux-gnu`;
-- `x86_64-pc-windows-msvc`.
+- `x86_64-unknown-linux-gnu`.
 
 When Cargo manifests, supported triples, or crate annotations change, repin
 from the ENNX repository root:

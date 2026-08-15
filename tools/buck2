@@ -39,18 +39,6 @@
         }
       ]
     },
-    "windows-x86_64": {
-      "size": 31139540,
-      "hash": "blake3",
-      "digest": "4943266f41e3de7848801befbd89c1ddbae61252a3042fc646e072cbe6abcea6",
-      "format": "zst",
-      "path": "buck2-x86_64-pc-windows-msvc.exe",
-      "providers": [
-        {
-          "url": "https://github.com/facebook/buck2/releases/download/2026-07-15/buck2-x86_64-pc-windows-msvc.exe.zst"
-        }
-      ]
-    },
     "linux-x86_64": {
       "size": 38640905,
       "hash": "blake3",

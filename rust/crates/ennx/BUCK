@@ -3,13 +3,10 @@ load("//buck2:reindeer_rules.bzl", "app_rust_binary", "app_rust_library")
 cxx_library(
     name = "faiss-bridge",
     srcs = ["src/faiss_bridge.cpp"],
-    compiler_flags = select({
-        "//:windows-x86_64": ["/std:c++20"],
-        "DEFAULT": [
-            "-std=c++20",
-            "-Wno-deprecated-declarations",
-        ],
-    }),
+    compiler_flags = [
+        "-std=c++20",
+        "-Wno-deprecated-declarations",
+    ],
     deps = ["//buck2/native:faiss"],
     visibility = ["PUBLIC"],
 )
@@ -17,13 +14,10 @@ cxx_library(
 cxx_library(
     name = "usearch-bridge",
     srcs = ["src/usearch_bridge.cpp"],
-    compiler_flags = select({
-        "//:windows-x86_64": ["/std:c++17"],
-        "DEFAULT": [
-            "-std=c++17",
-            "-Wno-unknown-pragmas",
-        ],
-    }),
+    compiler_flags = [
+        "-std=c++17",
+        "-Wno-unknown-pragmas",
+    ],
     deps = ["//buck2/native:usearch"],
     visibility = ["PUBLIC"],
 )
@@ -42,7 +36,6 @@ app_rust_library(
         "//:linux-arm64": ["opencl", "usearch-native", "zig-dense"],
         "//:linux-x86_64": ["opencl", "usearch-native", "zig-dense"],
         "//:macos-arm64": ["metal", "usearch-native", "zig-dense"],
-        "//:windows-x86_64": ["opencl", "usearch-native", "zig-dense"],
     }),
     visibility = ["PUBLIC"],
     deps = [
@@ -64,7 +57,6 @@ app_rust_library(
         "//:linux-arm64": ["//buck2/accelerators:opencl3"],
         "//:linux-x86_64": ["//buck2/accelerators:opencl3"],
         "//:macos-arm64": ["//buck2/accelerators:metal"],
-        "//:windows-x86_64": ["//buck2/accelerators:opencl3"],
     }),
 )
 

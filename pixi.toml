@@ -1,7 +1,7 @@
 [workspace]
 name = "ennx"
 channels = ["conda-forge"]
-platforms = ["osx-arm64", "win-64", "linux-64", "linux-aarch64"]
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 
 [feature.ennx.dependencies]
 numpy = "*"

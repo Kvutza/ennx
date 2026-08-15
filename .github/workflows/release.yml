@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-2025]
+        os: [ubuntu-24.04, macos-14]
 
     defaults:
       run:
@@ -46,10 +46,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buck2-
 
-      - name: Install DotSlash
-        if: runner.os == 'Windows'
-        uses: facebook/install-dotslash@latest
-
       - name: Install OpenCL development package
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev
@@ -61,13 +57,8 @@ jobs:
 
       - name: Run platform build and tests
         run: |
-          if [[ "${{ matrix.os }}" == windows-* ]]; then
-            pixi run -e ennx bash ./buck2w --isolation-dir dev build //rust/crates/bpann:bpann //rust/crates/ennx:ennx --local-only --num-threads 4 -M none
-            pixi run -e ennx bash ./buck2w --isolation-dir dev test //buck2/tests:all --local-only --num-threads 4
-          else
-            pixi run -e ennx buck2-build
-            pixi run -e ennx buck2-test
-          fi
+          pixi run -e ennx buck2-build
+          pixi run -e ennx buck2-test
 
       - name: Build wheel
         run: |
@@ -81,10 +72,8 @@ jobs:
               --config "ennx.python_version=$python_version" \
               --local-only --num-threads 4 --show-output
           done
-          if [[ "${{ matrix.os }}" != windows-* ]]; then
-            pixi run -e ennx-py312 buck2-verify-py312
-            pixi run -e ennx buck2-verify
-          fi
+          pixi run -e ennx-py312 buck2-verify-py312
+          pixi run -e ennx buck2-verify
 
       - name: Collect wheel artifacts
         run: |

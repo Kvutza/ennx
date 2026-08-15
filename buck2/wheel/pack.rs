@@ -230,11 +230,7 @@ fn main() -> io::Result<()> {
         .iter()
         .filter(|path| {
             let name = path.file_name().unwrap().to_string_lossy();
-            if args.extension_suffix == ".pyd" {
-                name.ends_with(".dll") && name.to_ascii_lowercase().contains("ennx")
-            } else {
-                name.starts_with("librust") && name.contains("ennx-py") && name.ends_with(".so")
-            }
+            name.starts_with("librust") && name.contains("ennx-py") && name.ends_with(".so")
         })
         .collect();
     assert_eq!(
@@ -279,16 +275,6 @@ fn main() -> io::Result<()> {
                 .is_some_and(|name| {
                     name.contains(".so") && !name.contains("ennx-py") && !name.contains("ennx_py")
                 })
-        }) {
-            let name = library.file_name().unwrap().to_string_lossy();
-            wheel_files.insert(format!("{}/{name}", args.package), fs::read(library)?);
-        }
-    }
-    if args.platform_tag == "win_amd64" {
-        for library in all_files.iter().filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.ends_with(".dll"))
         }) {
             let name = library.file_name().unwrap().to_string_lossy();
             wheel_files.insert(

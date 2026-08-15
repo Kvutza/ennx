@@ -150,10 +150,11 @@ impl Batch {
             if begin == 0 || end == 0 {
                 continue;
             }
-            let begin = timestamp(begin)?;
-            let end = timestamp(end)?;
+            let (Ok(begin), Ok(end)) = (timestamp(begin), timestamp(end)) else {
+                continue;
+            };
             if end < begin {
-                return Err("invalid Metal duration sample".to_string());
+                continue;
             }
             first.get_or_insert(begin);
             last = Some(end);
@@ -165,7 +166,7 @@ impl Batch {
             return Ok(Duration::ZERO);
         };
         if last < first {
-            return Err("invalid Metal duration envelope".to_string());
+            return Ok(Duration::ZERO);
         }
         Ok(Duration::from_nanos((last - first) as u64))
     }
@@ -183,12 +184,13 @@ impl Batch {
                 if begin == 0 || end == 0 {
                     return Ok((name, Duration::ZERO));
                 }
-                let begin = timestamp(begin)?;
-                let end = timestamp(end)?;
-                if end < begin {
-                    return Err(format!("{name}: invalid Metal duration sample"));
-                }
-                Ok((name, Duration::from_nanos((end - begin) as u64)))
+                let duration = match (timestamp(begin), timestamp(end)) {
+                    (Ok(begin), Ok(end)) if end >= begin => {
+                        Duration::from_nanos((end - begin) as u64)
+                    }
+                    _ => Duration::ZERO,
+                };
+                Ok((name, duration))
             })
             .collect()
     }
@@ -220,7 +222,7 @@ fn setup(device: &Device) -> Result<(), String> {
         let mut cpu = 0;
         let mut gpu = 0;
         device.sample_timestamps(&mut cpu, &mut gpu);
-        let gpu = timestamp(gpu)?;
+        let gpu = timestamp(gpu.max(1))?;
         LAST.store(gpu, Ordering::Relaxed);
         let name = b"ENNX Metal";
         unsafe {
@@ -290,13 +292,15 @@ fn counter(device: &Device) -> Result<CounterSampleBuffer, String> {
 }
 
 fn times(begin: u64, end: u64, last: i64) -> Result<(i64, i64), String> {
-    if begin == 0 || end == 0 {
-        if last == 0 {
-            return Err("unresolved Metal timestamp".to_string());
+    if let (Ok(begin), Ok(end)) = (timestamp(begin), timestamp(end)) {
+        if end >= begin {
+            return Ok((begin, end));
         }
-        return Ok((last + 5, last + 10));
     }
-    Ok((timestamp(begin)?, timestamp(end)?))
+    if last == 0 {
+        return Err("unresolved Metal timestamp".to_string());
+    }
+    Ok((last + 5, last + 10))
 }
 
 #[cfg(test)]
@@ -324,6 +328,7 @@ mod tests {
         assert_eq!(super::timestamp(7).unwrap(), 7);
         assert!(super::timestamp(0).is_err());
         assert_eq!(super::times(0, 0, 10).unwrap(), (15, 20));
+        assert_eq!(super::times(9, 7, 10).unwrap(), (15, 20));
         assert!(super::times(0, 0, 0).is_err());
     }
 }

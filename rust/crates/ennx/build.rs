@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 fn has_faiss(dir: &Path) -> bool {
-    ["libfaiss.dylib", "libfaiss.so", "faiss.lib"]
+    ["libfaiss.dylib", "libfaiss.so"]
         .iter()
         .any(|name| dir.join(name).exists())
 }
@@ -12,12 +12,7 @@ fn candidates() -> Vec<PathBuf> {
         paths.push(path.into());
     }
     if let Some(prefix) = std::env::var_os("CONDA_PREFIX") {
-        let prefix = PathBuf::from(prefix);
-        paths.push(if cfg!(target_os = "windows") {
-            prefix.join("Library/lib")
-        } else {
-            prefix.join("lib")
-        });
+        paths.push(PathBuf::from(prefix).join("lib"));
     }
     if cfg!(target_os = "macos") {
         paths.extend([
@@ -84,7 +79,5 @@ fn main() {
     } else if cfg!(target_os = "linux") {
         println!("cargo:rustc-link-lib=dylib=stdc++");
     }
-    if !cfg!(target_os = "windows") {
-        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib.display());
-    }
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib.display());
 }

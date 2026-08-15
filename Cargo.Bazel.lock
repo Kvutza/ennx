@@ -1,5 +1,5 @@
 {
-  "checksum": "35ccbfc08d5291c5651b3eabd82a50865e41f9dd361198db58673960e8029555",
+  "checksum": "41a949b0bb5f2dc57b9e675edd0a76b86c460a41ca669b5d3d055b20673f94cb",
   "crates": {
     "adler32 1.2.0": {
       "name": "adler32",
@@ -1083,9 +1083,9 @@
       ],
       "license_file": "LICENSE-APACHE"
     },
-    "ennx 0.0.0": {
+    "ennx 0.1.0": {
       "name": "ennx",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "package_url": "https://github.com/Kvutza/ennx",
       "repository": null,
       "targets": [
@@ -1130,7 +1130,7 @@
         "deps": {
           "common": [
             {
-              "id": "ennx 0.0.0",
+              "id": "ennx 0.1.0",
               "target": "build_script_build"
             },
             {
@@ -1209,7 +1209,7 @@
           "selects": {}
         },
         "edition": "2021",
-        "version": "0.0.0"
+        "version": "0.1.0"
       },
       "build_script_attrs": {
         "compile_data_glob": [
@@ -1237,9 +1237,9 @@
       ],
       "license_file": null
     },
-    "ennx-bpann 0.0.0": {
+    "ennx-bpann 0.1.0": {
       "name": "ennx-bpann",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "package_url": "https://github.com/Kvutza/ennx",
       "repository": null,
       "targets": [
@@ -1312,7 +1312,7 @@
           "selects": {}
         },
         "edition": "2021",
-        "version": "0.0.0"
+        "version": "0.1.0"
       },
       "license": "MIT",
       "license_ids": [
@@ -1320,9 +1320,9 @@
       ],
       "license_file": null
     },
-    "ennx-py 0.0.0": {
+    "ennx-py 0.1.0": {
       "name": "ennx-py",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "package_url": "https://github.com/Kvutza/ennx",
       "repository": null,
       "targets": [
@@ -1365,7 +1365,7 @@
         "deps": {
           "common": [
             {
-              "id": "ennx-py 0.0.0",
+              "id": "ennx-py 0.1.0",
               "target": "build_script_ennx_py_build"
             },
             {
@@ -1388,7 +1388,7 @@
           "selects": {}
         },
         "edition": "2021",
-        "version": "0.0.0"
+        "version": "0.1.0"
       },
       "build_script_attrs": {
         "compile_data_glob": [
@@ -7536,19 +7536,6 @@
         "compile_data_glob": [
           "**"
         ],
-        "crate_features": {
-          "common": [
-            "basetsd",
-            "dbghelp",
-            "errhandlingapi",
-            "libloaderapi",
-            "minwindef",
-            "processthreadsapi",
-            "winerror",
-            "winnt"
-          ],
-          "selects": {}
-        },
         "deps": {
           "common": [
             {
@@ -7850,16 +7837,6 @@
         "compile_data_glob": [
           "**"
         ],
-        "crate_features": {
-          "common": [
-            "Win32",
-            "Win32_Foundation",
-            "Win32_Storage",
-            "Win32_Storage_FileSystem",
-            "default"
-          ],
-          "selects": {}
-        },
         "deps": {
           "common": [
             {
@@ -8804,18 +8781,16 @@
   },
   "binary_crates": [],
   "workspace_members": {
-    "ennx 0.0.0": "rust/crates/ennx",
-    "ennx-bpann 0.0.0": "rust/crates/bpann",
-    "ennx-py 0.0.0": "rust/crates/ennx-py"
+    "ennx 0.1.0": "rust/crates/ennx",
+    "ennx-bpann 0.1.0": "rust/crates/bpann",
+    "ennx-py 0.1.0": "rust/crates/ennx-py"
   },
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
     ],
     "aarch64-pc-windows-gnullvm": [],
-    "cfg(all(any(target_arch = \"x86_64\", target_arch = \"arm64ec\"), target_env = \"msvc\", not(windows_raw_dylib)))": [
-      "x86_64-pc-windows-msvc"
-    ],
+    "cfg(all(any(target_arch = \"x86_64\", target_arch = \"arm64ec\"), target_env = \"msvc\", not(windows_raw_dylib)))": [],
     "cfg(all(any(target_os = \"linux\", target_os = \"android\"), any(rustix_use_libc, miri, not(all(target_os = \"linux\", any(target_endian = \"little\", any(target_arch = \"s390x\", target_arch = \"powerpc\")), any(target_arch = \"arm\", all(target_arch = \"aarch64\", target_pointer_width = \"64\"), target_arch = \"riscv64\", all(rustix_use_experimental_asm, target_arch = \"powerpc\"), all(rustix_use_experimental_asm, target_arch = \"powerpc64\"), all(rustix_use_experimental_asm, target_arch = \"s390x\"), all(rustix_use_experimental_asm, target_arch = \"mips\"), all(rustix_use_experimental_asm, target_arch = \"mips32r6\"), all(rustix_use_experimental_asm, target_arch = \"mips64\"), all(rustix_use_experimental_asm, target_arch = \"mips64r6\"), target_arch = \"x86\", all(target_arch = \"x86_64\", target_pointer_width = \"64\")))))))": [],
     "cfg(all(any(target_os = \"linux\", target_os = \"android\"), not(any(all(target_os = \"linux\", target_env = \"\"), getrandom_backend = \"custom\", getrandom_backend = \"linux_raw\", getrandom_backend = \"rdrand\", getrandom_backend = \"rndr\"))))": [
       "x86_64-unknown-linux-gnu"
@@ -8853,16 +8828,11 @@
       "aarch64-apple-darwin",
       "x86_64-unknown-linux-gnu"
     ],
-    "cfg(windows)": [
-      "x86_64-pc-windows-msvc"
-    ],
+    "cfg(windows)": [],
     "i686-pc-windows-gnu": [],
     "i686-pc-windows-gnullvm": [],
     "x86_64-pc-windows-gnu": [],
     "x86_64-pc-windows-gnullvm": [],
-    "x86_64-pc-windows-msvc": [
-      "x86_64-pc-windows-msvc"
-    ],
     "x86_64-unknown-linux-gnu": [
       "x86_64-unknown-linux-gnu"
     ]

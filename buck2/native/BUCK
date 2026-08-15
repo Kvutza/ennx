@@ -1,5 +1,5 @@
 load(":faiss.bzl", "faiss_native")
-load("//buck2:python.bzl", "PYTHON_ABI", "PYTHON_ENVIRONMENT")
+load("//buck2:python.bzl", "PYTHON_ENVIRONMENT")
 
 http_archive(
     name = "faiss-source",
@@ -44,17 +44,8 @@ genrule(
     name = "linux-native",
     srcs = ["//:pixi-lock"],
     out = "native",
-    cmd = "$(exe :import-pixi-tool) $OUT {} {}".format(PYTHON_ENVIRONMENT, PYTHON_ABI),
+    cmd = "$(exe :import-pixi-tool) $OUT {}".format(PYTHON_ENVIRONMENT),
     target_compatible_with = ["prelude//os/constraints:linux"],
-    visibility = ["PUBLIC"],
-)
-
-genrule(
-    name = "windows-native",
-    srcs = ["//:pixi-lock"],
-    out = "native",
-    cmd = "$(exe :import-pixi-tool) $OUT {} {}".format(PYTHON_ENVIRONMENT, PYTHON_ABI),
-    target_compatible_with = ["prelude//os/constraints:windows"],
     visibility = ["PUBLIC"],
 )
 
@@ -135,17 +126,6 @@ cxx_library(
 )
 
 cxx_library(
-    name = "faiss-windows-system",
-    exported_linker_flags = [
-        "/LIBPATH:$(location :windows-native)\\lib",
-        "faiss.lib",
-    ],
-    exported_preprocessor_flags = ["-I$(location :windows-native)\\include"],
-    target_compatible_with = ["prelude//os/constraints:windows"],
-    visibility = ["PUBLIC"],
-)
-
-cxx_library(
     name = "usearch",
     exported_preprocessor_flags = [
         "-DUSEARCH_USE_OPENMP=0",
@@ -160,7 +140,6 @@ alias(
     actual = select({
         "prelude//os/constraints:linux": ":faiss-linux-system",
         "prelude//os/constraints:macos": ":faiss-macos",
-        "prelude//os/constraints:windows": ":faiss-windows-system",
     }),
     visibility = ["PUBLIC"],
 )

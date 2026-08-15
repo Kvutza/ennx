@@ -9,10 +9,12 @@ case "$python_version" in
     3.12)
         python_abi=cp312
         python_environment=ennx-py312
+        isolation_dir=release-py312
         ;;
     3.13)
         python_abi=cp313
         python_environment=ennx
+        isolation_dir=release-py313
         ;;
     *)
         echo "unsupported Python version: $python_version" >&2
@@ -30,7 +32,7 @@ if [ ! -x "$python_bin" ]; then
     exit 1
 fi
 
-build_output=$(./buck2w --isolation-dir release build //:wheel \
+build_output=$(./buck2w --isolation-dir "$isolation_dir" build //:wheel \
     --config ennx.profile=release \
     --config "ennx.python_version=$python_version" \
     --local-only \

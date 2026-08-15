@@ -4,28 +4,12 @@ set -eu
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bin_dir="$repo_dir/.buck2-tools/bin"
 dotslash="$bin_dir/dotslash"
-windows_dotslash="$bin_dir/dotslash.exe"
 
 if [ -x "$dotslash" ]; then
     exit 0
 fi
 
-if [ -x "$windows_dotslash" ]; then
-    exit 0
-fi
-
 mkdir -p "$bin_dir"
-
-case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*)
-        ds_path=$(command -v dotslash.exe 2>/dev/null || command -v dotslash 2>/dev/null || true)
-        if [ -n "$ds_path" ]; then
-            cp "$ds_path" "$windows_dotslash"
-            chmod +x "$windows_dotslash" 2>/dev/null || true
-            exit 0
-        fi
-        ;;
-esac
 
 os=$(uname -s)
 arch=$(uname -m)

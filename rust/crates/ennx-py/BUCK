@@ -11,7 +11,6 @@ app_rust_library(
         "//:linux-arm64": ["opencl"],
         "//:linux-x86_64": ["opencl"],
         "//:macos-arm64": ["metal"],
-        "//:windows-x86_64": ["opencl"],
     }),
     rustc_flags = select({
         "//:linux-arm64": ["-Clink-arg=-Wl,-rpath,$ORIGIN/.dylibs"],

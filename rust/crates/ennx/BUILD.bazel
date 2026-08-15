@@ -47,10 +47,7 @@ ENNX_TEST_DEPS = ennx_crate_deps(ENNX_TEST_CRATES) + [
 cc_library(
     name = "faiss_bridge",
     srcs = ["src/faiss_bridge.cpp"],
-    copts = select({
-        "@platforms//os:windows": ["/std:c++20"],
-        "//conditions:default": ["-std=c++20"],
-    }),
+    copts = ["-std=c++20"],
     deps = ["@faiss_src//:faiss"],
 )
 
@@ -58,13 +55,10 @@ cc_library(
     name = "usearch_bridge",
     srcs = ["src/usearch_bridge.cpp"],
     hdrs = ["src/usearch_bridge.h"],
-    copts = select({
-        "@platforms//os:windows": ["/std:c++17"],
-        "//conditions:default": [
-            "-std=c++17",
-            "-Wno-unknown-pragmas",
-        ],
-    }),
+    copts = [
+        "-std=c++17",
+        "-Wno-unknown-pragmas",
+    ],
     includes = ["src"],
     deps = ["@usearch_src//:usearch"],
 )
@@ -138,7 +132,6 @@ alias(
     actual = select({
         "@platforms//os:linux": ":ennx_opencl",
         "@platforms//os:macos": ":ennx_metal",
-        "@platforms//os:windows": ":ennx_opencl",
         "//conditions:default": ":ennx_cpu",
     }),
 )

@@ -48,23 +48,6 @@ config_setting(
     ],
 )
 
-config_setting(
-    name = "windows-x86_64",
-    constraint_values = [
-        "prelude//cpu/constraints:x86_64",
-        "prelude//os/constraints:windows",
-    ],
-)
-
-platform(
-    name = "windows-x86_64-platform",
-    constraint_values = [
-        "prelude//cpu/constraints:x86_64",
-        "prelude//os/constraints:windows",
-    ],
-    visibility = ["PUBLIC"],
-)
-
 filegroup(
     name = "pixi-lock",
     srcs = ["pixi.lock"],
@@ -128,32 +111,12 @@ python_wheel(
     version = "0.1.0",
 )
 
-python_wheel(
-    name = "wheel-windows-x86_64",
-    extension = "//rust/crates/ennx-py:ennx-py[shared]",
-    extension_suffix = python_extension_suffix("windows-x86_64"),
-    license = "LICENSE",
-    notice = "NOTICE",
-    package = "ennx",
-    platform_tag = "win_amd64",
-    python_abi = PYTHON_ABI,
-    python_requires = PYTHON_REQUIRES,
-    python_srcs = glob(["src/ennx/**/*.py"]),
-    runtime_libraries = ["//buck2/native:windows-native"],
-    target_compatible_with = [
-        "prelude//cpu/constraints:x86_64",
-        "prelude//os/constraints:windows",
-    ],
-    version = "0.1.0",
-)
-
 alias(
     name = "wheel",
     actual = select({
         ":linux-arm64": ":wheel-linux-arm64",
         ":linux-x86_64": ":wheel-linux-x86_64",
         ":macos-arm64": ":wheel-macos-arm64",
-        ":windows-x86_64": ":wheel-windows-x86_64",
     }),
     visibility = ["PUBLIC"],
 )

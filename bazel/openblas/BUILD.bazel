@@ -17,13 +17,9 @@ cmake(
     },
     lib_source = "@openblas_src//:all_srcs",
     out_include_dir = "include",
-    out_static_libs = select({
-        "@platforms//os:windows": ["openblas.lib"],
-        "//conditions:default": ["libopenblas.a"],
-    }),
+    out_static_libs = ["libopenblas.a"],
     target_compatible_with = select({
         "@platforms//os:linux": [],
-        "@platforms//os:windows": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
 )
