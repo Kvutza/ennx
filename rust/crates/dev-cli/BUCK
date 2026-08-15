@@ -19,7 +19,7 @@ app_rust_binary(
     runtime_dependency_handling = "symlink",
     rustc_flags = select({
         "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/out",
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/openmp/lib",
         ],
         "DEFAULT": [],
     }),
@@ -45,7 +45,7 @@ rust_test(
     runtime_dependency_handling = "symlink",
     rustc_flags = select({
         "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/out",
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/openmp/lib",
         ],
         "DEFAULT": [],
     }),
