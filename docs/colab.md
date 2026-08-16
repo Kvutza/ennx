@@ -21,6 +21,21 @@ selected packed-row transfer as the remaining host boundary. It does not clone
 the repository, replace Colab's JAX stack, or install Rust, LLVM, and CUDA
 compiler tooling.
 
+For the high-dimensional control experiment, open
+[`examples/colab_mjx_humanoid_ennx.ipynb`](https://colab.research.google.com/github/Kvutza/ennx/blob/cuda/examples/colab_mjx_humanoid_ennx.ipynb).
+It runs a roughly 972,000-parameter JAX policy in a pure MJX Humanoid simulation,
+optimizes packed policy mutations with the ENNx CUDA backend, and renders the
+incumbent policy to an MP4. The notebook installs the released ENNx wheel and
+`mujoco-mjx`; it does not require a source checkout or Rust toolchain.
+`ennx.experimental.TurboSearch` owns acceptance and TuRBO trust-region updates
+in Rust while the packed history, candidate scoring, and selected row remain on
+the CUDA backend. Decoding the selected row into JAX parameters is still a host
+boundary.
+The wheel is installed without dependency resolution so Colab's compatible
+NumPy, SciPy, and CUDA-enabled JAX stack remains unchanged. The MJX dependency
+install is also constrained to the numerical package versions supplied by the
+fresh runtime.
+
 The development notebook only orchestrates the environment. Toolchain setup lives in
 `ops/colab_cuda_oxide_smoke.py`, and CUDA or ENNx implementation work belongs in
 normal repository source files. This keeps experiments reviewable and prevents

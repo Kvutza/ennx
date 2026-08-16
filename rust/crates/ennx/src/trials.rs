@@ -596,6 +596,19 @@ impl Search {
         self.capacity
     }
 
+    /// Begin a new trust-region generation around the current incumbent.
+    pub(crate) fn restart(&mut self, value: f32) -> Result<(), String> {
+        if self.pending.is_some() {
+            return Err("tell must finish the pending trial before restart".to_string());
+        }
+        self.history.clear();
+        self.history.push_back(Record {
+            slot: self.base,
+            value,
+        });
+        Ok(())
+    }
+
     pub fn row_bytes(&self) -> usize {
         self.row_bytes
     }

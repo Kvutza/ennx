@@ -141,12 +141,12 @@ def build() -> tuple[str, bytes]:
             "-c",
             (
                 "import numpy as np; "
-                "from ennx.experimental import WeightSearch; "
+                "from ennx.experimental import TurboSearch; "
                 "base=np.zeros(8,dtype=np.uint8); "
-                "search=WeightSearch(base,0.0,[(0,16,4,0.25,1.0,0.25)],2,backend='cuda'); "
-                "search.ask(np.array([11,13],dtype=np.uint64),0.5,1); "
+                "search=TurboSearch(base,0.0,[(0,16,4,0.25,1.0,0.25)],2,backend='cuda',num_pert=4); "
+                "search.ask(np.array([11,13],dtype=np.uint64),1); "
                 "assert search.row().shape==(8,); "
-                "search.tell(1.0,True); "
+                "assert search.tell(1.0); "
                 "print('CUDA_WHEEL ok=true')"
             ),
         ]
