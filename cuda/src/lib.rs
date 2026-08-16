@@ -677,6 +677,19 @@ impl TrialEngine {
         Ok(row)
     }
 
+    /// Return a synchronized device pointer to a resident row.
+    ///
+    /// The pointer remains valid only while this engine is alive. Callers must
+    /// retain the engine owner for the lifetime of every foreign GPU view.
+    pub fn device_row(&self, slot: usize) -> CudaResult<(u64, usize, usize)> {
+        self.check_slot(slot)?;
+        self.runtime.stream.synchronize().map_err(cuda_error)?;
+        let offset = slot
+            .checked_mul(self.row_bytes)
+            .ok_or("CUDA row pointer offset overflow")?;
+        Ok((self.rows.cu_deviceptr() + offset as u64, self.row_bytes, 0))
+    }
+
     pub fn write(&mut self, slot: usize, row: &[u8]) -> CudaResult<()> {
         self.check_slot(slot)?;
         if row.len() != self.row_bytes {

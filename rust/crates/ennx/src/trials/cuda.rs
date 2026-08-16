@@ -202,6 +202,10 @@ impl Engine {
         self.inner.read(slot)
     }
 
+    pub(super) fn device_row(&self, slot: usize) -> Result<(u64, usize, usize), String> {
+        self.inner.device_row(slot)
+    }
+
     pub(super) fn write(&mut self, slot: usize, row: &[u8]) -> Result<(), String> {
         self.inner.write(slot, row)
     }

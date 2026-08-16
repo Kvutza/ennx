@@ -34,6 +34,7 @@ Optimizer = _ext.optimizer.Optimizer
 Telemetry = _ext.optimizer.Telemetry
 MultiTrustRegion = _ext.optimizer.MultiTrustRegion
 WeightSearch = _ext.optimizer.WeightSearch
+TurboSearch = _ext.optimizer.TurboSearch
 BpannHistory = _ext.optimizer.BpannHistory
 create_optimizer = _ext.optimizer.create_optimizer
 create_optimizer_enn = _ext.optimizer.create_optimizer_enn
@@ -63,6 +64,7 @@ __all__ = [
     "Optimizer",
     "ResidentBoSession",
     "Telemetry",
+    "TurboSearch",
     "WeightSearch",
     "arms_from_pareto_fronts",
     "calculate_sobol_indices",

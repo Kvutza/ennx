@@ -526,6 +526,22 @@ impl Search {
         self.engine.read(pending.slot, self.row_bytes)
     }
 
+    /// Borrow the pending packed row through its CUDA device address.
+    ///
+    /// The returned address is owned by this search and becomes invalid when
+    /// the search is dropped. The CUDA stream is synchronized before return.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    pub fn device_row(&self, trial: Trial) -> Result<(u64, usize, usize), String> {
+        let pending = self.pending_for(trial)?;
+        if !pending.materialized {
+            return Err("lazy trial row must be materialized before CUDA export".to_string());
+        }
+        match &self.engine {
+            Engine::Cuda(engine) => engine.device_row(pending.slot),
+            _ => Err("pending row is not stored on CUDA".to_string()),
+        }
+    }
+
     /// Materialize a lazily selected trial into its resident row slot.
     ///
     /// Calling this for a trial returned by [`Search::ask`] is a no-op. Lazy
@@ -594,6 +610,19 @@ impl Search {
 
     pub fn history_capacity(&self) -> usize {
         self.capacity
+    }
+
+    /// Begin a new trust-region generation around the current incumbent.
+    pub(crate) fn restart(&mut self, value: f32) -> Result<(), String> {
+        if self.pending.is_some() {
+            return Err("tell must finish the pending trial before restart".to_string());
+        }
+        self.history.clear();
+        self.history.push_back(Record {
+            slot: self.base,
+            value,
+        });
+        Ok(())
     }
 
     pub fn row_bytes(&self) -> usize {

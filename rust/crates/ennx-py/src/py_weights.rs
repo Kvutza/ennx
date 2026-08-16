@@ -2,8 +2,10 @@ use ennx::experimental::{
     apply_dense, apply_sparse, blocks_for_words, dense_dist2, dense_linear, draw_sparse,
     merge_values, missing_words, select_weights, sparse_union, sparse_xor, take_words,
     AcquisitionKind, BpannHistory, ComputeBackend, DenseLeaf, DenseLinear, DenseTerm, DenseView,
-    WeightAsk, WeightBlock, WeightLeaf, WeightSearch, WeightSelectConfig, WeightTrial,
+    TurboSearch, TurboTrial, WeightAsk, WeightBlock, WeightLeaf, WeightSearch, WeightSelectConfig,
+    WeightTrial,
 };
+use ennx::TRLengthConfig;
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -311,6 +313,14 @@ impl PyWeightSearch {
         Ok(self.inner.row(trial).map_err(err)?.into_pyarray_bound(py))
     }
 
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    fn device_row(&self) -> PyResult<(u64, usize, usize)> {
+        let trial = self
+            .pending
+            .ok_or_else(|| PyValueError::new_err("there is no pending trial"))?;
+        self.inner.device_row(trial).map_err(err)
+    }
+
     #[cfg(all(target_os = "macos", feature = "metal"))]
     fn bind_pending_model(
         &mut self,
@@ -359,6 +369,133 @@ impl PyWeightSearch {
     #[getter]
     fn row_bytes(&self) -> usize {
         self.inner.row_bytes()
+    }
+}
+
+#[pyclass(name = "TurboSearch", unsendable)]
+pub struct PyTurboSearch {
+    inner: TurboSearch,
+    pending: Option<TurboTrial>,
+}
+
+#[pymethods]
+impl PyTurboSearch {
+    #[new]
+    #[pyo3(signature=(base,base_value,leaves,capacity,backend="auto",num_pert=20,length_init=0.8,length_min=0.0078125,length_max=1.6))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        base: PyReadonlyArray1<'_, u8>,
+        base_value: f32,
+        leaves: Vec<(usize, usize, u8, f32, f32, f32)>,
+        capacity: usize,
+        backend: &str,
+        num_pert: usize,
+        length_init: f64,
+        length_min: f64,
+        length_max: f64,
+    ) -> PyResult<Self> {
+        let backend = ComputeBackend::parse(backend).map_err(err)?;
+        Ok(Self {
+            inner: TurboSearch::new(
+                &array1_vec(base),
+                base_value,
+                trial_leaves(leaves)?,
+                capacity,
+                backend,
+                num_pert,
+                TRLengthConfig::new(length_init, length_min, length_max),
+            )
+            .map_err(err)?,
+            pending: None,
+        })
+    }
+
+    #[pyo3(signature=(seeds,neighbors,epistemic_scale=0.7,aleatoric_scale=0.05,y_scale=1.0,beta=1.0,acquisition="ucb",seed=0))]
+    #[allow(clippy::too_many_arguments)]
+    fn ask(
+        &mut self,
+        seeds: PyReadonlyArray1<'_, u64>,
+        neighbors: usize,
+        epistemic_scale: f32,
+        aleatoric_scale: f32,
+        y_scale: f32,
+        beta: f32,
+        acquisition: &str,
+        seed: u64,
+    ) -> PyResult<(usize, u64, f32, f32, f32)> {
+        let trial = self
+            .inner
+            .ask(
+                &array1_vec(seeds),
+                WeightAsk {
+                    length: 0.0,
+                    neighbors,
+                    epistemic_scale,
+                    aleatoric_scale,
+                    y_scale,
+                    beta,
+                    acquisition: AcquisitionKind::parse(acquisition).map_err(err)?,
+                    seed,
+                },
+            )
+            .map_err(err)?;
+        self.pending = Some(trial);
+        Ok((
+            trial.index,
+            trial.seed,
+            trial.score,
+            trial.length,
+            trial.probability,
+        ))
+    }
+
+    fn row<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<u8>>> {
+        let trial = self
+            .pending
+            .ok_or_else(|| PyValueError::new_err("there is no pending trial"))?;
+        Ok(self.inner.row(trial).map_err(err)?.into_pyarray_bound(py))
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    fn device_row(&self) -> PyResult<(u64, usize, usize)> {
+        let trial = self
+            .pending
+            .ok_or_else(|| PyValueError::new_err("there is no pending trial"))?;
+        self.inner.device_row(trial).map_err(err)
+    }
+
+    fn tell(&mut self, value: f32) -> PyResult<bool> {
+        let trial = self
+            .pending
+            .ok_or_else(|| PyValueError::new_err("there is no pending trial"))?;
+        let accepted = self.inner.tell(trial, value).map_err(err)?;
+        self.pending = None;
+        Ok(accepted)
+    }
+
+    #[getter]
+    fn length(&self) -> f64 {
+        self.inner.length()
+    }
+
+    #[getter]
+    fn probability(&self) -> f64 {
+        self.inner.probability()
+    }
+
+    #[getter]
+    fn best(&self) -> f32 {
+        self.inner.best()
+    }
+
+    #[getter]
+    fn restarts(&self) -> usize {
+        self.inner.restarts()
+    }
+
+    #[getter]
+    fn history_len(&self) -> usize {
+        self.inner.history_len()
     }
 }
 
