@@ -32,6 +32,7 @@ pub use crate::trials::{
     Ask as WeightAsk, BpannHistory, Center as WeightCenter, EncodingType, IndexedObservation,
     Leaf as WeightLeaf, ObservationId, Search as WeightSearch, Trial as WeightTrial,
 };
+pub use crate::turbo_search::{TurboSearch, TurboTrial};
 pub use crate::weights::{
     apply_sparse, blocks_for_words, draw_sparse, merge_values, missing_words, select_weights,
     sparse_union, sparse_xor, take_words, AcquisitionKind, ComputeBackend, WeightBlock,

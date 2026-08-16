@@ -98,7 +98,7 @@ def _run(command: list[str], *, cwd: Path = ENNX_DIR, timeout: int = 3_600) -> f
 
 
 @app.function(gpu="T4", cpu=8.0, memory=16_384, timeout=3_600)
-def build() -> tuple[str, bytes]:
+def build(mjx: bool = False) -> tuple[str, bytes]:
     _run(
         [
             "cargo",
@@ -141,22 +141,50 @@ def build() -> tuple[str, bytes]:
             "-c",
             (
                 "import numpy as np; "
-                "from ennx.experimental import WeightSearch; "
-                "base=np.zeros(8,dtype=np.uint8); "
-                "search=WeightSearch(base,0.0,[(0,16,4,0.25,1.0,0.25)],2,backend='cuda'); "
-                "search.ask(np.array([11,13],dtype=np.uint64),0.5,1); "
-                "assert search.row().shape==(8,); "
-                "search.tell(1.0,True); "
+                "from ennx.experimental import TurboSearch; "
+                "base=np.full(50,0x88,dtype=np.uint8); "
+                "leaves=[(0,100,4,0.25,1.0,0.25)]; "
+                "seeds=np.array([[11,13],[17,19]],dtype=np.uint64); "
+                "cpu=TurboSearch(base,0.0,leaves,4,backend='cpu',num_pert=20,max_pending=2); "
+                "gpu=TurboSearch(base,0.0,leaves,4,backend='cuda',num_pert=20,max_pending=2); "
+                "ct=cpu.ask_batch(seeds,1); gt=gpu.ask_batch(seeds,1); "
+                "assert [(x.index,x.seed) for x in ct]==[(x.index,x.seed) for x in gt]; "
+                "cr=[cpu.row_trial(x) for x in ct]; gr=[gpu.row_trial(x) for x in gt]; "
+                "assert all(np.array_equal(a,b) for a,b in zip(cr,gr)); "
+                "changed=lambda row: int(np.count_nonzero((row&15)!=8)+np.count_nonzero((row>>4)!=8)); "
+                "assert [changed(row) for row in gr]==[20,20]; "
+                "ptr,size,device=gpu.device_trial(gt[0]); "
+                "assert ptr>0 and size==50 and device==0; "
+                "assert len(gpu.device_batch(gt))==2; "
+                "assert gpu.tell_batch(gt,np.array([0.5,1.0],dtype=np.float32))==[True,True]; "
+                "assert cpu.tell_batch(ct,np.array([0.5,1.0],dtype=np.float32))==[True,True]; "
                 "print('CUDA_WHEEL ok=true')"
             ),
         ]
     )
+    _run([str(python), str(ENNX_DIR / "ops/cuda_sparse_bench.py")])
+    if mjx:
+        _run(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--quiet",
+                "cupy-cuda12x",
+                "jax[cuda12]",
+                "mujoco==3.6.0",
+                "mujoco-mjx==3.6.0",
+            ],
+            timeout=1_200,
+        )
+        _run([str(python), str(ENNX_DIR / "ops/mjx_batch_smoke.py")], timeout=1_200)
     return wheel.name, wheel.read_bytes()
 
 
 @app.local_entrypoint()
-def main(output: str = "/tmp/ennx-cuda-wheel") -> None:
-    name, data = build.remote()
+def main(output: str = "/tmp/ennx-cuda-wheel", mjx: bool = False) -> None:
+    name, data = build.remote(mjx)
     directory = Path(output)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / name

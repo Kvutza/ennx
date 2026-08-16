@@ -18,11 +18,14 @@ mod bpann_history;
 mod layout;
 mod tree;
 
+mod sparse;
+
 pub use bpann_history::{BpannHistory, IndexedObservation, ObservationId};
 pub(crate) use layout::{check_layout, make_steps, make_tiles, Step, Tile};
 pub use tree::Center;
 
 const MAX_HISTORY: usize = 128;
+const MAX_PENDING: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncodingType {
@@ -210,6 +213,12 @@ struct Pending {
     materialized: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SparseEdit {
+    pub leaf: u32,
+    pub element: u32,
+}
+
 enum Engine {
     Cpu(Cpu),
     #[cfg(all(target_os = "macos", feature = "metal"))]
@@ -224,10 +233,11 @@ pub struct Search {
     leaves: Vec<Leaf>,
     row_bytes: usize,
     capacity: usize,
+    pending_capacity: usize,
     slots: usize,
     base: usize,
     history: VecDeque<Record>,
-    pending: Option<Pending>,
+    pending: Vec<Pending>,
     next_id: u64,
     engine: Engine,
 }
@@ -240,11 +250,25 @@ impl Search {
         capacity: usize,
         backend: ComputeBackend,
     ) -> Result<Self, String> {
+        Self::new_batch(base, base_value, leaves, capacity, 1, backend)
+    }
+
+    pub fn new_batch(
+        base: &[u8],
+        base_value: f32,
+        leaves: Vec<Leaf>,
+        capacity: usize,
+        pending_capacity: usize,
+        backend: ComputeBackend,
+    ) -> Result<Self, String> {
         if !base_value.is_finite() {
             return Err("base value must be finite".to_string());
         }
         if capacity == 0 || capacity > MAX_HISTORY {
             return Err(format!("history capacity must be in 1..={MAX_HISTORY}"));
+        }
+        if pending_capacity == 0 || pending_capacity > MAX_PENDING {
+            return Err(format!("pending capacity must be in 1..={MAX_PENDING}"));
         }
         let row_bytes = check_layout(&leaves)?;
         if base.len() != row_bytes {
@@ -253,19 +277,23 @@ impl Search {
                 base.len()
             ));
         }
-        let slots = capacity + 2;
+        let slots = capacity
+            .checked_add(pending_capacity)
+            .and_then(|slots| slots.checked_add(1))
+            .ok_or("resident slot count overflow")?;
         let engine = Engine::new(base, &leaves, slots, backend)?;
         Ok(Self {
             leaves,
             row_bytes,
             capacity,
+            pending_capacity,
             slots,
             base: 0,
             history: VecDeque::from([Record {
                 slot: 0,
                 value: base_value,
             }]),
-            pending: None,
+            pending: Vec::with_capacity(pending_capacity),
             next_id: 0,
             engine,
         })
@@ -284,6 +312,109 @@ impl Search {
         self.ask_with_materialization(seeds, config, false)
     }
 
+    pub(crate) fn ask_sparse(
+        &mut self,
+        seeds: &[u64],
+        num_pert: usize,
+        config: Ask,
+    ) -> Result<Trial, String> {
+        if !self.pending.is_empty() {
+            return Err("tell must finish the pending trial before ask".to_string());
+        }
+        self.ask_sparse_open(seeds, num_pert, config)
+    }
+
+    pub(crate) fn ask_batch(
+        &mut self,
+        seeds: &[u64],
+        arms: usize,
+        num_pert: usize,
+        config: Ask,
+    ) -> Result<Vec<Trial>, String> {
+        if !self.pending.is_empty() {
+            return Err("tell must finish outstanding trials before batch ask".to_string());
+        }
+        if arms == 0 || arms > self.pending_capacity {
+            return Err(format!(
+                "batch arms must be in 1..={}, got {arms}",
+                self.pending_capacity
+            ));
+        }
+        if seeds.is_empty() || seeds.len() % arms != 0 {
+            return Err("batch seeds must divide evenly into non-empty arms".to_string());
+        }
+        let candidates = seeds.len() / arms;
+        if candidates == 0 {
+            return Err("each batch arm requires candidates".to_string());
+        }
+        let mut trials = Vec::with_capacity(arms);
+        for group in seeds.chunks_exact(candidates) {
+            match self.ask_sparse_open(group, num_pert, config) {
+                Ok(trial) => trials.push(trial),
+                Err(error) => {
+                    self.pending.clear();
+                    return Err(error);
+                }
+            }
+        }
+        Ok(trials)
+    }
+
+    pub(crate) fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
+    pub(crate) fn check_pending(&self, trials: &[Trial]) -> Result<(), String> {
+        for (index, trial) in trials.iter().enumerate() {
+            if trials[..index].contains(trial) {
+                return Err("batch contains a duplicate trial".to_string());
+            }
+            self.pending_for(*trial)?;
+        }
+        Ok(())
+    }
+
+    fn ask_sparse_open(
+        &mut self,
+        seeds: &[u64],
+        num_pert: usize,
+        config: Ask,
+    ) -> Result<Trial, String> {
+        check_ask(seeds, self.history.len(), config)?;
+        let edits = sparse::make_edits(seeds, &self.leaves, num_pert)?;
+        let slot = self.free_slot().ok_or("no free model slot")?;
+        let history = self
+            .history
+            .iter()
+            .map(|record| (record.slot, record.value))
+            .collect::<Vec<_>>();
+        let (index, score) = self.engine.ask_sparse(
+            self.base,
+            &history,
+            slot,
+            seeds,
+            &edits,
+            num_pert,
+            &self.leaves,
+            config,
+        )?;
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        self.pending.push(Pending {
+            id,
+            slot,
+            seed: seeds[index],
+            length: config.length,
+            materialized: true,
+        });
+        Ok(Trial {
+            id,
+            index,
+            seed: seeds[index],
+            score,
+        })
+    }
+
     fn ask_with_materialization(
         &mut self,
         seeds: &[u64],
@@ -292,7 +423,7 @@ impl Search {
     ) -> Result<Trial, String> {
         let span = crate::tracy::zone(tracy_client::span_location!("trials.ask"));
         span.emit_value(seeds.len() as u64);
-        if self.pending.is_some() {
+        if !self.pending.is_empty() {
             return Err("tell must finish the pending trial before ask".to_string());
         }
         check_ask(seeds, self.history.len(), config)?;
@@ -313,7 +444,7 @@ impl Search {
         )?;
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
-        self.pending = Some(Pending {
+        self.pending.push(Pending {
             id,
             slot,
             seed: seeds[index],
@@ -338,7 +469,7 @@ impl Search {
     ) -> Result<Vec<(usize, f32)>, String> {
         let span = crate::tracy::zone(tracy_client::span_location!("trials.multi"));
         span.emit_value(seeds.len() as u64);
-        if self.pending.is_some() {
+        if !self.pending.is_empty() {
             return Err("tell must finish the pending trial before ask".to_string());
         }
         if num_regions == 0 || seeds_per_region == 0 {
@@ -415,7 +546,7 @@ impl Search {
         let span = crate::tracy::zone(tracy_client::span_location!("trials.tree"));
         span.emit_value(seeds.len() as u64);
         tree::check(centers, region_centers, num_regions)?;
-        if self.pending.is_some() {
+        if !self.pending.is_empty() {
             return Err("tell must finish the pending trial before ask".to_string());
         }
         let expected = num_regions
@@ -526,6 +657,38 @@ impl Search {
         self.engine.read(pending.slot, self.row_bytes)
     }
 
+    /// Borrow the pending packed row through its CUDA device address.
+    ///
+    /// The returned address is owned by this search and becomes invalid when
+    /// the search is dropped. The CUDA stream is synchronized before return.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    pub fn device_row(&self, trial: Trial) -> Result<(u64, usize, usize), String> {
+        let pending = self.pending_for(trial)?;
+        if !pending.materialized {
+            return Err("lazy trial row must be materialized before CUDA export".to_string());
+        }
+        match &self.engine {
+            Engine::Cuda(engine) => engine.device_row(pending.slot),
+            _ => Err("pending row is not stored on CUDA".to_string()),
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    pub fn device_batch(&self, trials: &[Trial]) -> Result<Vec<(u64, usize, usize)>, String> {
+        let mut slots = Vec::with_capacity(trials.len());
+        for trial in trials {
+            let pending = self.pending_for(*trial)?;
+            if !pending.materialized {
+                return Err("lazy trial row must be materialized before CUDA export".to_string());
+            }
+            slots.push(pending.slot);
+        }
+        match &self.engine {
+            Engine::Cuda(engine) => engine.device_rows(&slots),
+            _ => Err("pending rows are not stored on CUDA".to_string()),
+        }
+    }
+
     /// Materialize a lazily selected trial into its resident row slot.
     ///
     /// Calling this for a trial returned by [`Search::ask`] is a no-op. Lazy
@@ -544,7 +707,8 @@ impl Search {
             pending.length,
         )?;
         self.pending
-            .as_mut()
+            .iter_mut()
+            .find(|candidate| candidate.id == trial.id)
             .expect("the pending trial was validated above")
             .materialized = true;
         Ok(())
@@ -584,7 +748,7 @@ impl Search {
         if accept {
             self.base = pending.slot;
         }
-        self.pending = None;
+        self.pending.retain(|candidate| candidate.id != trial.id);
         Ok(())
     }
 
@@ -594,6 +758,19 @@ impl Search {
 
     pub fn history_capacity(&self) -> usize {
         self.capacity
+    }
+
+    /// Begin a new trust-region generation around the current incumbent.
+    pub(crate) fn restart(&mut self, value: f32) -> Result<(), String> {
+        if !self.pending.is_empty() {
+            return Err("tell must finish the pending trial before restart".to_string());
+        }
+        self.history.clear();
+        self.history.push_back(Record {
+            slot: self.base,
+            value,
+        });
+        Ok(())
     }
 
     pub fn row_bytes(&self) -> usize {
@@ -607,7 +784,7 @@ impl Search {
     /// The shortlist is allowed to contain at most `history_capacity()` rows;
     /// one additional device slot remains free for the next generated trial.
     pub fn replace_history(&mut self, rows: &[u8], values: &[f32]) -> Result<(), String> {
-        if self.pending.is_some() {
+        if !self.pending.is_empty() {
             return Err("tell must finish the pending trial before replacing history".to_string());
         }
         if values.is_empty() {
@@ -664,7 +841,7 @@ impl Search {
     where
         F: FnMut(ObservationId) -> Result<Vec<u8>, String>,
     {
-        if self.pending.is_some() {
+        if !self.pending.is_empty() {
             return Err("tell must finish the pending trial before replacing history".to_string());
         }
         if observations.is_empty() {
@@ -706,18 +883,18 @@ impl Search {
     }
 
     fn pending_for(&self, trial: Trial) -> Result<Pending, String> {
-        match self.pending {
-            Some(pending) if pending.id == trial.id => Ok(pending),
-            Some(_) => Err("trial does not match the pending ask".to_string()),
-            None => Err("there is no pending trial".to_string()),
-        }
+        self.pending
+            .iter()
+            .copied()
+            .find(|pending| pending.id == trial.id)
+            .ok_or_else(|| "trial does not match an outstanding ask".to_string())
     }
 
     fn free_slot(&self) -> Option<usize> {
         (0..self.slots).find(|slot| {
             *slot != self.base
                 && self.history.iter().all(|record| record.slot != *slot)
-                && self.pending.map(|pending| pending.slot) != Some(*slot)
+                && self.pending.iter().all(|pending| pending.slot != *slot)
         })
     }
 }
@@ -823,6 +1000,31 @@ impl Engine {
             Self::Cuda(engine) => {
                 engine.ask(base, history, trial, seeds, leaves, config, materialize_row)
             }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn ask_sparse(
+        &mut self,
+        base: usize,
+        history: &[(usize, f32)],
+        trial: usize,
+        seeds: &[u64],
+        edits: &[SparseEdit],
+        num_pert: usize,
+        leaves: &[Leaf],
+        config: Ask,
+    ) -> Result<(usize, f32), String> {
+        match self {
+            Self::Cpu(engine) => {
+                engine.ask_sparse(base, history, trial, seeds, edits, num_pert, leaves, config)
+            }
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(engine) => {
+                engine.ask_sparse(base, history, trial, seeds, edits, num_pert, leaves, config)
+            }
+            #[allow(unreachable_patterns)]
+            _ => Err("sparse resident trials currently require CPU or CUDA".to_string()),
         }
     }
 
@@ -935,6 +1137,37 @@ impl Cpu {
             self.read_mut(trial_slot).copy_from_slice(&row);
         }
         Ok((best_index, best_score))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn ask_sparse(
+        &mut self,
+        base_slot: usize,
+        history: &[(usize, f32)],
+        trial_slot: usize,
+        seeds: &[u64],
+        edits: &[SparseEdit],
+        num_pert: usize,
+        leaves: &[Leaf],
+        config: Ask,
+    ) -> Result<(usize, f32), String> {
+        let base = self.read(base_slot).to_vec();
+        let rows = history
+            .iter()
+            .map(|&(slot, _)| self.read(slot))
+            .collect::<Vec<_>>();
+        let (index, score) = sparse::select(
+            &base, &rows, history, seeds, edits, num_pert, leaves, config,
+        );
+        let row = sparse::materialize(
+            &base,
+            seeds[index],
+            &edits[index * num_pert..(index + 1) * num_pert],
+            leaves,
+            config.length,
+        );
+        self.read_mut(trial_slot).copy_from_slice(&row);
+        Ok((index, score))
     }
 
     #[allow(clippy::too_many_arguments)]
