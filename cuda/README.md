@@ -62,13 +62,13 @@ python ops/colab_cuda_oxide_smoke.py bench
 python ops/colab_cuda_oxide_smoke.py python
 ```
 
-For the equivalent hosted T4 checks on Modal, run the focused Python gate or
-the full kernel suite:
+For the hosted T4 release gate on Modal, build the pinned toolchain image and
+then validate the CUDA wheel and batched MJX integration:
 
 ```bash
-modal run ops/modal_cuda_oxide_smoke.py::python_smoke
-modal run ops/modal_cuda_oxide_smoke.py::trial_smoke
-modal run ops/modal_cuda_oxide_smoke.py
+cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- image
+cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- \
+  wheel /tmp/ennx-cuda-wheel.whl --mjx
 ```
 
 CUDA events are the authoritative kernel timer. Tracy zones cover the parity

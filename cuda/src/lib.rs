@@ -11,7 +11,7 @@ use cuda_host::embedded::{ArtifactPayloadKind, EmbeddedModuleError, OwnedArtifac
 use ennx_cuda_kernels::trials;
 pub use ennx_cuda_kernels::{
     CenterStep, DenseLeaf, DenseLinearParams, DenseTerm, DenseTile, Leaf, MAX_CENTER_DEPTH,
-    MAX_HISTORY, Seed, Selection, THREADS, Tile,
+    MAX_HISTORY, Seed, Selection, SparseEdit, THREADS, Tile,
 };
 
 pub type CudaResult<T> = Result<T, String>;
@@ -171,6 +171,7 @@ struct Scratch {
     history_capacity: usize,
     candidate_capacity: usize,
     center_capacity: usize,
+    edit_capacity: usize,
     history_slots: DeviceBuffer<u32>,
     outcomes: DeviceBuffer<f32>,
     seeds: DeviceBuffer<Seed>,
@@ -179,6 +180,8 @@ struct Scratch {
     selection: DeviceBuffer<Selection>,
     centers: DeviceBuffer<CenterStep>,
     candidate_centers: DeviceBuffer<u32>,
+    edits: DeviceBuffer<SparseEdit>,
+    base_distances: DeviceBuffer<f32>,
 }
 
 impl Scratch {
@@ -187,6 +190,7 @@ impl Scratch {
             history_capacity: 1,
             candidate_capacity: 1,
             center_capacity: 1,
+            edit_capacity: 1,
             history_slots: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
             outcomes: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
             seeds: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
@@ -195,6 +199,8 @@ impl Scratch {
             selection: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
             centers: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
             candidate_centers: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
+            edits: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
+            base_distances: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
         })
     }
 
@@ -209,6 +215,8 @@ impl Scratch {
             self.history_slots =
                 DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
             self.outcomes = DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
+            self.base_distances =
+                DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
             self.history_capacity = history_capacity;
         }
         if candidate_capacity > self.candidate_capacity {
@@ -220,6 +228,17 @@ impl Scratch {
             self.candidate_centers =
                 DeviceBuffer::zeroed(stream, candidate_capacity).map_err(cuda_error)?;
             self.candidate_capacity = candidate_capacity;
+        }
+        Ok(())
+    }
+
+    fn ensure_edits(&mut self, stream: &CudaStream, edits: usize) -> CudaResult<()> {
+        let capacity = edits
+            .checked_next_power_of_two()
+            .ok_or("CUDA sparse edit capacity overflow")?;
+        if capacity > self.edit_capacity {
+            self.edits = DeviceBuffer::zeroed(stream, capacity).map_err(cuda_error)?;
+            self.edit_capacity = capacity;
         }
         Ok(())
     }
@@ -243,6 +262,7 @@ pub struct TrialEngine {
     leaves: DeviceBuffer<Leaf>,
     tiles: DeviceBuffer<Tile>,
     row_bytes: usize,
+    row_stride: usize,
     slots: usize,
     scratch: Scratch,
     profiling: bool,
@@ -263,8 +283,12 @@ impl TrialEngine {
         validate_trial_layout(base.len(), leaves, tiles)?;
         let runtime = Runtime::new()?;
         let row_bytes = base.len();
+        let row_stride = row_bytes
+            .checked_add(255)
+            .ok_or("CUDA resident row stride overflow")?
+            & !255;
         let total_bytes = slots
-            .checked_mul(row_bytes)
+            .checked_mul(row_stride)
             .ok_or("CUDA resident row byte count overflow")?;
         let rows = DeviceBuffer::zeroed(&runtime.stream, total_bytes).map_err(cuda_error)?;
         copy_prefix(&rows, base, &runtime.stream)?;
@@ -277,6 +301,7 @@ impl TrialEngine {
             leaves,
             tiles,
             row_bytes,
+            row_stride,
             slots,
             scratch,
             profiling: false,
@@ -355,6 +380,190 @@ impl TrialEngine {
         )?;
         let selection = selections[0];
         Ok((selection.index as usize, scores))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn ask_sparse(
+        &mut self,
+        base_slot: usize,
+        history_slots: &[u32],
+        outcomes: &[f32],
+        trial_slot: usize,
+        seeds: &[u64],
+        draws: &[f32],
+        edits: &[SparseEdit],
+        num_pert: usize,
+        leaves: &[Leaf],
+        config: Ask,
+    ) -> CudaResult<(usize, f32)> {
+        self.check_slot(base_slot)?;
+        self.check_slot(trial_slot)?;
+        if base_slot == trial_slot {
+            return Err("CUDA sparse base and destination slots must differ".to_string());
+        }
+        if history_slots.is_empty() || history_slots.len() > MAX_HISTORY {
+            return Err(format!(
+                "CUDA sparse history must contain 1..={MAX_HISTORY} rows"
+            ));
+        }
+        if history_slots.len() != outcomes.len() {
+            return Err("CUDA sparse history slots and outcomes differ in length".to_string());
+        }
+        if seeds.is_empty() || seeds.len() != draws.len() || num_pert == 0 {
+            return Err("CUDA sparse candidates, draws, and num_pert are invalid".to_string());
+        }
+        if edits.len() != seeds.len().saturating_mul(num_pert) {
+            return Err("CUDA sparse edit count does not match candidates".to_string());
+        }
+        if config.neighbors == 0 || config.neighbors > history_slots.len() {
+            return Err("CUDA sparse neighbor count exceeds resident history".to_string());
+        }
+        if leaves.len() != self.leaves.len() {
+            return Err("CUDA sparse leaf layout changed after construction".to_string());
+        }
+        validate_trial_leaves(self.row_bytes, leaves)?;
+        for &slot in history_slots {
+            self.check_slot(slot as usize)?;
+        }
+        for edit in edits {
+            let leaf = leaves
+                .get(edit.leaf as usize)
+                .ok_or("CUDA sparse edit leaf is out of bounds")?;
+            if edit.element >= leaf.length {
+                return Err("CUDA sparse edit element is out of bounds".to_string());
+            }
+        }
+
+        let history = to_u32(history_slots.len(), "history rows")?;
+        let candidates = to_u32(seeds.len(), "candidate count")?;
+        let num_pert = to_u32(num_pert, "sparse edit count")?;
+        self.scratch
+            .ensure(&self.runtime.stream, history_slots.len(), seeds.len())?;
+        self.scratch
+            .ensure_edits(&self.runtime.stream, edits.len())?;
+        let packed_seeds = seeds
+            .iter()
+            .map(|&seed| Seed {
+                low: seed as u32,
+                high: (seed >> 32) as u32,
+            })
+            .collect::<Vec<_>>();
+        copy_prefix(
+            &self.scratch.history_slots,
+            history_slots,
+            &self.runtime.stream,
+        )?;
+        copy_prefix(&self.scratch.outcomes, outcomes, &self.runtime.stream)?;
+        copy_prefix(&self.scratch.seeds, &packed_seeds, &self.runtime.stream)?;
+        copy_prefix(&self.scratch.draws, draws, &self.runtime.stream)?;
+        copy_prefix(&self.scratch.edits, edits, &self.runtime.stream)?;
+        copy_prefix(&self.leaves, leaves, &self.runtime.stream)?;
+
+        let base_launch = self
+            .runtime
+            .module
+            .prepare_base_distance(LaunchConfig1D::new(history, THREADS, 0))
+            .map_err(cuda_error)?;
+        let score_launch = self
+            .runtime
+            .module
+            .prepare_score_sparse(LaunchConfig1D::new(candidates, THREADS, 0))
+            .map_err(cuda_error)?;
+        let pick_launch = self
+            .runtime
+            .module
+            .prepare_pick_trial(LaunchConfig1D::new(1, THREADS, 0))
+            .map_err(cuda_error)?;
+        self.runtime
+            .module
+            .base_distance(
+                &self.runtime.stream,
+                &base_launch,
+                &self.rows,
+                &self.scratch.history_slots,
+                &self.leaves,
+                &mut self.scratch.base_distances,
+                to_u32(self.row_stride, "row stride")?,
+                history,
+                to_u32(base_slot, "base slot")?,
+            )
+            .map_err(cuda_error)?;
+        self.runtime
+            .module
+            .score_sparse(
+                &self.runtime.stream,
+                &score_launch,
+                &self.rows,
+                &self.scratch.history_slots,
+                &self.scratch.outcomes,
+                &self.scratch.seeds,
+                &self.scratch.draws,
+                &self.leaves,
+                &self.scratch.edits,
+                &self.scratch.base_distances,
+                &mut self.scratch.scores,
+                to_u32(self.row_stride, "row stride")?,
+                history,
+                candidates,
+                num_pert,
+                to_u32(base_slot, "base slot")?,
+                to_u32(config.neighbors, "neighbors")?,
+                config.acquisition,
+                config.epistemic_scale,
+                config.aleatoric_scale,
+                config.y_scale,
+                config.beta,
+            )
+            .map_err(cuda_error)?;
+        self.runtime
+            .module
+            .pick_trial(
+                &self.runtime.stream,
+                &pick_launch,
+                &self.scratch.scores,
+                &mut self.scratch.selection,
+                1,
+                candidates,
+            )
+            .map_err(cuda_error)?;
+
+        let source = self.rows.cu_deviceptr() + (base_slot * self.row_stride) as u64;
+        let destination = self.rows.cu_deviceptr() + (trial_slot * self.row_stride) as u64;
+        unsafe {
+            cuda_core::memory::memcpy_dtod_async(
+                destination,
+                source,
+                self.row_bytes,
+                self.runtime.stream.cu_stream(),
+            )
+            .map_err(cuda_error)?;
+        }
+        let write_launch = self
+            .runtime
+            .module
+            .prepare_write_sparse(LaunchConfig1D::new(1, 1, 0))
+            .map_err(cuda_error)?;
+        self.runtime
+            .module
+            .write_sparse(
+                &self.runtime.stream,
+                &write_launch,
+                &mut self.rows,
+                &self.scratch.seeds,
+                &self.scratch.selection,
+                &self.leaves,
+                &self.scratch.edits,
+                to_u32(self.row_stride, "row stride")?,
+                to_u32(trial_slot, "trial slot")?,
+                num_pert,
+            )
+            .map_err(cuda_error)?;
+        self.runtime.context.check_err().map_err(cuda_error)?;
+        let selection = read_prefix(&self.scratch.selection, &self.runtime.stream, 1)?[0];
+        if selection.index >= candidates {
+            return Err("CUDA sparse selection is out of bounds".to_string());
+        }
+        Ok((selection.index as usize, selection.score))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -548,7 +757,7 @@ impl TrialEngine {
                 &self.scratch.centers,
                 &self.scratch.candidate_centers,
                 &mut self.scratch.scores,
-                to_u32(self.row_bytes, "row bytes")?,
+                to_u32(self.row_stride, "row stride")?,
                 history,
                 candidates,
                 to_u32(base_slot, "base slot")?,
@@ -663,7 +872,7 @@ impl TrialEngine {
         self.check_slot(slot)?;
         self.runtime.stream.synchronize().map_err(cuda_error)?;
         let mut row = vec![0_u8; self.row_bytes];
-        let source = self.rows.cu_deviceptr() + (slot * self.row_bytes) as u64;
+        let source = self.rows.cu_deviceptr() + (slot * self.row_stride) as u64;
         unsafe {
             cuda_core::memory::memcpy_dtoh_async(
                 row.as_mut_ptr(),
@@ -677,6 +886,31 @@ impl TrialEngine {
         Ok(row)
     }
 
+    /// Return a synchronized device pointer to a resident row.
+    ///
+    /// The pointer remains valid only while this engine is alive. Callers must
+    /// retain the engine owner for the lifetime of every foreign GPU view.
+    pub fn device_row(&self, slot: usize) -> CudaResult<(u64, usize, usize)> {
+        Ok(self.device_rows(&[slot])?[0])
+    }
+
+    /// Return synchronized device pointers to several resident rows.
+    pub fn device_rows(&self, slots: &[usize]) -> CudaResult<Vec<(u64, usize, usize)>> {
+        for &slot in slots {
+            self.check_slot(slot)?;
+        }
+        self.runtime.stream.synchronize().map_err(cuda_error)?;
+        slots
+            .iter()
+            .map(|slot| {
+                let offset = slot
+                    .checked_mul(self.row_stride)
+                    .ok_or("CUDA row pointer offset overflow")?;
+                Ok((self.rows.cu_deviceptr() + offset as u64, self.row_bytes, 0))
+            })
+            .collect()
+    }
+
     pub fn write(&mut self, slot: usize, row: &[u8]) -> CudaResult<()> {
         self.check_slot(slot)?;
         if row.len() != self.row_bytes {
@@ -687,7 +921,7 @@ impl TrialEngine {
             ));
         }
         self.runtime.stream.synchronize().map_err(cuda_error)?;
-        let destination = self.rows.cu_deviceptr() + (slot * self.row_bytes) as u64;
+        let destination = self.rows.cu_deviceptr() + (slot * self.row_stride) as u64;
         unsafe {
             cuda_core::memory::memcpy_htod_sync(destination, row.as_ptr(), row.len())
                 .map_err(cuda_error)
@@ -714,7 +948,7 @@ impl TrialEngine {
                 &self.scratch.selection,
                 &self.leaves,
                 &self.tiles,
-                to_u32(self.row_bytes, "row bytes")?,
+                to_u32(self.row_stride, "row stride")?,
                 to_u32(base_slot, "base slot")?,
                 to_u32(trial_slot, "trial slot")?,
             )

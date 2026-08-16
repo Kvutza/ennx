@@ -1,4 +1,4 @@
-use super::{make_steps, make_tiles, Ask, Center, Leaf, Step, Tile};
+use super::{make_steps, make_tiles, Ask, Center, Leaf, SparseEdit, Step, Tile};
 
 pub(super) struct Engine {
     inner: ennx_cuda::TrialEngine,
@@ -60,6 +60,58 @@ impl Engine {
             materialize_row,
         )?;
         Ok((index, score))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn ask_sparse(
+        &mut self,
+        base_slot: usize,
+        history: &[(usize, f32)],
+        trial_slot: usize,
+        seeds: &[u64],
+        edits: &[SparseEdit],
+        num_pert: usize,
+        leaves: &[Leaf],
+        config: Ask,
+    ) -> Result<(usize, f32), String> {
+        let history_slots = history
+            .iter()
+            .map(|&(slot, _)| {
+                u32::try_from(slot).map_err(|_| "CUDA history slot exceeds u32".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let outcomes = history.iter().map(|&(_, value)| value).collect::<Vec<_>>();
+        let draws = crate::weights::thompson_draws(seeds.len(), config.seed);
+        let steps = make_steps(leaves, config.length)
+            .into_iter()
+            .map(cuda_leaf)
+            .collect::<Vec<_>>();
+        let edits = edits
+            .iter()
+            .map(|edit| ennx_cuda::SparseEdit {
+                leaf: edit.leaf,
+                element: edit.element,
+            })
+            .collect::<Vec<_>>();
+        self.inner.ask_sparse(
+            base_slot,
+            &history_slots,
+            &outcomes,
+            trial_slot,
+            seeds,
+            &draws,
+            &edits,
+            num_pert,
+            &steps,
+            ennx_cuda::Ask {
+                neighbors: config.neighbors,
+                acquisition: crate::weights::acquisition_code(config.acquisition),
+                epistemic_scale: config.epistemic_scale,
+                aleatoric_scale: config.aleatoric_scale,
+                y_scale: config.y_scale,
+                beta: config.beta,
+            },
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -200,6 +252,14 @@ impl Engine {
 
     pub(super) fn read(&self, slot: usize) -> Result<Vec<u8>, String> {
         self.inner.read(slot)
+    }
+
+    pub(super) fn device_row(&self, slot: usize) -> Result<(u64, usize, usize), String> {
+        self.inner.device_row(slot)
+    }
+
+    pub(super) fn device_rows(&self, slots: &[usize]) -> Result<Vec<(u64, usize, usize)>, String> {
+        self.inner.device_rows(slots)
     }
 
     pub(super) fn write(&mut self, slot: usize, row: &[u8]) -> Result<(), String> {

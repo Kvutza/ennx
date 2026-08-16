@@ -179,3 +179,59 @@ def test_colab():
         "git clone",
     ):
         assert removed not in source
+
+
+def test_mjx_colab():
+    repo_root = Path(__file__).resolve().parent.parent
+    path = repo_root / "examples/colab_mjx_humanoid_ennx.ipynb"
+    notebook = json.loads(path.read_text(encoding="utf-8"))
+
+    assert notebook["nbformat"] == 4
+    assert notebook["metadata"]["accelerator"] == "GPU"
+    assert notebook["metadata"]["colab"]["gpuType"] == "T4"
+
+    code = []
+    for cell in notebook["cells"]:
+        if cell["cell_type"] != "code":
+            continue
+        assert cell["execution_count"] is None
+        assert cell["outputs"] == []
+        source = "".join(cell["source"])
+        compile(source, f"{path.name}:{cell['id']}", "exec")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                assert len(node.name.split("_")) <= 2
+        code.append(source)
+
+    source = "\n".join(code)
+    for required in (
+        "cuda-v0.1.4",
+        "ennx-0.1.4%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
+        "mujoco==3.6.0",
+        "mujoco-mjx==3.6.0",
+        "from mujoco import mjx",
+        "mjx.put_model",
+        "mjx.step",
+        "PARAMETER_COUNT",
+        "900_000 <= PARAMETER_COUNT <= 1_000_000",
+        "TurboSearch",
+        "HISTORY_CAPACITY = 8",
+        "BATCH_ARMS = 4",
+        "CANDIDATES = 8",
+        'backend="cuda"',
+        "search.ask_batch(",
+        "search.device_batch(",
+        "search.tell_batch(",
+        "cp.cuda.UnownedMemory",
+        "jax.dlpack.from_dlpack",
+        "jax.vmap(score_policy)",
+        "mujoco.Renderer",
+        "media.show_video",
+        '"--no-deps"',
+        '"--constraint"',
+        'metadata.version("numpy")',
+    ):
+        assert required in source
+
+    assert "search.row()" not in source

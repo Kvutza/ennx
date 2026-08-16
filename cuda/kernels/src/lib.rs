@@ -39,6 +39,16 @@ unsafe impl cuda_core::DeviceCopy for Selection {}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
+pub struct SparseEdit {
+    pub leaf: u32,
+    pub element: u32,
+}
+
+// SAFETY: SparseEdit is repr(C) and contains only DeviceCopy scalars.
+unsafe impl cuda_core::DeviceCopy for SparseEdit {}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct Leaf {
     pub byte_offset: u32,
     pub element_offset: u32,
@@ -237,6 +247,22 @@ fn perturb_code(
 }
 
 #[inline(always)]
+fn sparse_code(code: u32, seed: Seed, element: u32, leaf: Leaf) -> u32 {
+    if leaf.whole == 0 && leaf.threshold == 0 {
+        return code;
+    }
+    perturb_code(
+        code,
+        seed.low,
+        seed.high,
+        element,
+        leaf.bits,
+        leaf.whole.max(1),
+        0,
+    )
+}
+
+#[inline(always)]
 fn resolve_center(
     mut code: u32,
     centers: &[CenterStep],
@@ -357,7 +383,7 @@ pub mod trials {
         centers: &[CenterStep],
         candidate_centers: &[u32],
         mut scores: DisjointSlice<f32>,
-        row_bytes: u32,
+        row_stride: u32,
         history: u32,
         candidates: u32,
         base_slot: u32,
@@ -389,7 +415,7 @@ pub mod trials {
         }
         thread::sync_threads();
 
-        let base_offset = base_slot as usize * row_bytes as usize;
+        let base_offset = base_slot as usize * row_stride as usize;
         let seed = seeds[candidate as usize];
         let center = if center_count == 0 {
             u32::MAX
@@ -462,7 +488,7 @@ pub mod trials {
                         let mut sum = 0.0_f32;
                         if h < history {
                             let observation_offset =
-                                history_slots[h as usize] as usize * row_bytes as usize;
+                                history_slots[h as usize] as usize * row_stride as usize;
                             let mut local = lane;
                             while local < tile_bytes {
                                 let observed = rows[observation_offset
@@ -528,7 +554,7 @@ pub mod trials {
                         let mut sum = 0.0_f32;
                         if h < history {
                             let observation_offset =
-                                history_slots[h as usize] as usize * row_bytes as usize;
+                                history_slots[h as usize] as usize * row_stride as usize;
                             let mut local = lane;
                             while local < tile_elements {
                                 let observed_code =
@@ -619,6 +645,181 @@ pub mod trials {
             unsafe {
                 *scores.get_unchecked_mut(candidate as usize) = score;
             }
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn base_distance(
+        rows: &[u8],
+        history_slots: &[u32],
+        leaves: &[Leaf],
+        mut distances: DisjointSlice<f32>,
+        row_stride: u32,
+        history: u32,
+        base_slot: u32,
+    ) {
+        static mut PARTIALS: SharedArray<f32, 256> = SharedArray::UNINIT;
+        let observation = thread::blockIdx_x();
+        if observation >= history {
+            return;
+        }
+        let thread_index = thread::threadIdx_x();
+        let base_offset = base_slot as usize * row_stride as usize;
+        let row_offset = history_slots[observation as usize] as usize * row_stride as usize;
+        let mut sum = 0.0_f32;
+        let mut leaf_index = 0usize;
+        while leaf_index < leaves.len() {
+            let leaf = leaves[leaf_index];
+            let mut element = thread_index;
+            while element < leaf.length {
+                let delta = decode_code(code_at(rows, base_offset, leaf, element), leaf)
+                    - decode_code(code_at(rows, row_offset, leaf, element), leaf);
+                sum += delta * delta * leaf.weight;
+                element += THREADS;
+            }
+            leaf_index += 1;
+        }
+        unsafe { PARTIALS[thread_index as usize] = sum };
+        thread::sync_threads();
+        let mut width = THREADS / 2;
+        while width > 0 {
+            if thread_index < width {
+                unsafe {
+                    PARTIALS[thread_index as usize] += PARTIALS[(thread_index + width) as usize];
+                }
+            }
+            thread::sync_threads();
+            width /= 2;
+        }
+        if thread_index == 0 {
+            unsafe {
+                *distances.get_unchecked_mut(observation as usize) = PARTIALS[0];
+            }
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn score_sparse(
+        rows: &[u8],
+        history_slots: &[u32],
+        outcomes: &[f32],
+        seeds: &[Seed],
+        draws: &[f32],
+        leaves: &[Leaf],
+        edits: &[SparseEdit],
+        base_distances: &[f32],
+        mut scores: DisjointSlice<f32>,
+        row_stride: u32,
+        history: u32,
+        candidates: u32,
+        num_pert: u32,
+        base_slot: u32,
+        neighbors: u32,
+        acquisition: u32,
+        epistemic_scale: f32,
+        aleatoric_scale: f32,
+        y_scale: f32,
+        beta: f32,
+    ) {
+        static mut DISTANCES: SharedArray<f32, MAX_HISTORY> = SharedArray::UNINIT;
+        static mut NEAREST_DISTANCES: SharedArray<f32, MAX_HISTORY> = SharedArray::UNINIT;
+        static mut NEAREST_INDICES: SharedArray<u32, MAX_HISTORY> = SharedArray::UNINIT;
+        let candidate = thread::blockIdx_x();
+        if candidate >= candidates {
+            return;
+        }
+        let thread_index = thread::threadIdx_x();
+        if thread_index < history {
+            let observation_offset =
+                history_slots[thread_index as usize] as usize * row_stride as usize;
+            let base_offset = base_slot as usize * row_stride as usize;
+            let seed = seeds[candidate as usize];
+            let mut distance = base_distances[thread_index as usize];
+            let mut edit_index = 0;
+            while edit_index < num_pert {
+                let edit = edits[(candidate * num_pert + edit_index) as usize];
+                let leaf = leaves[edit.leaf as usize];
+                let base_code = code_at(rows, base_offset, leaf, edit.element);
+                let observed_code = code_at(rows, observation_offset, leaf, edit.element);
+                let candidate_code =
+                    sparse_code(base_code, seed, leaf.element_offset + edit.element, leaf);
+                let base_delta = decode_code(base_code, leaf) - decode_code(observed_code, leaf);
+                let candidate_delta =
+                    decode_code(candidate_code, leaf) - decode_code(observed_code, leaf);
+                distance +=
+                    (candidate_delta * candidate_delta - base_delta * base_delta) * leaf.weight;
+                edit_index += 1;
+            }
+            unsafe { DISTANCES[thread_index as usize] = distance.max(0.0) };
+        }
+        thread::sync_threads();
+        if thread_index == 0 {
+            let mut k = 0;
+            while k < neighbors {
+                unsafe {
+                    NEAREST_DISTANCES[k as usize] = f32::INFINITY;
+                    NEAREST_INDICES[k as usize] = 0;
+                }
+                k += 1;
+            }
+            let mut h = 0;
+            while h < history {
+                let distance = unsafe { DISTANCES[h as usize] };
+                let mut insert_at = neighbors;
+                let mut nearest = 0;
+                while nearest < neighbors {
+                    let nearest_distance = unsafe { NEAREST_DISTANCES[nearest as usize] };
+                    let nearest_index = unsafe { NEAREST_INDICES[nearest as usize] };
+                    if distance < nearest_distance
+                        || (distance == nearest_distance && h < nearest_index)
+                    {
+                        insert_at = nearest;
+                        break;
+                    }
+                    nearest += 1;
+                }
+                if insert_at < neighbors {
+                    let mut move_index = neighbors - 1;
+                    while move_index > insert_at {
+                        unsafe {
+                            NEAREST_DISTANCES[move_index as usize] =
+                                NEAREST_DISTANCES[(move_index - 1) as usize];
+                            NEAREST_INDICES[move_index as usize] =
+                                NEAREST_INDICES[(move_index - 1) as usize];
+                        }
+                        move_index -= 1;
+                    }
+                    unsafe {
+                        NEAREST_DISTANCES[insert_at as usize] = distance;
+                        NEAREST_INDICES[insert_at as usize] = h;
+                    }
+                }
+                h += 1;
+            }
+            let mut weight_sum = 0.0_f32;
+            let mut weighted_value = 0.0_f32;
+            k = 0;
+            while k < neighbors {
+                let distance = unsafe { NEAREST_DISTANCES[k as usize] };
+                let outcome = outcomes[unsafe { NEAREST_INDICES[k as usize] } as usize];
+                let variance = 1.0e-9 + epistemic_scale * distance + aleatoric_scale;
+                let weight = 1.0 / variance.max(1.0e-12);
+                weight_sum += weight;
+                weighted_value += weight * outcome;
+                k += 1;
+            }
+            let mean = weighted_value / weight_sum.max(1.0e-12);
+            let se = (1.0 / weight_sum.max(1.0e-12)).sqrt() * y_scale;
+            let score = match acquisition {
+                1 => mean + se * draws[candidate as usize],
+                2 => mean + se,
+                _ => mean + beta * se,
+            };
+            unsafe { *scores.get_unchecked_mut(candidate as usize) = score };
         }
     }
 
@@ -720,7 +921,7 @@ pub mod trials {
         selection: &[Selection],
         leaves: &[Leaf],
         tiles: &[Tile],
-        row_bytes: u32,
+        row_stride: u32,
         base_slot: u32,
         trial_slot: u32,
     ) {
@@ -732,8 +933,8 @@ pub mod trials {
         let leaf = leaves[tile.leaf as usize];
         let seed = seeds[selection[0].index as usize];
         let thread_index = thread::threadIdx_x();
-        let base_offset = base_slot as usize * row_bytes as usize;
-        let trial_offset = trial_slot as usize * row_bytes as usize;
+        let base_offset = base_slot as usize * row_stride as usize;
+        let trial_offset = trial_slot as usize * row_stride as usize;
         let rows_ptr = rows.as_mut_ptr() as *const u8;
 
         if leaf.bits == 4 {
@@ -792,6 +993,60 @@ pub mod trials {
                 }
                 element += THREADS;
             }
+        }
+    }
+
+    #[kernel]
+    #[launch_bounds(1)]
+    #[launch_contract(domain = 1, block = (1, 1, 1), dynamic_shared = 0)]
+    pub fn write_sparse(
+        mut rows: DisjointSlice<u8>,
+        seeds: &[Seed],
+        selection: &[Selection],
+        leaves: &[Leaf],
+        edits: &[SparseEdit],
+        row_stride: u32,
+        trial_slot: u32,
+        num_pert: u32,
+    ) {
+        if thread::index_1d().get() != 0 {
+            return;
+        }
+        let candidate = selection[0].index;
+        let seed = seeds[candidate as usize];
+        let trial_offset = trial_slot as usize * row_stride as usize;
+        let rows_ptr = rows.as_mut_ptr() as *const u8;
+        let mut edit_index = 0;
+        while edit_index < num_pert {
+            let edit = edits[(candidate * num_pert + edit_index) as usize];
+            let leaf = leaves[edit.leaf as usize];
+            let byte = trial_offset
+                + leaf.byte_offset as usize
+                + if leaf.bits == 4 {
+                    (edit.element / 2) as usize
+                } else {
+                    edit.element as usize
+                };
+            let current = unsafe { rows_ptr.add(byte).read() };
+            let shift = if leaf.bits == 4 {
+                (edit.element & 1) * 4
+            } else {
+                0
+            };
+            let code = if leaf.bits == 4 {
+                u32::from((current >> shift) & 0x0f)
+            } else {
+                u32::from(current)
+            };
+            let value = sparse_code(code, seed, leaf.element_offset + edit.element, leaf);
+            unsafe {
+                *rows.get_unchecked_mut(byte) = if leaf.bits == 4 {
+                    (current & !(0x0f << shift)) | ((value as u8) << shift)
+                } else {
+                    value as u8
+                };
+            }
+            edit_index += 1;
         }
     }
 

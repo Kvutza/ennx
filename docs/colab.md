@@ -21,6 +21,23 @@ selected packed-row transfer as the remaining host boundary. It does not clone
 the repository, replace Colab's JAX stack, or install Rust, LLVM, and CUDA
 compiler tooling.
 
+For the high-dimensional control experiment, open
+[`examples/colab_mjx_humanoid_ennx.ipynb`](https://colab.research.google.com/github/Kvutza/ennx/blob/cuda/examples/colab_mjx_humanoid_ennx.ipynb).
+It runs a roughly 972,000-parameter JAX policy in a pure MJX Humanoid simulation,
+optimizes packed policy mutations with the ENNx CUDA backend, and renders the
+incumbent policy to an MP4. The notebook installs the released ENNx wheel and
+`mujoco-mjx`; it does not require a source checkout or Rust toolchain.
+`ennx.experimental.TurboSearch` owns acceptance and TuRBO trust-region updates
+in Rust while packed history, candidate scoring, and selected rows remain on
+the CUDA backend. The Python API exports a synchronized batch of pending-row
+device addresses; CuPy retains the Rust search as their allocation owner and
+passes all rows to one vectorized JAX/MJX evaluation through DLPack without
+staging policies in NumPy. Rewards return together through `tell_batch`.
+The wheel is installed without dependency resolution so Colab's compatible
+NumPy, SciPy, and CUDA-enabled JAX stack remains unchanged. The MJX dependency
+install is also constrained to the numerical package versions supplied by the
+fresh runtime.
+
 The development notebook only orchestrates the environment. Toolchain setup lives in
 `ops/colab_cuda_oxide_smoke.py`, and CUDA or ENNx implementation work belongs in
 normal repository source files. This keeps experiments reviewable and prevents
@@ -35,7 +52,7 @@ ABI tags; a `cp313` extension must never be relabeled as `cp312`.
 Install the CUDA-enabled Linux wheel directly from GitHub:
 
 ```python
-!pip install "https://github.com/Kvutza/ennx/releases/download/cuda-v0.1.0/ennx-0.1.0%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl"
+!pip install "https://github.com/Kvutza/ennx/releases/download/cuda-v0.1.5/ennx-0.1.5%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl"
 ```
 
 The Colab gate is complete when a clean hosted runtime can:
@@ -71,7 +88,20 @@ Python resident session selects it with `backend="cuda"`.
 
 The compiler revision, Rust nightly, and LLVM major version are pinned in
 `ops/cuda_oxide_toolchain.py`. Update those pins deliberately and rerun both the
-Modal and Colab smoke tests before accepting a toolchain change.
+Modal release gate and Colab checks before accepting a toolchain change.
+
+Build the pinned CUDA-Oxide Modal image from Rust using:
+
+```bash
+cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- image
+```
+
+Run the release wheel gate with the real batched MJX integration check using:
+
+```bash
+cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- \
+  wheel /tmp/ennx-cuda-wheel.whl --mjx
+```
 
 Colab runtimes and GPU assignments change over time. Record the notebook's
 runtime fingerprint with every benchmark result instead of treating "Colab T4"

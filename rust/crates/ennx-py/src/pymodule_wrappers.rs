@@ -84,6 +84,8 @@ pub fn pymodule_optimizer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::py_optimizer::PyMultiTrustRegion>()?;
     m.add_class::<crate::py_optimizer::PyTelemetry>()?;
     m.add_class::<crate::py_weights::PyWeightSearch>()?;
+    m.add_class::<crate::py_weights::PyTurboSearch>()?;
+    m.add_class::<crate::py_weights::PyTurboTrial>()?;
     m.add_class::<crate::py_weights::PyDenseLinear>()?;
     m.add_class::<crate::py_weights::PyBpannHistory>()?;
     m.add_function(wrap_pyfunction!(

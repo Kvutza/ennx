@@ -14,7 +14,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-VERSION = "0.1.0+cuda75"
+VERSION = "0.1.5+cuda75"
 TAG = "cp312-cp312-manylinux_2_28_x86_64"
 
 

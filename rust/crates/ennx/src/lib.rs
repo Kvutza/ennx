@@ -46,6 +46,7 @@ pub mod traits;
 mod trials;
 pub mod trust_region;
 pub mod trust_region_config;
+mod turbo_search;
 pub mod util;
 mod weights;
 pub mod y_bounds;

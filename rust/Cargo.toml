@@ -3,6 +3,7 @@ members = [
     "crates/bpann",
     "crates/ennx",
     "crates/ennx-py",
+    "crates/modal-runner",
 ]
 resolver = "2"
 
