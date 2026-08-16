@@ -1,0 +1,9 @@
+filegroup(
+    name = "source",
+    srcs = glob(["**/*.rs"]) + [
+        "Cargo.lock",
+        "Cargo.toml",
+        "kernels/Cargo.toml",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -53,17 +53,40 @@ in the `sm_75` baseline.
 For Colab, run the wrappers from the repository root:
 
 ```bash
-python ops/colab_cuda_oxide_smoke.py setup
-python ops/colab_cuda_oxide_smoke.py doctor
-python ops/colab_cuda_oxide_smoke.py ennx
-python ops/colab_cuda_oxide_smoke.py resident
-python ops/colab_cuda_oxide_smoke.py sanitize
-python ops/colab_cuda_oxide_smoke.py bench
-python ops/colab_cuda_oxide_smoke.py python
+python ops/colab_cuda.py setup
+python ops/colab_cuda.py doctor
+python ops/colab_cuda.py ennx
+python ops/colab_cuda.py resident
+python ops/colab_cuda.py sanitize
+python ops/colab_cuda.py bench
+python ops/colab_cuda.py python
+```
+
+The Buck2 wheel target is the development and release build entry point on a
+Linux x86-64 T4 runtime:
+
+```bash
+./buck2w --isolation-dir cuda build //:cuda-wheel \
+  --target-platforms //:linux-x86_64-platform \
+  --local-only --num-threads 4 --show-output
+```
+
+This action pins `nightly-2026-04-03`, compiles the CUDA-Oxide device crate for
+`sm_75`, embeds that artifact in the Python extension, and packages the CPython
+3.12 wheel. It requires `cargo-oxide` and the pinned nightly to be installed in
+the execution environment; the Colab setup cell provides both.
+
+After JAX is available on the T4 runtime, build the wheel and verify direct
+BF16 DLPack import, resident perturbation, and export with one target:
+
+```bash
+./buck2w --isolation-dir cuda build //:cuda-parity \
+  --target-platforms //:linux-x86_64-platform \
+  --local-only --num-threads 4 --show-output
 ```
 
 For the hosted T4 release gate on Modal, build the pinned toolchain image and
-then validate the CUDA wheel and batched MJX integration:
+then run the Buck2 CUDA wheel target, parity target, and batched MJX integration:
 
 ```bash
 cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- image

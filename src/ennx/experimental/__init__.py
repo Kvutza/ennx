@@ -15,6 +15,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "MultiTrustRegion": (".._rust", "MultiTrustRegion"),
     "WeightSearch": (".._rust", "WeightSearch"),
     "BpannHistory": (".._rust", "BpannHistory"),
+    "Bf16Tree": (".._rust", "Bf16Tree"),
     "SharingPolicy": (".multi_trust_region", "SharingPolicy"),
     "RegionBatch": (".multi_trust_region", "RegionBatch"),
     "RegionCandidate": (".multi_trust_region", "RegionCandidate"),
@@ -54,6 +55,7 @@ def __getattr__(name: str):
 
 __all__: list[str] = [
     "BpannHistory",
+    "Bf16Tree",
     "CandidateProposal",
     "DenseLinear",
     "ModelPackage",

@@ -51,7 +51,8 @@ fn tool_image() -> Result<Image> {
     );
     let image = Image::from_registry("nvidia/cuda:12.8.1-devel-rockylinux8")
         .run_commands([
-            "dnf install -y ca-certificates curl gcc gcc-c++ git libffi-devel make patch pkgconf-pkg-config xz && dnf clean all".to_string(),
+            "dnf install -y ca-certificates curl gcc gcc-c++ libffi-devel make patch pkgconf-pkg-config xz && dnf clean all".to_string(),
+            "curl -fsSL https://github.com/jj-vcs/jj/releases/download/v0.41.0/jj-v0.41.0-x86_64-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin jj".to_string(),
             format!(
                 "curl -fsSL https://pixi.sh/install.sh | bash && /root/.pixi/bin/pixi init /opt/tool --channel conda-forge && /root/.pixi/bin/pixi add --manifest-path /opt/tool/pixi.toml 'llvmdev=21.*' 'clang=21.*' 'libclang=21.*' 'lld=21.*' 'python=3.12.*' pip && ln -sf {llvm}/bin/python /usr/local/bin/python && ln -sf {llvm}/bin/python /usr/local/bin/python3"
             ),
@@ -59,7 +60,7 @@ fn tool_image() -> Result<Image> {
                 "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain {RUST_NIGHTLY} && /root/.cargo/bin/rustup component add --toolchain {RUST_NIGHTLY} rust-src rustc-dev llvm-tools rust-analyzer clippy rustfmt"
             ),
             format!(
-                "git init {cuda} && git -C {cuda} remote add origin https://github.com/NVlabs/cuda-oxide.git && git -C {cuda} fetch --depth 1 origin {CUDA_REV} && git -C {cuda} checkout --detach FETCH_HEAD && PATH={path} LLVM_CONFIG_PATH={llvm}/bin/llvm-config LIBCLANG_PATH={llvm}/lib /root/.cargo/bin/cargo +{RUST_NIGHTLY} install --path {cuda}/crates/cargo-oxide --locked && cd {cuda} && PATH={path} LLVM_CONFIG_PATH={llvm}/bin/llvm-config LIBCLANG_PATH={llvm}/lib CUDA_OXIDE_LLC={llvm}/bin/llc RUSTUP_TOOLCHAIN={RUST_NIGHTLY} /root/.cargo/bin/cargo oxide setup"
+                "jj git clone https://github.com/NVlabs/cuda-oxide.git {cuda} && jj -R {cuda} edit {CUDA_REV} && PATH={path} LLVM_CONFIG_PATH={llvm}/bin/llvm-config LIBCLANG_PATH={llvm}/lib /root/.cargo/bin/cargo +{RUST_NIGHTLY} install --path {cuda}/crates/cargo-oxide --locked && cd {cuda} && PATH={path} LLVM_CONFIG_PATH={llvm}/bin/llvm-config LIBCLANG_PATH={llvm}/lib CUDA_OXIDE_LLC={llvm}/bin/llc RUSTUP_TOOLCHAIN={RUST_NIGHTLY} /root/.cargo/bin/cargo oxide setup"
             ),
         ])?
         .env([
@@ -122,14 +123,14 @@ fn repo_root() -> Result<PathBuf> {
 
 fn source_tar() -> Result<NamedTempFile> {
     let root = repo_root()?;
-    let files = Command::new("git")
-        .arg("-C")
+    let files = Command::new("jj")
+        .arg("-R")
         .arg(&root)
-        .args(["ls-files", "-co", "--exclude-standard", "-z"])
+        .args(["file", "list", "-r", "@", "-T", "path ++ \"\\x00\""])
         .output()?;
     if !files.status.success() {
         return Err(io::Error::other(format!(
-            "git ls-files failed: {}",
+            "jj file list failed: {}",
             String::from_utf8_lossy(&files.stderr).trim()
         ))
         .into());
@@ -163,24 +164,30 @@ fn source_tar() -> Result<NamedTempFile> {
 }
 
 fn wheel_cmd(mjx: bool) -> String {
-    let mut command = String::from(
-        "set -euo pipefail; cd /opt/ennx/rust; \
-         cargo oxide build --arch sm_75 --device-codegen-crate ennx_cuda_kernels -- \
-         -p ennx-py --features cuda --release; \
-         cd /opt/ennx; \
-         python ops/cuda_python_smoke.py rust/target/release/libennx_rust.so; \
+    let mut command = format!(
+        "set -euo pipefail; cd /opt/ennx; \
          rm -rf /tmp/ennx-wheel /tmp/ennx-wheel-env; \
-         python ops/cuda_wheel.py rust/target/release/libennx_rust.so /tmp/ennx-wheel; \
+         mkdir -p /tmp/ennx-wheel; \
          python -m venv /tmp/ennx-wheel-env; \
-         /tmp/ennx-wheel-env/bin/python -m pip install --quiet \
-         /tmp/ennx-wheel/ennx-0.1.5+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl; \
+         /tmp/ennx-wheel-env/bin/python -m pip install --quiet 'jax[cuda12]'; \
+         export PATH=/tmp/ennx-wheel-env/bin:$PATH; \
+         export XLA_PYTHON_CLIENT_PREALLOCATE=false; \
+         unset LD_LIBRARY_PATH; \
+         PARITY=$(./buck2w --isolation-dir cuda build //:cuda-parity \
+         --target-platforms //:linux-x86_64-platform --local-only --num-threads 4 \
+         --show-full-simple-output); \
+         cat \"$PARITY\"; \
+         ./buck2w --isolation-dir cuda build //:cuda-wheel \
+         --target-platforms //:linux-x86_64-platform --local-only --num-threads 4 \
+         --out {WHEEL_PATH}; \
+         /tmp/ennx-wheel-env/bin/python -m pip install --quiet {WHEEL_PATH}; \
          /tmp/ennx-wheel-env/bin/python ops/cuda_sparse_bench.py",
     );
     if mjx {
         command.push_str(
             "; /tmp/ennx-wheel-env/bin/python -m pip install --quiet \
-             cupy-cuda12x 'jax[cuda12]' mujoco==3.6.0 mujoco-mjx==3.6.0; \
-             /tmp/ennx-wheel-env/bin/python ops/mjx_batch_smoke.py",
+             cupy-cuda12x mujoco==3.6.0 mujoco-mjx==3.6.0; \
+             /tmp/ennx-wheel-env/bin/python ops/mjx_batch.py",
         );
     }
     command

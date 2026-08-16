@@ -1,5 +1,24 @@
 load("//buck2:reindeer_rules.bzl", "app_rust_binary", "app_rust_library")
 
+filegroup(
+    name = "ennx-source",
+    srcs = glob([
+        "examples/**/*.rs",
+        "src/**/*.cl",
+        "src/**/*.cpp",
+        "src/**/*.h",
+        "src/**/*.metal",
+        "src/**/*.rs",
+    ]) + [
+        "build.rs",
+        "Cargo.toml",
+        "LICENSE",
+        "NOTICE",
+        "README.md",
+    ],
+    visibility = ["PUBLIC"],
+)
+
 cxx_library(
     name = "faiss-bridge",
     srcs = ["src/faiss_bridge.cpp"],

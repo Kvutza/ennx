@@ -10,6 +10,9 @@ use metal_crate::Buffer;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 mod metal;
 
+#[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+mod cuda;
+
 /// A BF16 parameter tree whose base weights stay resident across perturbations.
 pub struct Bf16Tree {
     len: usize,
@@ -24,6 +27,8 @@ enum Resident {
     },
     #[cfg(all(target_os = "macos", feature = "metal"))]
     Metal(metal::Resident),
+    #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+    Cuda(cuda::Resident),
 }
 
 impl Bf16Tree {
@@ -55,9 +60,34 @@ impl Bf16Tree {
                 }
             }
             ComputeBackend::OpenCl => return Err("OpenCL BF16 pytree is not available".into()),
-            ComputeBackend::Cuda => return Err("CUDA BF16 pytree is not available yet".into()),
+            ComputeBackend::Cuda => {
+                #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+                {
+                    Resident::Cuda(cuda::Resident::new(&base, &leaves)?)
+                }
+                #[cfg(not(all(feature = "cuda", target_os = "linux", target_arch = "x86_64")))]
+                {
+                    return Err("CUDA BF16 pytree is not available in this build".into());
+                }
+            }
         };
         Ok(Self { len, engine })
+    }
+
+    #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+    pub unsafe fn from_device(
+        pointer: u64,
+        len: usize,
+        leaves: Vec<DenseLeaf>,
+    ) -> Result<Self, String> {
+        if pointer == 0 || len == 0 {
+            return Err("CUDA BF16 pytree requires a non-empty device buffer".into());
+        }
+        validate_leaves(&leaves, Some(len))?;
+        Ok(Self {
+            len,
+            engine: Resident::Cuda(unsafe { cuda::Resident::from_device(pointer, len, &leaves)? }),
+        })
     }
 
     pub fn materialize(&mut self, terms: &[DenseTerm]) -> Result<(), String> {
@@ -70,18 +100,27 @@ impl Bf16Tree {
                 base,
                 candidate,
                 leaves,
-            } => materialize(base, candidate, leaves, terms)?,
+            } => {
+                if let Err(error) = materialize(base, candidate, leaves, terms) {
+                    candidate.clone_from(base);
+                    return Err(error);
+                }
+            }
             #[cfg(all(target_os = "macos", feature = "metal"))]
             Resident::Metal(engine) => engine.materialize(terms)?,
+            #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+            Resident::Cuda(engine) => engine.materialize(terms)?,
         }
         Ok(())
     }
 
-    pub fn candidate(&self) -> Vec<u16> {
+    pub fn candidate(&self) -> Result<Vec<u16>, String> {
         match &self.engine {
-            Resident::Cpu { candidate, .. } => candidate.clone(),
+            Resident::Cpu { candidate, .. } => Ok(candidate.clone()),
             #[cfg(all(target_os = "macos", feature = "metal"))]
-            Resident::Metal(engine) => engine.candidate(),
+            Resident::Metal(engine) => Ok(engine.candidate()),
+            #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+            Resident::Cuda(engine) => engine.candidate(),
         }
     }
 
@@ -98,6 +137,14 @@ impl Bf16Tree {
         match &self.engine {
             Resident::Metal(engine) => Some(engine.buffer()),
             Resident::Cpu { .. } => None,
+        }
+    }
+
+    #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+    pub fn device_ptr(&self, stream: Option<i64>) -> Result<(u64, usize, usize), String> {
+        match &self.engine {
+            Resident::Cuda(engine) => engine.device_ptr(stream),
+            _ => Err("BF16 tree is not resident on CUDA".into()),
         }
     }
 }
@@ -204,7 +251,7 @@ mod tests {
             ComputeBackend::Cpu,
         )
         .unwrap();
-        assert_eq!(tree.candidate(), base);
+        assert_eq!(tree.candidate().unwrap(), base);
     }
 
     #[test]
@@ -220,6 +267,7 @@ mod tests {
             .unwrap();
         assert!(tree
             .candidate()
+            .unwrap()
             .iter()
             .zip(base)
             .all(|(candidate, base)| *candidate != base));
@@ -229,5 +277,21 @@ mod tests {
     fn next_value_stays_finite_at_the_bf16_limits() {
         assert!(decode(next_finite(0x7f7f, true)).is_finite());
         assert!(decode(next_finite(0xff7f, false)).is_finite());
+    }
+
+    #[test]
+    fn rollback_overflow() {
+        let base = vec![encode(1.0)];
+        let mut tree = Bf16Tree::new(
+            base.clone(),
+            vec![DenseLeaf::new(7, 0, 1, f32::MAX).unwrap()],
+            ComputeBackend::Cpu,
+        )
+        .unwrap();
+        let error = tree
+            .materialize(&[DenseTerm::new(11, f32::MAX).unwrap()])
+            .unwrap_err();
+        assert_eq!(error, "BF16 pytree perturbation overflowed FP32");
+        assert_eq!(tree.candidate().unwrap(), base);
     }
 }

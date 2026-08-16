@@ -21,7 +21,7 @@ LLVM_KEY_URL = "https://apt.llvm.org/llvm-snapshot.gpg.key"
 TOOLCHAIN_STATE = Path.home() / ".cache/ennx/cuda-oxide-toolchain.json"
 
 
-def _run(
+def run(
     command: list[str],
     *,
     cwd: Path | None = None,
@@ -33,11 +33,11 @@ def _run(
     return time.monotonic() - started
 
 
-def _capture(command: list[str]) -> str:
+def capture(command: list[str]) -> str:
     return subprocess.check_output(command, text=True).strip()
 
 
-def _fingerprint() -> dict[str, object]:
+def fingerprint() -> dict[str, object]:
     if sys.platform != "linux" or platform.machine() != "x86_64":
         raise RuntimeError("CUDA-Oxide Colab development requires Linux x86_64")
     if shutil.which("nvidia-smi") is None:
@@ -47,18 +47,18 @@ def _fingerprint() -> dict[str, object]:
     return {
         "platform": platform.platform(),
         "python": platform.python_version(),
-        "gpu": _capture(
+        "gpu": capture(
             [
                 "nvidia-smi",
                 "--query-gpu=name,compute_cap,driver_version,memory.total",
                 "--format=csv,noheader",
             ]
         ),
-        "cuda": _capture(["nvcc", "--version"]),
+        "cuda": capture(["nvcc", "--version"]),
     }
 
 
-def _install_system_packages() -> None:
+def install_packages() -> None:
     if os.geteuid() != 0:
         raise RuntimeError("Colab setup expects its default root notebook runtime")
 
@@ -76,14 +76,13 @@ def _install_system_packages() -> None:
         "curl",
         "g++",
         "gcc",
-        "git",
         "gnupg",
         "libc6-dev",
         "make",
         "pkg-config",
     ]
-    _run(["apt-get", "update"])
-    _run(["apt-get", "install", "-y", "--no-install-recommends", *base_packages])
+    run(["apt-get", "update"])
+    run(["apt-get", "install", "-y", "--no-install-recommends", *base_packages])
 
     os_release = {}
     for line in Path("/etc/os-release").read_text().splitlines():
@@ -97,8 +96,8 @@ def _install_system_packages() -> None:
     key_download = Path("/tmp/llvm-snapshot.gpg.key")
     keyring = Path("/usr/share/keyrings/apt.llvm.org.gpg")
     source = Path(f"/etc/apt/sources.list.d/llvm-toolchain-{LLVM_MAJOR}.list")
-    _run(["curl", "-fsSL", LLVM_KEY_URL, "-o", str(key_download)])
-    _run(
+    run(["curl", "-fsSL", LLVM_KEY_URL, "-o", str(key_download)])
+    run(
         [
             "gpg",
             "--dearmor",
@@ -112,8 +111,8 @@ def _install_system_packages() -> None:
         f"deb [signed-by={keyring}] https://apt.llvm.org/{codename}/ "
         f"llvm-toolchain-{codename}-{LLVM_MAJOR} main\n"
     )
-    _run(["apt-get", "update"])
-    _run(
+    run(["apt-get", "update"])
+    run(
         [
             "apt-get",
             "install",
@@ -128,11 +127,11 @@ def _install_system_packages() -> None:
     )
 
 
-def _install_rust() -> tuple[Path, Path]:
+def install_rust() -> tuple[Path, Path]:
     cargo = Path.home() / ".cargo/bin/cargo"
     rustup = Path.home() / ".cargo/bin/rustup"
     if not rustup.exists():
-        _run(
+        run(
             [
                 "bash",
                 "-c",
@@ -142,7 +141,7 @@ def _install_rust() -> tuple[Path, Path]:
                 ),
             ]
         )
-    _run(
+    run(
         [
             str(rustup),
             "toolchain",
@@ -167,39 +166,26 @@ def _install_rust() -> tuple[Path, Path]:
     return cargo, rustup
 
 
-def _checkout(workspace: Path) -> None:
-    if workspace.exists() and not (workspace / ".git").is_dir():
-        raise RuntimeError(f"Refusing to replace non-git directory: {workspace}")
+def checkout(workspace: Path) -> None:
+    if shutil.which("jj") is None:
+        raise RuntimeError("CUDA-Oxide setup requires jj")
+    if workspace.exists() and not (workspace / ".jj").is_dir():
+        raise RuntimeError(f"Refusing to replace non-jj directory: {workspace}")
     if not workspace.exists():
-        workspace.mkdir(parents=True)
-        _run(["git", "init", str(workspace)])
-        _run(
+        run(
             [
+                "jj",
                 "git",
-                "-C",
-                str(workspace),
-                "remote",
-                "add",
-                "origin",
+                "clone",
                 "https://github.com/NVlabs/cuda-oxide.git",
+                str(workspace),
             ]
         )
-    _run(
-        [
-            "git",
-            "-C",
-            str(workspace),
-            "fetch",
-            "--depth",
-            "1",
-            "origin",
-            CUDA_OXIDE_REV,
-        ]
-    )
-    _run(["git", "-C", str(workspace), "checkout", "--detach", "FETCH_HEAD"])
+    run(["jj", "git", "fetch"], cwd=workspace)
+    run(["jj", "edit", CUDA_OXIDE_REV], cwd=workspace)
 
 
-def _toolchain_env() -> dict[str, str]:
+def toolchain_env() -> dict[str, str]:
     env = os.environ.copy()
     paths = [
         str(Path.home() / ".cargo/bin"),
@@ -224,11 +210,11 @@ def _toolchain_env() -> dict[str, str]:
 def setup(workspace: Path) -> dict[str, object]:
     timings = {}
     started = time.monotonic()
-    _install_system_packages()
+    install_packages()
     timings["system_packages"] = time.monotonic() - started
-    cargo, _ = _install_rust()
+    cargo, _ = install_rust()
     timings["rust"] = time.monotonic() - started - timings["system_packages"]
-    _checkout(workspace)
+    checkout(workspace)
     install_started = time.monotonic()
     expected_state = {
         "cuda_oxide_rev": CUDA_OXIDE_REV,
@@ -242,7 +228,7 @@ def setup(workspace: Path) -> dict[str, object]:
     if cargo_oxide.exists() and installed_state == expected_state:
         print("Pinned cargo-oxide is already installed", flush=True)
     else:
-        _run(
+        run(
             [
                 str(cargo),
                 f"+{RUST_TOOLCHAIN}",
@@ -252,16 +238,16 @@ def setup(workspace: Path) -> dict[str, object]:
                 "--locked",
                 "--force",
             ],
-            env=_toolchain_env(),
+            env=toolchain_env(),
         )
         TOOLCHAIN_STATE.parent.mkdir(parents=True, exist_ok=True)
         TOOLCHAIN_STATE.write_text(json.dumps(expected_state, sort_keys=True) + "\n")
     timings["cargo_oxide"] = time.monotonic() - install_started
     backend_started = time.monotonic()
-    _run(
+    run(
         [str(cargo), f"+{RUST_TOOLCHAIN}", "oxide", "setup"],
         cwd=workspace,
-        env=_toolchain_env(),
+        env=toolchain_env(),
     )
     timings["backend"] = time.monotonic() - backend_started
     return timings
@@ -271,27 +257,27 @@ def exercise(workspace: Path, command: list[str]) -> dict[str, object]:
     cargo = Path.home() / ".cargo/bin/cargo"
     if not cargo.exists() or not workspace.exists():
         raise RuntimeError("Run the setup command first")
-    seconds = _run(
+    seconds = run(
         [str(cargo), f"+{RUST_TOOLCHAIN}", "oxide", *command],
         cwd=workspace,
-        env=_toolchain_env(),
+        env=toolchain_env(),
     )
     return {"command": command, "seconds": seconds}
 
 
-def exercise_project(project: Path, command: list[str]) -> dict[str, object]:
+def run_project(project: Path, command: list[str]) -> dict[str, object]:
     cargo = Path.home() / ".cargo/bin/cargo"
     if not cargo.exists() or not project.is_dir():
         raise RuntimeError("Run setup first and ensure the ENNx repository is present")
-    seconds = _run(
+    seconds = run(
         [str(cargo), f"+{RUST_TOOLCHAIN}", "oxide", *command],
         cwd=project,
-        env=_toolchain_env(),
+        env=toolchain_env(),
     )
     return {"command": command, "project": str(project), "seconds": seconds}
 
 
-def sanitize_project(project: Path) -> dict[str, object]:
+def run_sanitize(project: Path) -> dict[str, object]:
     executable = project / "target/release/ennx-cuda"
     if not executable.is_file():
         raise RuntimeError("Run the ennx command before the sanitizer")
@@ -304,18 +290,18 @@ def sanitize_project(project: Path) -> dict[str, object]:
         str(executable),
         "resident",
     ]
-    seconds = _run(command, cwd=project, env=_toolchain_env())
+    seconds = run(command, cwd=project, env=toolchain_env())
     return {"command": command, "project": str(project), "seconds": seconds}
 
 
-def exercise_python(project: Path) -> dict[str, object]:
+def run_python(project: Path) -> dict[str, object]:
     repo = project.resolve().parent
     rust = repo / "rust"
-    smoke = repo / "ops/cuda_python_smoke.py"
-    if not rust.is_dir() or not smoke.is_file():
+    check = repo / "ops/cuda_python.py"
+    if not rust.is_dir() or not check.is_file():
         raise RuntimeError("The CUDA project must be inside an ENNx checkout")
 
-    env = _toolchain_env()
+    env = toolchain_env()
     env.update(
         {
             "ENNX_FAISS_UNAVAILABLE": "1",
@@ -340,15 +326,15 @@ def exercise_python(project: Path) -> dict[str, object]:
         "cuda",
         "--release",
     ]
-    build_seconds = _run(build, cwd=rust, env=env)
+    build_seconds = run(build, cwd=rust, env=env)
     extension = rust / "target/release/libennx_rust.so"
-    smoke_command = [sys.executable, str(smoke), str(extension)]
-    smoke_seconds = _run(smoke_command, cwd=repo, env=env)
+    check_command = [sys.executable, str(check), str(extension)]
+    check_seconds = run(check_command, cwd=repo, env=env)
     return {
         "build": build,
         "build_seconds": build_seconds,
-        "smoke": smoke_command,
-        "smoke_seconds": smoke_seconds,
+        "check": check_command,
+        "check_seconds": check_seconds,
     }
 
 
@@ -376,7 +362,7 @@ def main() -> None:
     result: dict[str, object] = {
         "cuda_oxide_rev": CUDA_OXIDE_REV,
         "rust_toolchain": RUST_TOOLCHAIN,
-        "runtime": _fingerprint(),
+        "runtime": fingerprint(),
     }
     if args.action in {"setup", "all"}:
         result["setup"] = setup(args.workspace)
@@ -385,25 +371,25 @@ def main() -> None:
     if args.action in {"vecadd", "all"}:
         result["vecadd"] = exercise(args.workspace, ["run", "vecadd"])
     if args.action in {"ennx", "all"}:
-        result["ennx"] = exercise_project(
+        result["ennx"] = run_project(
             args.project, ["run", "--arch", "sm_75", "--", "parity"]
         )
     if args.action in {"resident", "all"}:
-        result["resident"] = exercise_project(
+        result["resident"] = run_project(
             args.project, ["run", "--arch", "sm_75", "--", "resident"]
         )
     if args.action in {"sanitize", "all"}:
         if args.action == "sanitize":
-            result["resident"] = exercise_project(
+            result["resident"] = run_project(
                 args.project, ["run", "--arch", "sm_75", "--", "resident"]
             )
-        result["sanitize"] = sanitize_project(args.project)
+        result["sanitize"] = run_sanitize(args.project)
     if args.action in {"bench", "all"}:
-        result["bench"] = exercise_project(
+        result["bench"] = run_project(
             args.project, ["run", "--arch", "sm_75", "--", "bench"]
         )
     if args.action in {"python", "all"}:
-        result["python"] = exercise_python(args.project)
+        result["python"] = run_python(args.project)
     result["ok"] = True
     print(json.dumps(result, indent=2))
 

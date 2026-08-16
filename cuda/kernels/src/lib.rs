@@ -4,6 +4,7 @@ use cuda_device::{
 
 pub const MODULE_NAME: &str = env!("CARGO_PKG_NAME");
 pub const THREADS: u32 = 256;
+const WARPS: usize = (THREADS / 32) as usize;
 pub const MAX_HISTORY: usize = 128;
 pub const MAX_CENTER_DEPTH: usize = 8;
 
@@ -361,6 +362,75 @@ fn dense_value(
     let candidate = value + scale * sum;
     if sum == 0.0 || candidate == value {
         dense_next_finite(value, positive)
+    } else {
+        candidate
+    }
+}
+
+#[inline(always)]
+fn bf16_decode(value: u16) -> f32 {
+    f32::from_bits(u32::from(value) << 16)
+}
+
+#[inline(always)]
+fn bf16_finite(value: u16) -> bool {
+    value & 0x7f80 != 0x7f80
+}
+
+#[inline(always)]
+fn bf16_encode(value: f32) -> u16 {
+    let bits = value.to_bits();
+    (bits.wrapping_add(0x7fff + ((bits >> 16) & 1)) >> 16) as u16
+}
+
+#[inline(always)]
+fn bf16_next(value: u16, positive: bool) -> u16 {
+    if value & 0x7fff == 0 {
+        return if positive { 1 } else { 0x8001 };
+    }
+    let grows = (value & 0x8000 == 0) == positive;
+    let candidate = if grows {
+        value.wrapping_add(1)
+    } else {
+        value.wrapping_sub(1)
+    };
+    if bf16_decode(candidate).is_finite() {
+        candidate
+    } else if grows {
+        value.wrapping_sub(1)
+    } else {
+        value.wrapping_add(1)
+    }
+}
+
+#[inline(always)]
+fn bf16_value(
+    value: u16,
+    leaf_key: u64,
+    element: u64,
+    scale: f32,
+    terms: &[DenseTerm],
+    term_count: u32,
+) -> u16 {
+    let mut sum = 0.0_f32;
+    let mut strongest = 0.0_f32;
+    let mut positive = true;
+    let mut term_index = 0;
+    while term_index < term_count {
+        let term = terms[term_index as usize];
+        if term.coefficient != 0.0 {
+            let direction = dense_sign(term.seed, leaf_key, element);
+            sum += term.coefficient * direction;
+            if term.coefficient.abs() > strongest {
+                strongest = term.coefficient.abs();
+                positive = (term.coefficient > 0.0) == (direction > 0.0);
+            }
+        }
+        term_index += 1;
+    }
+    let candidate = bf16_encode(bf16_decode(value) + scale * sum);
+    if sum == 0.0 || candidate == value {
+        bf16_next(value, positive)
     } else {
         candidate
     }
@@ -1153,6 +1223,112 @@ pub mod trials {
                 );
             }
             item += THREADS;
+        }
+    }
+
+    #[kernel]
+    pub fn apply_bf16(
+        base: &[u16],
+        leaves: &[DenseLeaf],
+        terms: &[DenseTerm],
+        tiles: &[DenseTile],
+        mut output: DisjointSlice<u16>,
+        mut status: DisjointSlice<u32>,
+        term_count: u32,
+    ) {
+        static mut WARP_STATUS: SharedArray<u32, WARPS> = SharedArray::UNINIT;
+
+        let tile_index = thread::blockIdx_x();
+        if tile_index as usize >= tiles.len() {
+            return;
+        }
+        let tile = tiles[tile_index as usize];
+        let leaf = leaves[tile.leaf as usize];
+        let thread_index = thread::threadIdx_x();
+        let lane = warp::lane_id();
+        let warp_index = thread_index / 32;
+        let mut invalid = false;
+        let mut item = thread_index;
+        while item < tile.length {
+            let coordinate = u64::from(tile.start + item);
+            let index = leaf.offset + coordinate;
+            unsafe {
+                let value = bf16_value(
+                    base[index as usize],
+                    leaf.key,
+                    coordinate,
+                    leaf.scale,
+                    terms,
+                    term_count,
+                );
+                invalid |= !bf16_finite(value);
+                *output.get_unchecked_mut(index as usize) = value;
+            }
+            item += THREADS;
+        }
+        let warp_invalid = warp::any(invalid);
+        if lane == 0 {
+            unsafe {
+                WARP_STATUS[warp_index as usize] = u32::from(warp_invalid);
+            }
+        }
+        thread::sync_threads();
+        if thread_index == 0 {
+            let mut block_status = 0;
+            let mut warp_index = 0;
+            while warp_index < WARPS {
+                block_status |= unsafe { WARP_STATUS[warp_index] };
+                warp_index += 1;
+            }
+            unsafe {
+                *status.get_unchecked_mut(tile_index as usize) = block_status;
+            }
+        }
+    }
+
+    #[kernel]
+    pub fn check_bf16(
+        base: &[u16],
+        leaves: &[DenseLeaf],
+        tiles: &[DenseTile],
+        mut status: DisjointSlice<u32>,
+    ) {
+        static mut WARP_STATUS: SharedArray<u32, WARPS> = SharedArray::UNINIT;
+
+        let tile_index = thread::blockIdx_x();
+        if tile_index as usize >= tiles.len() {
+            return;
+        }
+        let tile = tiles[tile_index as usize];
+        let leaf = leaves[tile.leaf as usize];
+        let thread_index = thread::threadIdx_x();
+        let lane = warp::lane_id();
+        let warp_index = thread_index / 32;
+        let mut invalid = false;
+        let mut item = thread_index;
+        while item < tile.length {
+            let coordinate = u64::from(tile.start + item);
+            let index = leaf.offset + coordinate;
+            invalid |= !bf16_finite(base[index as usize]);
+            item += THREADS;
+        }
+        let warp_invalid = warp::any(invalid);
+        if lane == 0 {
+            unsafe {
+                WARP_STATUS[warp_index as usize] = u32::from(warp_invalid);
+            }
+        }
+        thread::sync_threads();
+        if thread_index == 0 {
+            let mut block_status = 0;
+            let mut warp_index = 0;
+            while warp_index < WARPS {
+                block_status |= unsafe { WARP_STATUS[warp_index] };
+                warp_index += 1;
+            }
+            unsafe {
+                *status.get_unchecked_mut(tile_index as usize) = block_status;
+            }
         }
     }
 

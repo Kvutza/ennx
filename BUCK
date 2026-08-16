@@ -1,4 +1,5 @@
 load("//buck2/wheel:wheel.bzl", "python_wheel")
+load("//buck2/cuda:defs.bzl", "cuda_oxide")
 load(
     "//buck2:python.bzl",
     "PYTHON_ABI",
@@ -52,6 +53,30 @@ filegroup(
     name = "pixi-lock",
     srcs = ["pixi.lock"],
     visibility = ["PUBLIC"],
+)
+
+filegroup(
+    name = "cuda-package",
+    srcs = glob(["src/ennx/**/*.py"]) + [
+        "LICENSE",
+        "NOTICE",
+        "README",
+        "ops/cuda_wheel.py",
+        "rust-toolchain.toml",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+cuda_oxide(
+    name = "cuda",
+    package = ":cuda-package",
+    workspace = "//rust:cuda-workspace",
+    bpann = "//rust/crates/bpann:bpann-source",
+    ennx = "//rust/crates/ennx:ennx-source",
+    python = "//rust/crates/ennx-py:python-source",
+    modal = "//rust/crates/modal-runner:modal-source",
+    cuda = "//cuda:source",
+    parity = "ops/bf16_parity.py",
 )
 
 python_wheel(

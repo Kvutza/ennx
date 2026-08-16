@@ -13,8 +13,106 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use std::sync::Arc;
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use ennx::experimental::Bf16Tree;
+
 fn err(error: String) -> PyErr {
     PyValueError::new_err(error)
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+#[pyclass(name = "Bf16Tree", unsendable)]
+pub struct PyBf16Tree {
+    inner: Bf16Tree,
+    exported: Arc<AtomicBool>,
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+#[pymethods]
+impl PyBf16Tree {
+    #[new]
+    fn new(base: &Bound<'_, PyAny>, leaves: Vec<(u64, usize, usize, f32)>) -> PyResult<Self> {
+        let input = crate::dlpack::Input::new(base)?;
+        let leaves = dense_leaves(leaves)?;
+        Ok(Self {
+            inner: unsafe { Bf16Tree::from_device(input.pointer, input.len, leaves) }
+                .map_err(err)?,
+            exported: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    fn materialize(&mut self, terms: Vec<(u64, f32)>) -> PyResult<()> {
+        if self.exported.load(Ordering::Acquire) {
+            return Err(PyValueError::new_err(
+                "cannot materialize while a JAX candidate is alive",
+            ));
+        }
+        self.inner.materialize(&dense_terms(terms)?).map_err(err)
+    }
+
+    fn __dlpack_device__(&self) -> (i32, i32) {
+        (2, 0)
+    }
+
+    #[pyo3(signature=(stream=None,max_version=None,dl_device=None,copy=None))]
+    fn __dlpack__(
+        slf: PyRef<'_, Self>,
+        stream: Option<i64>,
+        max_version: Option<(u32, u32)>,
+        dl_device: Option<(i32, i32)>,
+        copy: Option<bool>,
+    ) -> PyResult<PyObject> {
+        if copy == Some(true) {
+            return Err(pyo3::exceptions::PyBufferError::new_err(
+                "Bf16Tree does not export copies",
+            ));
+        }
+        if dl_device.is_some_and(|device| device != (2, 0)) {
+            return Err(pyo3::exceptions::PyBufferError::new_err(
+                "Bf16Tree cannot export to another device",
+            ));
+        }
+        if stream.is_some_and(|value| value == 0 || value < -1) {
+            return Err(PyValueError::new_err("invalid DLPack CUDA stream"));
+        }
+        if slf
+            .exported
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(PyValueError::new_err(
+                "the current BF16 candidate is already exported",
+            ));
+        }
+        let py = slf.py();
+        let (pointer, _, _) = match slf.inner.device_ptr(stream) {
+            Ok(value) => value,
+            Err(error) => {
+                slf.exported.store(false, Ordering::Release);
+                return Err(err(error));
+            }
+        };
+        let len = slf.inner.len();
+        let lease = Arc::clone(&slf.exported);
+        let owner = slf.into_py(py);
+        match crate::dlpack::export(py, owner, Arc::clone(&lease), pointer, len, max_version) {
+            Ok(capsule) => Ok(capsule),
+            Err(error) => {
+                lease.store(false, Ordering::Release);
+                Err(error)
+            }
+        }
+    }
+
+    #[getter]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
 }
 
 fn array1_vec<T: Copy + Element>(array: PyReadonlyArray1<'_, T>) -> Vec<T> {

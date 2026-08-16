@@ -1,5 +1,11 @@
 load("//buck2:reindeer_rules.bzl", "app_rust_library")
 
+filegroup(
+    name = "python-source",
+    srcs = glob(["src/**/*.rs"]) + ["Cargo.toml"],
+    visibility = ["PUBLIC"],
+)
+
 app_rust_library(
     name = "ennx-py",
     srcs = glob(["src/**/*.rs"]),

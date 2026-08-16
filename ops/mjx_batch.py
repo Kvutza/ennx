@@ -1,4 +1,4 @@
-"""Exercise batched CUDA-Oxide rows through DLPack and MJX on a T4."""
+"""Check batched CUDA-Oxide rows through DLPack and MJX on a T4."""
 
 from __future__ import annotations
 

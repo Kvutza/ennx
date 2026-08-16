@@ -46,6 +46,7 @@ dense_apply = _ext.optimizer.dense_apply
 dense_dist2 = _ext.optimizer.dense_dist2
 dense_linear = _ext.optimizer.dense_linear
 DenseLinear = _ext.optimizer.DenseLinear
+Bf16Tree = getattr(_ext.optimizer, "Bf16Tree", None)
 weight_int4_select_ucb = _ext.optimizer.weight_int4_select_ucb
 weight_select_ucb = _ext.optimizer.weight_select_ucb
 ModelPackage = _ext.experimental.ModelPackage
@@ -55,6 +56,7 @@ ResidentBoSession = _ext.experimental.ResidentBoSession
 
 __all__ = [
     "BpannHistory",
+    "Bf16Tree",
     "DenseLinear",
     "ENNParams",
     "ENNStatefulFitter",

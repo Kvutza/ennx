@@ -1,4 +1,4 @@
-"""Exercise the Cargo-built CUDA extension through ENNx's public Python API."""
+"""Check the Cargo-built CUDA extension through ENNx's public Python API."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _round(session, seeds: list[int], neighbors: int, reward: float, accept: bool):
+def run_round(session, seeds: list[int], neighbors: int, reward: float, accept: bool):
     trial = session.ask(
         seeds,
         0.8,
@@ -59,8 +59,8 @@ def main() -> None:
             ([5, 29, 0x0123456789ABCDEF, (1 << 64) - 4], 2, 0.5, False),
         ]
         for seeds, neighbors, reward, accept in rounds:
-            cpu_trial = _round(cpu, seeds, neighbors, reward, accept)
-            cuda_trial = _round(cuda, seeds, neighbors, reward, accept)
+            cpu_trial = run_round(cpu, seeds, neighbors, reward, accept)
+            cuda_trial = run_round(cuda, seeds, neighbors, reward, accept)
             if cpu_trial[:2] != cuda_trial[:2]:
                 raise SystemExit(
                     f"CUDA Python choice {cuda_trial[:2]} differs from CPU {cpu_trial[:2]}"

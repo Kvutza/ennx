@@ -174,7 +174,7 @@ def test_colab():
 
     for removed in (
         '"jax[cuda12]"',
-        "colab_cuda_oxide_smoke.py",
+        "colab_cuda.py",
         "cargo oxide",
         "git clone",
     ):
@@ -235,3 +235,38 @@ def test_mjx_colab():
         assert required in source
 
     assert "search.row()" not in source
+
+
+def test_bf16():
+    repo_root = Path(__file__).resolve().parent.parent
+    path = repo_root / "examples/colab_cuda_oxide_dev.ipynb"
+    notebook = json.loads(path.read_text(encoding="utf-8"))
+
+    assert notebook["nbformat"] == 4
+    assert notebook["metadata"]["accelerator"] == "GPU"
+    assert notebook["metadata"]["colab"]["gpuType"] == "T4"
+
+    code = []
+    for cell in notebook["cells"]:
+        if cell["cell_type"] != "code":
+            continue
+        assert cell["execution_count"] is None
+        assert cell["outputs"] == []
+        source = "".join(cell["source"])
+        compile(source, path.name, "exec")
+        code.append(source)
+
+    source = "\n".join(code)
+    for required in (
+        "jj",
+        "//:cuda-parity",
+        "//:cuda-wheel",
+        "Bf16Tree",
+        "jnp.bfloat16",
+        "jax.dlpack.from_dlpack(tree)",
+        "PARAMETERS = 1_000_000",
+    ):
+        assert required in source
+
+    for removed in ("import numpy", "import cupy", '["git"'):
+        assert removed not in source

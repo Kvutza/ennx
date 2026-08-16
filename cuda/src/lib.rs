@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use cuda_core::{
-    CudaContext, CudaEvent, CudaStream, DeviceBuffer, DeviceCopy, LaunchConfig, LaunchConfig1D,
+    CudaContext, CudaEvent, CudaStream, DeviceBuffer, DeviceCopy, IntoResult, LaunchConfig,
+    LaunchConfig1D,
 };
 use cuda_host::embedded::{ArtifactPayloadKind, EmbeddedModuleError, OwnedArtifactBundle};
 use ennx_cuda_kernels::trials;
@@ -1022,14 +1023,7 @@ fn publish_profile(client: &tracy_client::Client, profile: AskProfile) {
 
 const DENSE_TILE_ELEMENTS: usize = 65_536;
 
-pub fn dense_apply(
-    base: &[f32],
-    leaves: &[DenseLeaf],
-    terms: &[DenseTerm],
-) -> CudaResult<Vec<f32>> {
-    if base.is_empty() || leaves.is_empty() || terms.is_empty() {
-        return Err("CUDA dense apply requires base values, leaves, and terms".to_string());
-    }
+fn dense_tiles(leaves: &[DenseLeaf]) -> CudaResult<Vec<DenseTile>> {
     let mut tiles = Vec::new();
     for (leaf_index, leaf) in leaves.iter().enumerate() {
         let leaf_index = to_u32(leaf_index, "dense leaf count")?;
@@ -1050,6 +1044,18 @@ pub fn dense_apply(
     if tiles.is_empty() {
         return Err("CUDA dense apply requires non-empty leaves".to_string());
     }
+    Ok(tiles)
+}
+
+pub fn dense_apply(
+    base: &[f32],
+    leaves: &[DenseLeaf],
+    terms: &[DenseTerm],
+) -> CudaResult<Vec<f32>> {
+    if base.is_empty() || leaves.is_empty() || terms.is_empty() {
+        return Err("CUDA dense apply requires base values, leaves, and terms".to_string());
+    }
+    let tiles = dense_tiles(leaves)?;
 
     let runtime = Runtime::new()?;
     let base_buffer = DeviceBuffer::from_host(&runtime.stream, base).map_err(cuda_error)?;
@@ -1081,6 +1087,228 @@ pub fn dense_apply(
     }
     runtime.context.check_err().map_err(cuda_error)?;
     read_prefix(&output, &runtime.stream, base.len())
+}
+
+pub struct Bf16Engine {
+    runtime: Runtime,
+    base: DeviceBuffer<u16>,
+    candidate: DeviceBuffer<u16>,
+    leaves: DeviceBuffer<DenseLeaf>,
+    tiles: DeviceBuffer<DenseTile>,
+    terms: DeviceBuffer<DenseTerm>,
+    status: DeviceBuffer<u32>,
+    term_capacity: usize,
+    tile_count: usize,
+    len: usize,
+}
+
+impl Bf16Engine {
+    pub fn new(base: &[u16], leaves: &[DenseLeaf]) -> CudaResult<Self> {
+        if base.is_empty() || leaves.is_empty() {
+            return Err("CUDA BF16 tree requires base values and leaves".to_string());
+        }
+        let tiles = dense_tiles(leaves)?;
+        let runtime = Runtime::new()?;
+        let mut engine = Self {
+            base: DeviceBuffer::from_host(&runtime.stream, base).map_err(cuda_error)?,
+            candidate: DeviceBuffer::from_host(&runtime.stream, base).map_err(cuda_error)?,
+            leaves: DeviceBuffer::from_host(&runtime.stream, leaves).map_err(cuda_error)?,
+            tiles: DeviceBuffer::from_host(&runtime.stream, &tiles).map_err(cuda_error)?,
+            terms: DeviceBuffer::zeroed(&runtime.stream, 1).map_err(cuda_error)?,
+            status: DeviceBuffer::zeroed(&runtime.stream, tiles.len()).map_err(cuda_error)?,
+            term_capacity: 1,
+            tile_count: tiles.len(),
+            len: base.len(),
+            runtime,
+        };
+        engine.validate()?;
+        Ok(engine)
+    }
+
+    /// Copy a contiguous BF16 CUDA allocation into persistent ENNx storage.
+    ///
+    /// # Safety
+    /// `pointer` must address at least `len * 2` readable bytes on CUDA device 0.
+    pub unsafe fn from_device(pointer: u64, len: usize, leaves: &[DenseLeaf]) -> CudaResult<Self> {
+        if pointer == 0 || len == 0 || leaves.is_empty() {
+            return Err("CUDA BF16 tree requires a device base and leaves".to_string());
+        }
+        let tiles = dense_tiles(leaves)?;
+        let runtime = Runtime::new()?;
+        let base = DeviceBuffer::zeroed(&runtime.stream, len).map_err(cuda_error)?;
+        unsafe {
+            cuda_core::memory::memcpy_dtod_async(
+                base.cu_deviceptr(),
+                pointer,
+                len.checked_mul(size_of::<u16>())
+                    .ok_or("CUDA BF16 byte count overflow")?,
+                runtime.stream.cu_stream(),
+            )
+            .map_err(cuda_error)?;
+        }
+        runtime.stream.synchronize().map_err(cuda_error)?;
+        let candidate = DeviceBuffer::zeroed(&runtime.stream, len).map_err(cuda_error)?;
+        unsafe {
+            cuda_core::memory::memcpy_dtod_async(
+                candidate.cu_deviceptr(),
+                base.cu_deviceptr(),
+                len * size_of::<u16>(),
+                runtime.stream.cu_stream(),
+            )
+            .map_err(cuda_error)?;
+        }
+        runtime.stream.synchronize().map_err(cuda_error)?;
+        let mut engine = Self {
+            base,
+            candidate,
+            leaves: DeviceBuffer::from_host(&runtime.stream, leaves).map_err(cuda_error)?,
+            tiles: DeviceBuffer::from_host(&runtime.stream, &tiles).map_err(cuda_error)?,
+            terms: DeviceBuffer::zeroed(&runtime.stream, 1).map_err(cuda_error)?,
+            status: DeviceBuffer::zeroed(&runtime.stream, tiles.len()).map_err(cuda_error)?,
+            term_capacity: 1,
+            tile_count: tiles.len(),
+            len,
+            runtime,
+        };
+        engine.validate()?;
+        Ok(engine)
+    }
+
+    pub fn materialize(&mut self, terms: &[DenseTerm]) -> CudaResult<()> {
+        if terms.is_empty() {
+            return Err("CUDA BF16 tree requires dense terms".to_string());
+        }
+        if terms.len() > self.term_capacity {
+            self.term_capacity = terms
+                .len()
+                .checked_next_power_of_two()
+                .ok_or("CUDA BF16 term capacity overflow")?;
+            self.terms = DeviceBuffer::zeroed(&self.runtime.stream, self.term_capacity)
+                .map_err(cuda_error)?;
+        }
+        copy_prefix(&self.terms, terms, &self.runtime.stream)?;
+        self.clear_status()?;
+        let config = LaunchConfig {
+            grid_dim: (to_u32(self.tile_count, "dense tile count")?, 1, 1),
+            block_dim: (THREADS, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.runtime
+                .module
+                .apply_bf16(
+                    &self.runtime.stream,
+                    config,
+                    &self.base,
+                    &self.leaves,
+                    &self.terms,
+                    &self.tiles,
+                    &mut self.candidate,
+                    &mut self.status,
+                    to_u32(terms.len(), "dense term count")?,
+                )
+                .map_err(cuda_error)?;
+        }
+        self.runtime.context.check_err().map_err(cuda_error)?;
+        if let Err(error) = self.check_status("CUDA BF16 perturbation overflowed FP32") {
+            self.reset_candidate()?;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub fn candidate(&self) -> CudaResult<Vec<u16>> {
+        read_prefix(&self.candidate, &self.runtime.stream, self.len)
+    }
+
+    pub fn device_ptr(&self, stream: Option<i64>) -> CudaResult<(u64, usize, usize)> {
+        self.sync_stream(stream)?;
+        Ok((
+            self.candidate.cu_deviceptr(),
+            self.len * size_of::<u16>(),
+            0,
+        ))
+    }
+
+    fn validate(&mut self) -> CudaResult<()> {
+        self.clear_status()?;
+        let config = LaunchConfig {
+            grid_dim: (to_u32(self.tile_count, "dense tile count")?, 1, 1),
+            block_dim: (THREADS, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.runtime
+                .module
+                .check_bf16(
+                    &self.runtime.stream,
+                    config,
+                    &self.base,
+                    &self.leaves,
+                    &self.tiles,
+                    &mut self.status,
+                )
+                .map_err(cuda_error)?;
+        }
+        self.runtime.context.check_err().map_err(cuda_error)?;
+        self.check_status("CUDA BF16 base values must be finite")
+    }
+
+    fn clear_status(&self) -> CudaResult<()> {
+        unsafe {
+            cuda_core::memory::memset_d8_async(
+                self.status.cu_deviceptr(),
+                0,
+                self.status.len() * size_of::<u32>(),
+                self.runtime.stream.cu_stream(),
+            )
+            .map_err(cuda_error)
+        }
+    }
+
+    fn check_status(&self, message: &str) -> CudaResult<()> {
+        let status = read_prefix(&self.status, &self.runtime.stream, self.tile_count)?;
+        if status.contains(&1) {
+            Err(message.to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn reset_candidate(&self) -> CudaResult<()> {
+        unsafe {
+            cuda_core::memory::memcpy_dtod_async(
+                self.candidate.cu_deviceptr(),
+                self.base.cu_deviceptr(),
+                self.len
+                    .checked_mul(size_of::<u16>())
+                    .ok_or("CUDA BF16 byte count overflow")?,
+                self.runtime.stream.cu_stream(),
+            )
+            .map_err(cuda_error)
+        }
+    }
+
+    fn sync_stream(&self, stream: Option<i64>) -> CudaResult<()> {
+        let Some(stream) = stream else {
+            return self.runtime.stream.synchronize().map_err(cuda_error);
+        };
+        if stream == -1 {
+            return Ok(());
+        }
+        let event = self.runtime.stream.record_event(None).map_err(cuda_error)?;
+        self.runtime.context.bind_to_thread().map_err(cuda_error)?;
+        let stream = stream as usize as cuda_core::sys::CUstream;
+        unsafe {
+            cuda_core::sys::cuStreamWaitEvent(
+                stream,
+                event.cu_event(),
+                cuda_core::sys::CUevent_wait_flags_enum_CU_EVENT_WAIT_DEFAULT,
+            )
+            .result()
+            .map_err(cuda_error)
+        }
+    }
 }
 
 pub struct DenseLinearEngine {

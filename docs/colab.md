@@ -39,7 +39,7 @@ install is also constrained to the numerical package versions supplied by the
 fresh runtime.
 
 The development notebook only orchestrates the environment. Toolchain setup lives in
-`ops/colab_cuda_oxide_smoke.py`, and CUDA or ENNx implementation work belongs in
+`ops/colab_cuda.py`, and CUDA or ENNx implementation work belongs in
 normal repository source files. This keeps experiments reviewable and prevents
 the notebook from becoming a second implementation.
 
@@ -66,11 +66,11 @@ The first kernel development stage is available now. Run its parity, memory
 check, and benchmark from the repository checkout:
 
 ```bash
-python ops/colab_cuda_oxide_smoke.py ennx
-python ops/colab_cuda_oxide_smoke.py resident
-python ops/colab_cuda_oxide_smoke.py sanitize
-python ops/colab_cuda_oxide_smoke.py bench
-python ops/colab_cuda_oxide_smoke.py python
+python ops/colab_cuda.py ennx
+python ops/colab_cuda.py resident
+python ops/colab_cuda.py sanitize
+python ops/colab_cuda.py bench
+python ops/colab_cuda.py python
 ```
 
 The `ennx` command compares 36 deterministic CPU and CUDA materialization cases.
@@ -79,7 +79,7 @@ selected row against CPU. `sanitize` runs the resident path through Compute
 Sanitizer memcheck. `bench` uses CUDA events for timing and reports effective
 read-plus-write bandwidth. `python` compiles `ennx-py` for the T4 and runs two
 ask/tell rounds through `ennx.experimental.ResidentBoSession` on both CPU and
-CUDA. This source smoke intentionally uses the native-free Faiss bridge; release
+CUDA. This source check intentionally uses the native-free Faiss bridge; release
 wheels continue to bundle the real Faiss runtime.
 
 The CUDA crate remains a separate nightly workspace and is enabled in ENNx only
@@ -96,7 +96,8 @@ Build the pinned CUDA-Oxide Modal image from Rust using:
 cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- image
 ```
 
-Run the release wheel gate with the real batched MJX integration check using:
+Run the Buck2 release wheel and parity targets with the real batched MJX
+integration check using:
 
 ```bash
 cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- \

@@ -16,6 +16,11 @@ pub mod ennx_py_build {
     define_ennx_py_build_api!(link_rpath);
 }
 pub mod adapter;
+#[cfg_attr(
+    not(all(target_os = "linux", target_arch = "x86_64", feature = "cuda")),
+    allow(dead_code)
+)]
+mod dlpack;
 pub mod link_rpath;
 pub mod py_experimental;
 pub mod py_fit;
