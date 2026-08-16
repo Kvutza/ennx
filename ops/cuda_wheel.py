@@ -14,7 +14,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-VERSION = "0.1.5+cuda75"
+VERSION = "0.1.6+cuda75"
 TAG = "cp312-cp312-manylinux_2_28_x86_64"
 
 
@@ -112,7 +112,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("extension", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+    )
     args = parser.parse_args()
     print(build_wheel(args.root, args.extension, args.output))
 

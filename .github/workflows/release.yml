@@ -4,6 +4,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing or new v* release tag
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -30,7 +35,7 @@ jobs:
         with:
           pixi-version: latest
           cache: true
-          environments: ennx ennx-py312
+          environments: ennx ennx-py312 ennx-py314
           locked: true
 
       - name: Restore Buck2 cache
@@ -42,6 +47,7 @@ jobs:
             buck-out/release
             buck-out/release-py312
             buck-out/release-py313
+            buck-out/release-py314
           key: ${{ runner.os }}-buck2-${{ hashFiles('.buckconfig', '.buckroot', 'BUCK', 'buck2/**', 'rust/BUCK', 'rust/crates/**/BUCK', 'pixi.lock', 'rust/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-buck2-
@@ -54,6 +60,7 @@ jobs:
         run: |
           pixi install -e ennx --locked
           pixi install -e ennx-py312 --locked
+          pixi install -e ennx-py314 --locked
 
       - name: Run platform build and tests
         run: |
@@ -62,7 +69,7 @@ jobs:
 
       - name: Build wheel
         run: |
-          for spec in "3.12:ennx-py312" "3.13:ennx"; do
+          for spec in "3.12:ennx-py312" "3.13:ennx" "3.14:ennx-py314"; do
             python_version=${spec%%:*}
             environment=${spec#*:}
             isolation=release-py${python_version//./}
@@ -72,15 +79,21 @@ jobs:
               --config "ennx.python_version=$python_version" \
               --local-only --num-threads 4 --show-output
           done
-          pixi run -e ennx-py312 buck2-verify-py312
-          pixi run -e ennx buck2-verify
+          for spec in "3.12:ennx-py312" "3.13:ennx" "3.14:ennx-py314"; do
+            python_version=${spec%%:*}
+            environment=${spec#*:}
+            pixi run -e "$environment" \
+              env ENNX_PYTHON_VERSION="$python_version" \
+              ENNX_PYTHON=".pixi/envs/$environment/bin/python" \
+              tools/buck2-wheel-verify
+          done
 
       - name: Collect wheel artifacts
         run: |
           mkdir -p release
-          find buck-out/release-py312 buck-out/release-py313 \
+          find buck-out/release-py312 buck-out/release-py313 buck-out/release-py314 \
             -type f -name 'ennx-*.whl' -exec cp {} release/ \;
-          test "$(find release -type f -name 'ennx-*.whl' | wc -l | tr -d ' ')" -eq 2
+          test "$(find release -type f -name 'ennx-*.whl' | wc -l | tr -d ' ')" -eq 3
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -106,9 +119,16 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
+          case "$RELEASE_TAG" in v*) ;; *) exit 2 ;; esac
           cp README LICENSE NOTICE release/
-          gh release create "${GITHUB_REF_NAME}" release/* \
-            --repo "${GITHUB_REPOSITORY}" \
-            --generate-notes \
-            --title "${GITHUB_REF_NAME}"
+          if gh release view "$RELEASE_TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null; then
+            gh release upload "$RELEASE_TAG" release/* \
+              --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "$RELEASE_TAG" release/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --generate-notes \
+              --title "$RELEASE_TAG"
+          fi

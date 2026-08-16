@@ -14,6 +14,9 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+type PyObject = Py<PyAny>;
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
 use std::sync::Arc;
@@ -205,7 +208,7 @@ pub fn dense_apply_py<'py>(
         ComputeBackend::parse(backend).map_err(err)?,
     )
     .map_err(err)?;
-    Ok((result.values.into_pyarray_bound(py), result.changed))
+    Ok((result.values.into_pyarray(py), result.changed))
 }
 
 #[pyfunction(name = "dense_dist2")]
@@ -248,7 +251,7 @@ pub fn dense_linear_py<'py>(
         &dense_terms(terms)?,
         ComputeBackend::parse(backend).map_err(err)?,
     )
-    .map(|values| values.into_pyarray_bound(py))
+    .map(|values| values.into_pyarray(py))
     .map_err(err)
 }
 
@@ -291,7 +294,7 @@ impl PyDenseLinear {
     ) -> PyResult<Bound<'py, PyArray1<f32>>> {
         self.inner
             .eval(&array1_vec(input), &dense_terms(terms)?)
-            .map(|values| values.into_pyarray_bound(py))
+            .map(|values| values.into_pyarray(py))
             .map_err(err)
     }
 
@@ -410,7 +413,7 @@ impl PyWeightSearch {
         let trial = self
             .pending
             .ok_or_else(|| PyValueError::new_err("there is no pending trial"))?;
-        Ok(self.inner.row(trial).map_err(err)?.into_pyarray_bound(py))
+        Ok(self.inner.row(trial).map_err(err)?.into_pyarray(py))
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
@@ -478,7 +481,7 @@ pub struct PyTurboSearch {
     pending: Vec<CoreTrial>,
 }
 
-#[pyclass(name = "TurboTrial", frozen)]
+#[pyclass(name = "TurboTrial", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PyTurboTrial {
     inner: CoreTrial,
@@ -626,7 +629,7 @@ impl PyTurboSearch {
 
     fn row<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<u8>>> {
         let trial = self.only_pending()?;
-        Ok(self.inner.row(trial).map_err(err)?.into_pyarray_bound(py))
+        Ok(self.inner.row(trial).map_err(err)?.into_pyarray(py))
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
@@ -640,11 +643,7 @@ impl PyTurboSearch {
         py: Python<'py>,
         trial: PyRef<'_, PyTurboTrial>,
     ) -> PyResult<Bound<'py, PyArray1<u8>>> {
-        Ok(self
-            .inner
-            .row(trial.inner)
-            .map_err(err)?
-            .into_pyarray_bound(py))
+        Ok(self.inner.row(trial.inner).map_err(err)?.into_pyarray(py))
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
@@ -842,7 +841,7 @@ fn weight_ucb<'py>(
     let row_bytes = candidates.as_array().ncols();
     let start = result.index * row_bytes;
     let selected = candidate_bytes[start..start + row_bytes].to_vec();
-    Ok((selected.into_pyarray_bound(py), result.index, result.score))
+    Ok((selected.into_pyarray(py), result.index, result.score))
 }
 
 #[pyfunction(name = "weight_int4_select_ucb")]
@@ -912,7 +911,7 @@ pub fn sparse_union_py<'py>(
 ) -> PyResult<Bound<'py, PyArray1<u32>>> {
     let owned: Vec<Vec<u32>> = rows.into_iter().map(array1_vec).collect();
     let refs: Vec<&[u32]> = owned.iter().map(Vec::as_slice).collect();
-    Ok(sparse_union(&refs).into_pyarray_bound(py))
+    Ok(sparse_union(&refs).into_pyarray(py))
 }
 
 #[pyfunction(name = "sparse_xor")]
@@ -930,7 +929,7 @@ pub fn sparse_xor_py<'py>(
         &array1_vec(right_masks),
     )
     .map_err(err)?;
-    Ok((words.into_pyarray_bound(py), masks.into_pyarray_bound(py)))
+    Ok((words.into_pyarray(py), masks.into_pyarray(py)))
 }
 
 #[pyfunction(name = "sparse_missing")]
@@ -939,7 +938,7 @@ pub fn sparse_missing_py<'py>(
     cached: PyReadonlyArray1<'_, u32>,
     query: PyReadonlyArray1<'_, u32>,
 ) -> PyResult<Bound<'py, PyArray1<u32>>> {
-    Ok(missing_words(&array1_vec(cached), &array1_vec(query)).into_pyarray_bound(py))
+    Ok(missing_words(&array1_vec(cached), &array1_vec(query)).into_pyarray(py))
 }
 
 #[pyfunction(name = "sparse_merge")]
@@ -957,7 +956,7 @@ pub fn sparse_merge_py<'py>(
         &array1_vec(extra_values),
     )
     .map_err(err)?;
-    Ok((words.into_pyarray_bound(py), values.into_pyarray_bound(py)))
+    Ok((words.into_pyarray(py), values.into_pyarray(py)))
 }
 
 #[pyfunction(name = "sparse_take")]
@@ -970,7 +969,7 @@ pub fn sparse_take_py<'py>(
     Ok(
         take_words(&array1_vec(words), &array1_vec(values), &array1_vec(query))
             .map_err(err)?
-            .into_pyarray_bound(py),
+            .into_pyarray(py),
     )
 }
 
@@ -989,7 +988,7 @@ pub fn sparse_apply_py<'py>(
         &array1_vec(move_masks),
     )
     .map_err(err)?
-    .into_pyarray_bound(py))
+    .into_pyarray(py))
 }
 
 #[pyfunction(name = "sparse_blocks")]
@@ -1030,11 +1029,11 @@ pub fn sparse_draw_py<'py>(
         seed,
     )
     .map_err(err)?;
-    let word_rows = PyList::empty_bound(py);
-    let mask_rows = PyList::empty_bound(py);
+    let word_rows = PyList::empty(py);
+    let mask_rows = PyList::empty(py);
     for (words, masks) in rows {
-        word_rows.append(words.into_pyarray_bound(py))?;
-        mask_rows.append(masks.into_pyarray_bound(py))?;
+        word_rows.append(words.into_pyarray(py))?;
+        mask_rows.append(masks.into_pyarray(py))?;
     }
     Ok((word_rows, mask_rows))
 }

@@ -26,7 +26,7 @@ pub fn normal_hash_batch_multi_seed_fast_py<'py>(
 
     // Release GIL for computation
     let result =
-        py.allow_threads(|| ennx::normal_hash_batch_multi_seed_fast(&seeds, &indices, num_metrics));
+        py.detach(|| ennx::normal_hash_batch_multi_seed_fast(&seeds, &indices, num_metrics));
 
     match result {
         Ok(arr) => {
@@ -35,7 +35,7 @@ pub fn normal_hash_batch_multi_seed_fast_py<'py>(
             let reshaped = arr
                 .into_shape_with_order(IxDyn(&output_shape))
                 .map_err(|e| PyValueError::new_err(format!("Shape error: {}", e)))?;
-            Ok(reshaped.into_pyarray_bound(py))
+            Ok(reshaped.into_pyarray(py))
         }
         Err(e) => Err(PyValueError::new_err(e.to_string())),
     }

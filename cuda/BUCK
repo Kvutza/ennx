@@ -4,6 +4,7 @@ filegroup(
         "Cargo.lock",
         "Cargo.toml",
         "kernels/Cargo.toml",
+        "rust-toolchain.toml",
     ],
     visibility = ["PUBLIC"],
 )

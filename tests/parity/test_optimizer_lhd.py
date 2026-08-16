@@ -26,6 +26,4 @@ def test_optimizer_lhd_ask_tell_state():
 
     bounds = np.array([[0.0, 1.0], [0.0, 1.0]], dtype=float)
     config = lhd_only_config(num_init=5)
-    assert_tr_cycles(
-        bounds, config, opt_seed=37, cycle_rng_seed=37, obj_fn=_obj
-    )
+    assert_tr_cycles(bounds, config, opt_seed=37, cycle_rng_seed=37, obj_fn=_obj)

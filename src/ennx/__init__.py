@@ -27,7 +27,6 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
 }
 
 
-
 def __getattr__(name: str):
     if name in _DEPRECATED_ATTRS:
         import warnings

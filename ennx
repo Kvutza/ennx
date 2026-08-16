@@ -4,4 +4,9 @@ set -eu
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$repo_dir"
 
-exec pixi run -e ennx ./buck2w --isolation-dir dev run //rust/crates/dev-cli:ennx -- "$@"
+environment=ennx
+if [ "${1:-}" = "cuda" ]; then
+    environment=ennx-py312
+fi
+
+exec pixi run -e "$environment" ./buck2w --isolation-dir dev run //rust/crates/dev-cli:ennx -- "$@"

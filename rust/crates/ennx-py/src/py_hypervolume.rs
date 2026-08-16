@@ -15,7 +15,7 @@ pub fn hypervolume_2d_max_py<'py>(
     let ref_arr = ref_point.as_array();
 
     // Release GIL for computation
-    let result = py.allow_threads(|| ennx::hypervolume_2d_max(&y_arr, &ref_arr));
+    let result = py.detach(|| ennx::hypervolume_2d_max(&y_arr, &ref_arr));
 
     result.map_err(|e| PyValueError::new_err(e.to_string()))
 }

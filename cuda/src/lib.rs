@@ -11,11 +11,20 @@ use cuda_core::{
 use cuda_host::embedded::{ArtifactPayloadKind, EmbeddedModuleError, OwnedArtifactBundle};
 use ennx_cuda_kernels::trials;
 pub use ennx_cuda_kernels::{
-    CenterStep, DenseLeaf, DenseLinearParams, DenseTerm, DenseTile, Leaf, MAX_CENTER_DEPTH,
-    MAX_HISTORY, Seed, Selection, SparseEdit, THREADS, Tile,
+    BatchValue, Bf16Leaf, Bf16Score, CenterStep, DenseLeaf, DenseLinearParams, DenseTerm,
+    DenseTile, KNN_MAX_K, Leaf, MAX_CENTER_DEPTH, MAX_HISTORY, SearchState, Seed, Selection,
+    SparseEdit, THREADS, TellParams, TellSummary, Tile,
 };
 
 pub type CudaResult<T> = Result<T, String>;
+
+mod bf16_search;
+pub use bf16_search::{Bf16SearchEngine, TellOutput};
+mod knn;
+pub use knn::{
+    BatchOutput, BatchSpec, CudaIndex, DrawOutput, KnnProfile, PosteriorOutput, PosteriorSpec,
+    WeightedOutput, WeightedSpec,
+};
 
 static TRIAL_BUNDLE: OnceLock<Result<OwnedArtifactBundle, String>> = OnceLock::new();
 static TRACY: OnceLock<tracy_client::Client> = OnceLock::new();
@@ -311,10 +320,7 @@ impl TrialEngine {
     }
 
     pub fn set_profiling(&mut self, enabled: bool) {
-        self.profiling = enabled;
-        if !enabled {
-            self.last_profile = None;
-        }
+        set_profile(enabled, &mut self.profiling, &mut self.last_profile);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -998,6 +1004,34 @@ fn timing_event(stream: &CudaStream) -> CudaResult<CudaEvent> {
         .map_err(cuda_error)
 }
 
+fn set_profile(enabled: bool, profiling: &mut bool, profile: &mut Option<AskProfile>) {
+    *profiling = enabled;
+    if !enabled {
+        *profile = None;
+    }
+}
+
+fn sync_stream(runtime: &Runtime, stream: Option<i64>) -> CudaResult<()> {
+    let Some(stream) = stream else {
+        return runtime.stream.synchronize().map_err(cuda_error);
+    };
+    if stream == -1 {
+        return Ok(());
+    }
+    let event = runtime.stream.record_event(None).map_err(cuda_error)?;
+    runtime.context.bind_to_thread().map_err(cuda_error)?;
+    let stream = stream as usize as cuda_core::sys::CUstream;
+    unsafe {
+        cuda_core::sys::cuStreamWaitEvent(
+            stream,
+            event.cu_event(),
+            cuda_core::sys::CUevent_wait_flags_enum_CU_EVENT_WAIT_DEFAULT,
+        )
+        .result()
+        .map_err(cuda_error)
+    }
+}
+
 fn publish_profile(client: &tracy_client::Client, profile: AskProfile) {
     for (name, milliseconds) in [
         (
@@ -1222,7 +1256,7 @@ impl Bf16Engine {
     }
 
     pub fn device_ptr(&self, stream: Option<i64>) -> CudaResult<(u64, usize, usize)> {
-        self.sync_stream(stream)?;
+        sync_stream(&self.runtime, stream)?;
         Ok((
             self.candidate.cu_deviceptr(),
             self.len * size_of::<u16>(),
@@ -1285,27 +1319,6 @@ impl Bf16Engine {
                     .ok_or("CUDA BF16 byte count overflow")?,
                 self.runtime.stream.cu_stream(),
             )
-            .map_err(cuda_error)
-        }
-    }
-
-    fn sync_stream(&self, stream: Option<i64>) -> CudaResult<()> {
-        let Some(stream) = stream else {
-            return self.runtime.stream.synchronize().map_err(cuda_error);
-        };
-        if stream == -1 {
-            return Ok(());
-        }
-        let event = self.runtime.stream.record_event(None).map_err(cuda_error)?;
-        self.runtime.context.bind_to_thread().map_err(cuda_error)?;
-        let stream = stream as usize as cuda_core::sys::CUstream;
-        unsafe {
-            cuda_core::sys::cuStreamWaitEvent(
-                stream,
-                event.cu_event(),
-                cuda_core::sys::CUevent_wait_flags_enum_CU_EVENT_WAIT_DEFAULT,
-            )
-            .result()
             .map_err(cuda_error)
         }
     }

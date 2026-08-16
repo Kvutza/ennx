@@ -1,5 +1,5 @@
 use std::ffi::{c_char, c_void};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use pyo3::exceptions::{PyBufferError, PyTypeError, PyValueError};
@@ -7,7 +7,10 @@ use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+type PyObject = Py<PyAny>;
+
 const CUDA: i32 = 2;
+const FLOAT: u8 = 2;
 const BF16: u8 = 4;
 const READ_ONLY: u64 = 1;
 const LEGACY: &[u8] = b"dltensor\0";
@@ -82,13 +85,21 @@ pub(crate) struct Input {
 
 impl Input {
     pub(crate) fn new(source: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let kwargs = PyDict::new_bound(source.py());
+        Self::read(source, BF16, 16, "BF16")
+    }
+
+    pub(crate) fn f32(source: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Self::read(source, FLOAT, 32, "FP32")
+    }
+
+    fn read(source: &Bound<'_, PyAny>, code: u8, bits: u8, name: &str) -> PyResult<Self> {
+        let kwargs = PyDict::new(source.py());
         kwargs.set_item("stream", 1_u64)?;
         kwargs.set_item("max_version", (1_u32, 3_u32))?;
         let capsule = match source.call_method("__dlpack__", (), Some(&kwargs)) {
             Ok(capsule) => capsule,
             Err(error) if error.is_instance_of::<PyTypeError>(source.py()) => {
-                let kwargs = PyDict::new_bound(source.py());
+                let kwargs = PyDict::new(source.py());
                 kwargs.set_item("stream", 1_u64)?;
                 source.call_method("__dlpack__", (), Some(&kwargs))?
             }
@@ -116,14 +127,14 @@ impl Input {
                 return Err(PyBufferError::new_err("invalid DLPack capsule"));
             }
         };
-        validate_tensor(tensor)?;
+        validate_tensor(tensor, code, bits, name)?;
         let dimensions = usize::try_from(tensor.ndim)
             .map_err(|_| PyValueError::new_err("invalid DLPack rank"))?;
         let shape = unsafe { std::slice::from_raw_parts(tensor.shape, dimensions) };
         if !is_contiguous(tensor, shape) {
-            return Err(PyBufferError::new_err(
-                "BF16Tree requires a contiguous DLPack tensor",
-            ));
+            return Err(PyBufferError::new_err(format!(
+                "{name} input requires a contiguous DLPack tensor"
+            )));
         }
         let len = shape.iter().try_fold(1usize, |size, &dimension| {
             let dimension = usize::try_from(dimension)
@@ -132,9 +143,9 @@ impl Input {
                 .ok_or_else(|| PyValueError::new_err("DLPack shape overflow"))
         })?;
         if len == 0 {
-            return Err(PyValueError::new_err(
-                "BF16Tree requires a non-empty tensor",
-            ));
+            return Err(PyValueError::new_err(format!(
+                "{name} input requires a non-empty tensor"
+            )));
         }
         let pointer = (tensor.data as u64)
             .checked_add(tensor.byte_offset)
@@ -150,7 +161,7 @@ impl Input {
 
 impl Drop for Input {
     fn drop(&mut self) {
-        Python::with_gil(|py| unsafe {
+        Python::attach(|py| unsafe {
             let capsule = self.capsule.bind(py);
             let result = match self.kind {
                 InputKind::Legacy(managed) => {
@@ -189,7 +200,7 @@ struct LegacyOwner {
     managed: Managed,
     shape: i64,
     _owner: PyObject,
-    lease: Arc<AtomicBool>,
+    lease: Lease,
 }
 
 struct VersionOwner {
@@ -197,7 +208,24 @@ struct VersionOwner {
     shape: i64,
     stride: i64,
     _owner: PyObject,
-    lease: Arc<AtomicBool>,
+    lease: Lease,
+}
+
+#[derive(Clone)]
+enum Lease {
+    Flag(Arc<AtomicBool>),
+    Count(Arc<AtomicUsize>),
+}
+
+impl Lease {
+    fn release(&self) {
+        match self {
+            Self::Flag(lease) => lease.store(false, Ordering::Release),
+            Self::Count(lease) => {
+                lease.fetch_sub(1, Ordering::AcqRel);
+            }
+        }
+    }
 }
 
 unsafe extern "C" fn release_legacy(managed: *mut Managed) {
@@ -206,9 +234,9 @@ unsafe extern "C" fn release_legacy(managed: *mut Managed) {
     }
     let context = unsafe { (*managed).context.cast::<LegacyOwner>() };
     if !context.is_null() {
-        Python::with_gil(|_| {
+        Python::attach(|_| {
             let owner = unsafe { Box::from_raw(context) };
-            owner.lease.store(false, Ordering::Release);
+            owner.lease.release();
             drop(owner);
         });
     }
@@ -220,9 +248,9 @@ unsafe extern "C" fn release_versioned(managed: *mut ManagedV1) {
     }
     let context = unsafe { (*managed).context.cast::<VersionOwner>() };
     if !context.is_null() {
-        Python::with_gil(|_| {
+        Python::attach(|_| {
             let owner = unsafe { Box::from_raw(context) };
-            owner.lease.store(false, Ordering::Release);
+            owner.lease.release();
             drop(owner);
         });
     }
@@ -264,6 +292,28 @@ pub(crate) fn export(
     len: usize,
     max_version: Option<(u32, u32)>,
 ) -> PyResult<PyObject> {
+    export_with(py, owner, Lease::Flag(lease), pointer, len, max_version)
+}
+
+pub(crate) fn export_count(
+    py: Python<'_>,
+    owner: PyObject,
+    lease: Arc<AtomicUsize>,
+    pointer: u64,
+    len: usize,
+    max_version: Option<(u32, u32)>,
+) -> PyResult<PyObject> {
+    export_with(py, owner, Lease::Count(lease), pointer, len, max_version)
+}
+
+fn export_with(
+    py: Python<'_>,
+    owner: PyObject,
+    lease: Lease,
+    pointer: u64,
+    len: usize,
+    max_version: Option<(u32, u32)>,
+) -> PyResult<PyObject> {
     if let Some((major, minor)) = max_version.filter(|version| version.0 >= 1) {
         let version = Version {
             major: 1,
@@ -278,7 +328,7 @@ pub(crate) fn export(
 fn export_legacy(
     py: Python<'_>,
     owner: PyObject,
-    lease: Arc<AtomicBool>,
+    lease: Lease,
     pointer: u64,
     len: usize,
 ) -> PyResult<PyObject> {
@@ -305,7 +355,7 @@ fn export_legacy(
 fn export_versioned(
     py: Python<'_>,
     owner: PyObject,
-    lease: Arc<AtomicBool>,
+    lease: Lease,
     pointer: u64,
     len: usize,
     version: Version,
@@ -369,23 +419,25 @@ where
         failure();
         Err(PyErr::fetch(py))
     } else {
-        Ok(unsafe { PyObject::from_owned_ptr(py, capsule) })
+        Ok(unsafe { Bound::from_owned_ptr(py, capsule).unbind() })
     }
 }
 
-fn validate_tensor(tensor: &Tensor) -> PyResult<()> {
+fn validate_tensor(tensor: &Tensor, code: u8, bits: u8, name: &str) -> PyResult<()> {
     if tensor.device.kind != CUDA || tensor.device.index != 0 {
-        return Err(PyBufferError::new_err(
-            "BF16Tree requires a CUDA device-0 DLPack tensor",
-        ));
+        return Err(PyBufferError::new_err(format!(
+            "{name} input requires a CUDA device-0 DLPack tensor"
+        )));
     }
-    if tensor.dtype.code != BF16 || tensor.dtype.bits != 16 || tensor.dtype.lanes != 1 {
-        return Err(PyBufferError::new_err("BF16Tree requires BF16 DLPack data"));
+    if tensor.dtype.code != code || tensor.dtype.bits != bits || tensor.dtype.lanes != 1 {
+        return Err(PyBufferError::new_err(format!(
+            "{name} input requires {name} DLPack data"
+        )));
     }
     if tensor.ndim <= 0 || tensor.shape.is_null() || tensor.data.is_null() {
-        return Err(PyValueError::new_err(
-            "BF16Tree requires a non-empty tensor",
-        ));
+        return Err(PyValueError::new_err(format!(
+            "{name} input requires a non-empty tensor"
+        )));
     }
     Ok(())
 }

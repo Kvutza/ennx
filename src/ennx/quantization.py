@@ -9,7 +9,24 @@ except ImportError:  # pragma: no cover - source-only dev mode
 
 # FP4 E2M1 lookup table
 FP4_E2M1_LUT = np.array(
-    [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+    [
+        0.0,
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        3.0,
+        4.0,
+        6.0,
+        -0.0,
+        -0.5,
+        -1.0,
+        -1.5,
+        -2.0,
+        -3.0,
+        -4.0,
+        -6.0,
+    ],
     dtype=np.float32,
 )
 

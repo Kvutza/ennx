@@ -39,7 +39,7 @@ impl PyENNStatefulFitter {
     }
 
     fn y_std<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        Ok(self.inner.y_std().to_pyarray_bound(py))
+        Ok(self.inner.y_std().to_pyarray(py))
     }
 
     #[pyo3(signature = (model, num_fit_candidates, num_fit_samples, params_warm_start=None))]

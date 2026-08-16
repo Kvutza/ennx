@@ -11,6 +11,7 @@ class ENNIndexDriver(Enum):
     BPANN_DISK = auto()
     METAL = auto()
     OPENCL = auto()
+    CUDA = auto()
 
 
 # Canonical strings for Rust (model and optimizer both accept lowercase)
@@ -22,4 +23,5 @@ ENN_INDEX_DRIVER_TO_RUST: dict[ENNIndexDriver, str] = {
     ENNIndexDriver.BPANN_DISK: "bpann_disk",
     ENNIndexDriver.METAL: "metal",
     ENNIndexDriver.OPENCL: "opencl",
+    ENNIndexDriver.CUDA: "cuda",
 }

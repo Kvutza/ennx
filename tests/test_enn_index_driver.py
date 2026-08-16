@@ -24,6 +24,7 @@ def test_enn_index_driver_to_rust_maps_all():
     assert ENN_INDEX_DRIVER_TO_RUST[ENNIndexDriver.BPANN_DISK] == "bpann_disk"
     assert ENN_INDEX_DRIVER_TO_RUST[ENNIndexDriver.METAL] == "metal"
     assert ENN_INDEX_DRIVER_TO_RUST[ENNIndexDriver.OPENCL] == "opencl"
+    assert ENN_INDEX_DRIVER_TO_RUST[ENNIndexDriver.CUDA] == "cuda"
 
 
 @pytest.mark.parametrize("index_driver", [ENNIndexDriver.METAL, ENNIndexDriver.OPENCL])

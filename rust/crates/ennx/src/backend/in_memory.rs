@@ -97,6 +97,10 @@ impl InMemoryEnnBackend {
         self.train_y_rows.view()
     }
 
+    pub fn yvar_view(&self) -> Option<ndarray::ArrayView2<'_, f64>> {
+        self.train_yvar_rows.as_ref().map(RowStorage::view)
+    }
+
     pub fn index(&self) -> &ENNIndex {
         &self.index
     }

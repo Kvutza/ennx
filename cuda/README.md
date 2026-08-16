@@ -9,13 +9,14 @@ materialization, exact distance, ENN scoring, and winner selection. They
 preserve ENNx's trial semantics and are tested against an independent CPU
 implementation before any timing result is accepted.
 
-On a prepared Linux CUDA host:
+On a prepared Linux CUDA host, run from this directory:
 
 ```bash
-cargo +nightly-2026-04-03 oxide run --arch sm_75 -- parity
-cargo +nightly-2026-04-03 oxide run --arch sm_75 -- resident
-cargo +nightly-2026-04-03 oxide run --arch sm_75 -- bench 16777216 100 4
-cargo +nightly-2026-04-03 oxide run --arch sm_75 -- \
+cd cuda
+cargo oxide run --arch sm_75 -- parity
+cargo oxide run --arch sm_75 -- resident
+cargo oxide run --arch sm_75 -- bench 16777216 100 4
+cargo oxide run --arch sm_75 -- \
   trial-bench 1024 32 8192 20
 compute-sanitizer --tool memcheck --error-exitcode 99 \
   target/release/ennx-cuda resident
@@ -71,10 +72,11 @@ Linux x86-64 T4 runtime:
   --local-only --num-threads 4 --show-output
 ```
 
-This action pins `nightly-2026-04-03`, compiles the CUDA-Oxide device crate for
-`sm_75`, embeds that artifact in the Python extension, and packages the CPython
-3.12 wheel. It requires `cargo-oxide` and the pinned nightly to be installed in
-the execution environment; the Colab setup cell provides both.
+This action enters the CUDA workspace, which pins `nightly-2026-04-03`, then
+compiles the CUDA-Oxide device crate for `sm_75`, embeds that artifact in the
+Python extension, and packages the CPython 3.12 wheel. It requires
+`cargo-oxide` and the pinned nightly to be installed in the execution
+environment; the Colab setup cell provides both.
 
 After JAX is available on the T4 runtime, build the wheel and verify direct
 BF16 DLPack import, resident perturbation, and export with one target:
@@ -108,3 +110,5 @@ argmax, materialization, and total CUDA event times as Tracy plots; setting
 
 CUDA support is opt-in through the ENNx `cuda` Cargo feature so CUDA-Oxide's
 pinned nightly compiler remains outside normal CPU, Metal, and OpenCL builds.
+Do not run CUDA commands through Pixi: Pixi owns the Python environment, while
+this workspace owns the Rust and CUDA-Oxide toolchain.

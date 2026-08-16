@@ -19,7 +19,7 @@ must be reproducible from a seed, workload shape, and backend selection.
 | Python optional | Tests requiring optional packages such as Torch/Gpytorch/click or source-tree extension setup. | Install the optional dependencies and built extension, then run the selected pytest group. |
 | Project CI | Default project build, Buck2 tests, wheel build, and wheel/API verification. | `./ennx ci` |
 | Bazel graph | Bazel release/audit path. | `bazel test //:check //:audit --config=release --config=constrained` |
-| Hardware | Metal/OpenCL/FAISS behavior and CPU parity. Run when touching accelerator, KNN, dense, BF16, or native build code. | platform-specific Rust, Bazel, or Buck2 tests |
+| Hardware | Metal/OpenCL/FAISS behavior and CPU parity. Run when touching accelerator, KNN, dense, BF16, or native build code. | platform-specific Rust, Bazel, or Buck2 tests; `./ennx cuda parity` on Linux x86_64 with NVIDIA CUDA |
 | Benchmark | Speed and numerical-regression checks. Run before performance claims. | benchmark scripts plus Tracy captures |
 
 Use the smallest tier that can catch the bug while iterating. Before merging,

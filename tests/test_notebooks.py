@@ -206,8 +206,8 @@ def test_mjx_colab():
 
     source = "\n".join(code)
     for required in (
-        "cuda-v0.1.4",
-        "ennx-0.1.4%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
+        "cuda-v0.1.6",
+        "ennx-0.1.6%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
         "mujoco==3.6.0",
         "mujoco-mjx==3.6.0",
         "from mujoco import mjx",
@@ -215,15 +215,16 @@ def test_mjx_colab():
         "mjx.step",
         "PARAMETER_COUNT",
         "900_000 <= PARAMETER_COUNT <= 1_000_000",
-        "TurboSearch",
-        "HISTORY_CAPACITY = 8",
-        "BATCH_ARMS = 4",
-        "CANDIDATES = 8",
-        'backend="cuda"',
+        "Bf16Search",
+        "repetitions = 10",
+        'os.environ.get("ENNX_REPETITIONS"',
+        'os.environ.get("ENNX_ROUNDS"',
+        "history_capacity = 8",
+        "batch_arms = 4",
+        "candidates = 8",
         "search.ask_batch(",
-        "search.device_batch(",
-        "search.tell_batch(",
-        "cp.cuda.UnownedMemory",
+        "search.rows(",
+        "search.tell_batch(trials, reward, variances)",
         "jax.dlpack.from_dlpack",
         "jax.vmap(score_policy)",
         "mujoco.Renderer",
@@ -231,10 +232,29 @@ def test_mjx_colab():
         '"--no-deps"',
         '"--constraint"',
         'metadata.version("numpy")',
+        "CONFIG_TOML",
+        "env_steps_total",
+        "proposal_dt",
+        "tell_dt",
+        "mean_sem",
+        "fill_between",
+        'RESULT_ROOT / "trace.jsonl"',
+        "handle.flush()",
+        'RESULT_ROOT / "summary.json"',
+        '"round_ms_mean"',
+        '"control_transitions"',
     ):
         assert required in source
 
-    assert "search.row()" not in source
+    for removed in (
+        "TurboSearch",
+        "cp.cuda.UnownedMemory",
+        "import numpy as",
+        "reward.tolist()",
+        "EVAL_KEYS =",
+        "keys.reshape(arms, EVAL_ENVS, 2)",
+    ):
+        assert removed not in source
 
 
 def test_bf16():

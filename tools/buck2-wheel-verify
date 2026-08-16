@@ -16,13 +16,25 @@ case "$python_version" in
         python_environment=ennx
         isolation_dir=release-py313
         ;;
+    3.14)
+        python_abi=cp314
+        python_environment=ennx-py314
+        isolation_dir=release-py314
+        ;;
     *)
         echo "unsupported Python version: $python_version" >&2
         exit 1
         ;;
 esac
 
-python_bin=${ENNX_PYTHON:-"$repo_dir/.pixi/envs/$python_environment/bin/python"}
+python_bin=${ENNX_PYTHON:-}
+if [ -z "$python_bin" ] && [ -n "$python_environment" ]; then
+    python_bin="$repo_dir/.pixi/envs/$python_environment/bin/python"
+fi
+if [ -z "$python_bin" ]; then
+    echo "set ENNX_PYTHON to a CPython $python_version interpreter" >&2
+    exit 1
+fi
 case "$python_bin" in
     /*) ;;
     *) python_bin="$repo_dir/$python_bin" ;;

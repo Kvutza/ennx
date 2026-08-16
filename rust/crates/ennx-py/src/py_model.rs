@@ -32,7 +32,7 @@ fn py_posterior_flags(
 }
 
 /// Python wrapper for EpistemicNearestNeighbors
-#[pyclass(name = "EpistemicNearestNeighbors")]
+#[pyclass(unsendable, name = "EpistemicNearestNeighbors")]
 pub struct PyEpistemicNearestNeighbors {
     pub(crate) inner: ennx::EpistemicNearestNeighbors,
     tie_break_neighbors: std::cell::Cell<bool>,
@@ -60,6 +60,7 @@ impl PyEpistemicNearestNeighbors {
             "BPANN_DISK" | "bpann_disk" => ennx::IndexDriver::BpAnnDisk,
             "METAL" | "metal" => ennx::IndexDriver::Metal,
             "OPENCL" | "OpenCL" | "opencl" | "ocl" => ennx::IndexDriver::OpenCl,
+            "CUDA" | "Cuda" | "cuda" => ennx::IndexDriver::Cuda,
             _ => {
                 return Err(PyValueError::new_err(format!(
                     "Unknown index_driver: {index_driver}"
@@ -147,7 +148,7 @@ impl PyEpistemicNearestNeighbors {
 
     #[getter]
     fn y_bounds<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f64>> {
-        self.inner.y_bounds().clone().into_pyarray_bound(py)
+        self.inner.y_bounds().clone().into_pyarray(py)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -174,11 +175,11 @@ impl PyEpistemicNearestNeighbors {
             .posterior(&x.as_array(), &params, &flags)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok((
-            out.mu.into_pyarray_bound(py),
-            out.se.into_pyarray_bound(py),
-            out.se_epi.into_pyarray_bound(py),
-            out.se_ale.into_pyarray_bound(py),
-            out.idx.map(|idx| idx.into_dyn().into_pyarray_bound(py)),
+            out.mu.into_pyarray(py),
+            out.se.into_pyarray(py),
+            out.se_epi.into_pyarray(py),
+            out.se_ale.into_pyarray(py),
+            out.idx.map(|idx| idx.into_dyn().into_pyarray(py)),
         ))
     }
 
@@ -223,10 +224,10 @@ impl PyEpistemicNearestNeighbors {
             .batch_posterior(&x.as_array(), &paramss, &flags)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok((
-            out.mu.into_pyarray_bound(py),
-            out.se.into_pyarray_bound(py),
-            out.se_epi.into_pyarray_bound(py),
-            out.se_ale.into_pyarray_bound(py),
+            out.mu.into_pyarray(py),
+            out.se.into_pyarray(py),
+            out.se_epi.into_pyarray(py),
+            out.se_ale.into_pyarray(py),
         ))
     }
 
@@ -255,7 +256,7 @@ impl PyEpistemicNearestNeighbors {
             .inner
             .posterior_function_draw(&x.as_array(), &params, &function_seeds, &flags)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok((draws.into_dyn().into_pyarray_bound(py), idx))
+        Ok((draws.into_dyn().into_pyarray(py), idx))
     }
 
     /// Conditional posterior with what-if scenarios.
@@ -291,11 +292,11 @@ impl PyEpistemicNearestNeighbors {
             )
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok((
-            out.mu.into_pyarray_bound(py),
-            out.se.into_pyarray_bound(py),
-            out.se_epi.into_pyarray_bound(py),
-            out.se_ale.into_pyarray_bound(py),
-            out.idx.map(|idx| idx.into_dyn().into_pyarray_bound(py)),
+            out.mu.into_pyarray(py),
+            out.se.into_pyarray(py),
+            out.se_epi.into_pyarray(py),
+            out.se_ale.into_pyarray(py),
+            out.idx.map(|idx| idx.into_dyn().into_pyarray(py)),
         ))
     }
 
@@ -333,7 +334,7 @@ impl PyEpistemicNearestNeighbors {
                 &flags,
             )
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok((draws.into_dyn().into_pyarray_bound(py), idx))
+        Ok((draws.into_dyn().into_pyarray(py), idx))
     }
 
     /// Get k nearest neighbors for query points.
@@ -349,7 +350,7 @@ impl PyEpistemicNearestNeighbors {
             .inner
             .neighbors(&x.as_array(), k, exclude_nearest)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(result.into_dyn().into_pyarray_bound(py))
+        Ok(result.into_dyn().into_pyarray(py))
     }
 
     #[allow(clippy::type_complexity)]
@@ -367,8 +368,8 @@ impl PyEpistemicNearestNeighbors {
             .neighbor_distances_and_indices(&x.as_array(), search_k, exclude_nearest)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok((
-            dist2s.into_dyn().into_pyarray_bound(py),
-            idx.into_dyn().into_pyarray_bound(py),
+            dist2s.into_dyn().into_pyarray(py),
+            idx.into_dyn().into_pyarray(py),
         ))
     }
 
@@ -393,8 +394,8 @@ impl PyEpistemicNearestNeighbors {
             )
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok((
-            dist2s.into_dyn().into_pyarray_bound(py),
-            idx.into_dyn().into_pyarray_bound(py),
+            dist2s.into_dyn().into_pyarray(py),
+            idx.into_dyn().into_pyarray(py),
         ))
     }
 
@@ -427,9 +428,9 @@ impl PyEpistemicNearestNeighbors {
             .natural_rows(&indices)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok((
-            x.into_pyarray_bound(py),
-            y.into_pyarray_bound(py),
-            yvar.map(|a| a.into_pyarray_bound(py)),
+            x.into_pyarray(py),
+            y.into_pyarray(py),
+            yvar.map(|a| a.into_pyarray(py)),
         ))
     }
 
@@ -439,7 +440,7 @@ impl PyEpistemicNearestNeighbors {
             .rows()
             .row_x(i)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(row.insert_axis(ndarray::Axis(0)).into_pyarray_bound(py))
+        Ok(row.insert_axis(ndarray::Axis(0)).into_pyarray(py))
     }
 
     fn row_y<'py>(&self, py: Python<'py>, i: usize) -> PyResult<Bound<'py, PyArray2<f64>>> {
@@ -447,22 +448,22 @@ impl PyEpistemicNearestNeighbors {
             .inner
             .natural_y(i)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(row.insert_axis(ndarray::Axis(0)).into_pyarray_bound(py))
+        Ok(row.insert_axis(ndarray::Axis(0)).into_pyarray(py))
     }
 
     #[getter]
     fn x_scale_row<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
-        Ok(self.inner.x_scale_row().into_pyarray_bound(py))
+        Ok(self.inner.x_scale_row().into_pyarray(py))
     }
 
     #[getter]
     fn y_scale_row<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
-        Ok(self.inner.y_scale_row().into_pyarray_bound(py))
+        Ok(self.inner.y_scale_row().into_pyarray(py))
     }
 }
 
 /// Wrapper for ENNParams
-#[pyclass(name = "ENNParams")]
+#[pyclass(name = "ENNParams", from_py_object)]
 #[derive(Clone, Copy)]
 pub struct PyENNParams {
     pub(crate) inner: ennx::ENNParams,

@@ -2,6 +2,16 @@ use cuda_device::{
     DisjointSlice, SharedArray, cuda_module, kernel, launch_bounds, launch_contract, thread, warp,
 };
 
+mod bf16;
+pub use bf16::{Bf16Leaf, Bf16Score, SearchState, TellParams, TellSummary};
+use bf16::{acquisition_score, bf16_finite, bf16_seed, bf16_value, tile_distances, warp_invalid};
+mod knn;
+pub use knn::{
+    BatchParams, BatchValue, DrawParams, KNN_MAX_K, KNN_ROW_TILE, KNN_WARP_TILE, KnnParams,
+    MergeParams, PosteriorParams, WeightedParams,
+};
+use knn::{block_sum, init_pairs, row_distance, sort_pairs, warp_distance, write_list};
+
 pub const MODULE_NAME: &str = env!("CARGO_PKG_NAME");
 pub const THREADS: u32 = 256;
 const WARPS: usize = (THREADS / 32) as usize;
@@ -304,6 +314,34 @@ fn dense_mix64(input: u64) -> u64 {
 }
 
 #[inline(always)]
+fn draw_normal(seed: u64, index: u32, metric: u32) -> f64 {
+    const SEED_PRIME: u64 = 1_000_003;
+    const XOR_OFFSET: u64 = 0xd2b7_4407_b1ce_6e93;
+    const INV_2P53: f64 = 1.0 / 9_007_199_254_740_992.0;
+    const CLIP_MIN: f64 = 1.0e-12;
+    const CLIP_MAX: f64 = 1.0 - 1.0e-12;
+    const TAU: f64 = 6.283_185_307_179_586;
+
+    let base = seed
+        .wrapping_mul(SEED_PRIME)
+        .wrapping_add(index as u64)
+        .wrapping_mul(SEED_PRIME);
+    let combined = base.wrapping_add(metric as u64);
+    let first = dense_mix64(combined);
+    let second = dense_mix64(combined ^ XOR_OFFSET);
+    let raw = ((first >> 11) as f64) * INV_2P53;
+    let u1 = if raw < CLIP_MIN {
+        CLIP_MIN
+    } else if raw > CLIP_MAX {
+        CLIP_MAX
+    } else {
+        raw
+    };
+    let u2 = ((second >> 11) as f64) * INV_2P53;
+    (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
+}
+
+#[inline(always)]
 fn dense_sign(seed: u64, leaf: u64, element: u64) -> f32 {
     let leaf = dense_mix64(leaf ^ 0xd6e8_feb8_6659_fd93);
     let element = dense_mix64(element ^ 0xa076_1d64_78bd_642f);
@@ -367,78 +405,621 @@ fn dense_value(
     }
 }
 
-#[inline(always)]
-fn bf16_decode(value: u16) -> f32 {
-    f32::from_bits(u32::from(value) << 16)
+macro_rules! tell_validate {
+    ($values:ident, $trial_variances:ident, $accepted:ident, $trials:expr) => {{
+        let mut status = 0_u32;
+        let mut trial = 0_u32;
+        while trial < $trials {
+            let value = $values[trial as usize];
+            let variance = $trial_variances[trial as usize];
+            if !value.is_finite() || !variance.is_finite() || variance < 0.0 {
+                status = 1;
+            }
+            unsafe { *$accepted.get_unchecked_mut(trial as usize) = 0 };
+            trial += 1;
+        }
+        status
+    }};
 }
 
-#[inline(always)]
-fn bf16_finite(value: u16) -> bool {
-    value & 0x7f80 != 0x7f80
+macro_rules! tell_history {
+    ($local:ident, $history_slots:ident, $outcomes:ident, $variances:ident,
+     $trial_slots:ident, $values:ident, $trial_variances:ident, $accepted:ident,
+     $params:ident) => {{
+        let slots_ptr = $history_slots.as_mut_ptr() as *const u32;
+        let outcomes_ptr = $outcomes.as_mut_ptr() as *const f32;
+        let variances_ptr = $variances.as_mut_ptr() as *const f32;
+        let mut best_slot = u32::MAX;
+        let mut trial = 0_u32;
+        while trial < $params.trials {
+            let value = $values[trial as usize];
+            let variance = $trial_variances[trial as usize];
+            let slot = $trial_slots[trial as usize];
+            if value > $local.best {
+                $local.best = value;
+                $local.best_variance = variance;
+                best_slot = slot;
+                unsafe { *$accepted.get_unchecked_mut(trial as usize) = 1 };
+            }
+            if $local.history == $params.capacity {
+                let mut index = 1_u32;
+                while index < $local.history {
+                    unsafe {
+                        *$history_slots.get_unchecked_mut((index - 1) as usize) =
+                            slots_ptr.add(index as usize).read();
+                        *$outcomes.get_unchecked_mut((index - 1) as usize) =
+                            outcomes_ptr.add(index as usize).read();
+                        *$variances.get_unchecked_mut((index - 1) as usize) =
+                            variances_ptr.add(index as usize).read();
+                    }
+                    index += 1;
+                }
+                $local.history -= 1;
+            }
+            let index = $local.history as usize;
+            unsafe {
+                *$history_slots.get_unchecked_mut(index) = slot;
+                *$outcomes.get_unchecked_mut(index) = value;
+                *$variances.get_unchecked_mut(index) = variance;
+            }
+            $local.history += 1;
+            trial += 1;
+        }
+        best_slot
+    }};
 }
 
-#[inline(always)]
-fn bf16_encode(value: f32) -> u16 {
-    let bits = value.to_bits();
-    (bits.wrapping_add(0x7fff + ((bits >> 16) & 1)) >> 16) as u16
-}
-
-#[inline(always)]
-fn bf16_next(value: u16, positive: bool) -> u16 {
-    if value & 0x7fff == 0 {
-        return if positive { 1 } else { 0x8001 };
-    }
-    let grows = (value & 0x8000 == 0) == positive;
-    let candidate = if grows {
-        value.wrapping_add(1)
-    } else {
-        value.wrapping_sub(1)
-    };
-    if bf16_decode(candidate).is_finite() {
-        candidate
-    } else if grows {
-        value.wrapping_sub(1)
-    } else {
-        value.wrapping_add(1)
-    }
-}
-
-#[inline(always)]
-fn bf16_value(
-    value: u16,
-    leaf_key: u64,
-    element: u64,
-    scale: f32,
-    terms: &[DenseTerm],
-    term_count: u32,
-) -> u16 {
-    let mut sum = 0.0_f32;
-    let mut strongest = 0.0_f32;
-    let mut positive = true;
-    let mut term_index = 0;
-    while term_index < term_count {
-        let term = terms[term_index as usize];
-        if term.coefficient != 0.0 {
-            let direction = dense_sign(term.seed, leaf_key, element);
-            sum += term.coefficient * direction;
-            if term.coefficient.abs() > strongest {
-                strongest = term.coefficient.abs();
-                positive = (term.coefficient > 0.0) == (direction > 0.0);
+macro_rules! tell_adapt {
+    ($local:ident, $values:ident, $history_slots:ident, $outcomes:ident,
+     $variances:ident, $params:ident) => {{
+        let previous_best = $local.trust_best;
+        if previous_best.is_finite() {
+            let scale = if $local.prev_obs >= 2 {
+                ($local.hist_max - $local.hist_min).max(1.0e-6)
+            } else {
+                0.0
+            };
+            if f64::from($local.best) > previous_best + 1.0e-3 * scale {
+                $local.successes += 1;
+                $local.failures = 0;
+            } else {
+                $local.failures += 1;
+                $local.successes = 0;
+            }
+            if $local.successes >= 3 {
+                $local.length = ($local.length * 2.0).min($local.length_max);
+                $local.successes = 0;
+            } else if $local.failures >= $params.failure_tolerance {
+                $local.length *= 0.5;
+                $local.failures = 0;
             }
         }
-        term_index += 1;
-    }
-    let candidate = bf16_encode(bf16_decode(value) + scale * sum);
-    if sum == 0.0 || candidate == value {
-        bf16_next(value, positive)
-    } else {
-        candidate
-    }
+        $local.trust_best = f64::from($local.best);
+        let mut trial = 0_u32;
+        while trial < $params.trials {
+            let value = f64::from($values[trial as usize]);
+            $local.hist_min = $local.hist_min.min(value);
+            $local.hist_max = $local.hist_max.max(value);
+            trial += 1;
+        }
+        $local.prev_obs += u64::from($params.trials);
+        let mut restarted = 0_u32;
+        if $local.length < $local.length_min {
+            $local.length = $local.length_init;
+            $local.successes = 0;
+            $local.failures = 0;
+            $local.trust_best = f64::NEG_INFINITY;
+            $local.hist_min = f64::INFINITY;
+            $local.hist_max = f64::NEG_INFINITY;
+            $local.history = 1;
+            $local.restarts += 1;
+            unsafe {
+                *$history_slots.get_unchecked_mut(0) = 1;
+                *$outcomes.get_unchecked_mut(0) = $local.best;
+                *$variances.get_unchecked_mut(0) = $local.best_variance;
+            }
+            restarted = 1;
+        }
+        restarted
+    }};
 }
 
 #[cuda_module]
 pub mod trials {
     use super::*;
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn scan_rows(
+        rows: &[f32],
+        queries: &[f32],
+        mut distances: DisjointSlice<f32>,
+        mut indices: DisjointSlice<u32>,
+        params: KnnParams,
+    ) {
+        static mut VALUES: SharedArray<f32, { KNN_ROW_TILE as usize }> = SharedArray::UNINIT;
+        static mut INDICES: SharedArray<u32, { KNN_ROW_TILE as usize }> = SharedArray::UNINIT;
+
+        let list = thread::blockIdx_x();
+        let total_lists = params.queries * params.lists;
+        if list >= total_lists {
+            return;
+        }
+        let thread_index = thread::threadIdx_x();
+        let values = unsafe { SharedArray::as_raw_mut_ptr(&raw mut VALUES) };
+        let local_indices = unsafe { SharedArray::as_raw_mut_ptr(&raw mut INDICES) };
+        unsafe { init_pairs(values, local_indices, KNN_ROW_TILE) };
+
+        let query = list / params.lists;
+        let tile = list - query * params.lists;
+        let row = tile * KNN_ROW_TILE + thread_index;
+        if row < params.rows {
+            let distance = row_distance(rows, queries, row, query, params.dims);
+            unsafe {
+                values.add(thread_index as usize).write(distance);
+                local_indices.add(thread_index as usize).write(row);
+            }
+        }
+        thread::sync_threads();
+
+        unsafe {
+            sort_pairs(values, local_indices, KNN_ROW_TILE);
+            write_list(
+                values,
+                local_indices,
+                &mut distances,
+                &mut indices,
+                list,
+                params.neighbors,
+            );
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn scan_warps(
+        rows: &[f32],
+        queries: &[f32],
+        mut distances: DisjointSlice<f32>,
+        mut indices: DisjointSlice<u32>,
+        params: KnnParams,
+    ) {
+        static mut VALUES: SharedArray<f32, { KNN_ROW_TILE as usize }> = SharedArray::UNINIT;
+        static mut INDICES: SharedArray<u32, { KNN_ROW_TILE as usize }> = SharedArray::UNINIT;
+
+        let list = thread::blockIdx_x();
+        let total_lists = params.queries * params.lists;
+        if list >= total_lists {
+            return;
+        }
+        let values = unsafe { SharedArray::as_raw_mut_ptr(&raw mut VALUES) };
+        let local_indices = unsafe { SharedArray::as_raw_mut_ptr(&raw mut INDICES) };
+        unsafe { init_pairs(values, local_indices, KNN_ROW_TILE) };
+        thread::sync_threads();
+
+        let thread_index = thread::threadIdx_x();
+        let warp_index = thread_index / 32;
+        let query = list / params.lists;
+        let tile = list - query * params.lists;
+        let row = tile * KNN_WARP_TILE + warp_index;
+        if row < params.rows {
+            let distance = warp_distance(rows, queries, row, query, params.dims);
+            if warp::lane_id() == 0 {
+                unsafe {
+                    values.add(warp_index as usize).write(distance);
+                    local_indices.add(warp_index as usize).write(row);
+                }
+            }
+        }
+        thread::sync_threads();
+
+        unsafe {
+            sort_pairs(values, local_indices, KNN_WARP_TILE);
+            write_list(
+                values,
+                local_indices,
+                &mut distances,
+                &mut indices,
+                list,
+                params.neighbors,
+            );
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn merge_topk(
+        input_distances: &[f32],
+        input_indices: &[u32],
+        mut output_distances: DisjointSlice<f32>,
+        mut output_indices: DisjointSlice<u32>,
+        params: MergeParams,
+    ) {
+        static mut VALUES: SharedArray<f32, { KNN_ROW_TILE as usize }> = SharedArray::UNINIT;
+        static mut INDICES: SharedArray<u32, { KNN_ROW_TILE as usize }> = SharedArray::UNINIT;
+
+        let output_list = thread::blockIdx_x();
+        let total_lists = params.queries * params.output_lists;
+        if output_list >= total_lists {
+            return;
+        }
+        let thread_index = thread::threadIdx_x();
+        let values = unsafe { SharedArray::as_raw_mut_ptr(&raw mut VALUES) };
+        let local_indices = unsafe { SharedArray::as_raw_mut_ptr(&raw mut INDICES) };
+        unsafe { init_pairs(values, local_indices, KNN_ROW_TILE) };
+
+        let query = output_list / params.output_lists;
+        let local_list = output_list - query * params.output_lists;
+        let left_list = query * params.input_lists + 2 * local_list;
+        let right_local = 2 * local_list + 1;
+        if thread_index < params.neighbors {
+            let source = left_list as usize * params.neighbors as usize + thread_index as usize;
+            unsafe {
+                values
+                    .add(thread_index as usize)
+                    .write(input_distances[source]);
+                local_indices
+                    .add(thread_index as usize)
+                    .write(input_indices[source]);
+            }
+        } else if thread_index < 2 * params.neighbors && right_local < params.input_lists {
+            let neighbor = thread_index - params.neighbors;
+            let right_list = left_list + 1;
+            let source = right_list as usize * params.neighbors as usize + neighbor as usize;
+            unsafe {
+                values
+                    .add(thread_index as usize)
+                    .write(input_distances[source]);
+                local_indices
+                    .add(thread_index as usize)
+                    .write(input_indices[source]);
+            }
+        }
+        thread::sync_threads();
+
+        let mut width = 2_u32;
+        while width < 2 * params.neighbors {
+            width *= 2;
+        }
+        unsafe {
+            sort_pairs(values, local_indices, width);
+            write_list(
+                values,
+                local_indices,
+                &mut output_distances,
+                &mut output_indices,
+                output_list,
+                params.neighbors,
+            );
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn posterior_light(
+        distances: &[f32],
+        indices: &[u32],
+        outcomes: &[f32],
+        scales: &[f32],
+        mut means: DisjointSlice<f32>,
+        mut errors: DisjointSlice<f32>,
+        mut selected: DisjointSlice<u32>,
+        params: PosteriorParams,
+    ) {
+        static mut WEIGHTS: SharedArray<f32, KNN_MAX_K> = SharedArray::UNINIT;
+        static mut SUMS: SharedArray<f32, { THREADS as usize }> = SharedArray::UNINIT;
+
+        let query = thread::blockIdx_x();
+        if query >= params.queries {
+            return;
+        }
+        let thread_index = thread::threadIdx_x();
+        let weights = unsafe { SharedArray::as_raw_mut_ptr(&raw mut WEIGHTS) };
+        let sums = unsafe { SharedArray::as_raw_mut_ptr(&raw mut SUMS) };
+        let mut weight = 0.0_f32;
+        if thread_index < params.used_k {
+            let source = query as usize * params.input_k as usize
+                + params.skip as usize
+                + thread_index as usize;
+            let variance = params.epsilon
+                + params.epistemic_scale * distances[source]
+                + params.aleatoric_scale;
+            weight = 1.0 / variance.max(params.epsilon);
+            unsafe {
+                weights.add(thread_index as usize).write(weight);
+                *selected.get_unchecked_mut(
+                    query as usize * params.used_k as usize + thread_index as usize,
+                ) = indices[source];
+            }
+        }
+        unsafe { sums.add(thread_index as usize).write(weight) };
+        thread::sync_threads();
+
+        let mut stride = THREADS / 2;
+        while stride > 0 {
+            if thread_index < stride {
+                unsafe {
+                    let value = sums.add(thread_index as usize).read()
+                        + sums.add((thread_index + stride) as usize).read();
+                    sums.add(thread_index as usize).write(value);
+                }
+            }
+            thread::sync_threads();
+            stride /= 2;
+        }
+        let inverse = 1.0 / unsafe { sums.read() }.max(params.epsilon);
+        let error_base = inverse.max(params.epsilon).sqrt();
+        let mut metric = thread_index;
+        while metric < params.metrics {
+            let mut weighted = 0.0_f32;
+            let mut neighbor = 0_u32;
+            while neighbor < params.used_k {
+                let source = query as usize * params.input_k as usize
+                    + params.skip as usize
+                    + neighbor as usize;
+                let row = indices[source] as usize;
+                weighted += unsafe { weights.add(neighbor as usize).read() }
+                    * outcomes[row * params.metrics as usize + metric as usize];
+                neighbor += 1;
+            }
+            let output = query as usize * params.metrics as usize + metric as usize;
+            unsafe {
+                *means.get_unchecked_mut(output) = weighted * inverse;
+                *errors.get_unchecked_mut(output) = error_base * scales[metric as usize];
+            }
+            metric += THREADS;
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn posterior_full(
+        distances: &[f32],
+        indices: &[u32],
+        outcomes: &[f32],
+        variances: &[f32],
+        scales: &[f32],
+        mut weights_out: DisjointSlice<f32>,
+        mut l2_out: DisjointSlice<f32>,
+        mut means: DisjointSlice<f32>,
+        mut errors: DisjointSlice<f32>,
+        mut epistemic: DisjointSlice<f32>,
+        mut aleatoric: DisjointSlice<f32>,
+        mut selected: DisjointSlice<u32>,
+        params: WeightedParams,
+    ) {
+        static mut SUMS: SharedArray<f32, { THREADS as usize }> = SharedArray::UNINIT;
+
+        let block = thread::blockIdx_x();
+        let total = params.queries * params.metrics;
+        if block >= total {
+            return;
+        }
+        let query = block / params.metrics;
+        let metric = block - query * params.metrics;
+        let thread_index = thread::threadIdx_x();
+        let sums = unsafe { SharedArray::as_raw_mut_ptr(&raw mut SUMS) };
+        let scale = scales[metric as usize];
+        let scale_sq = scale * scale;
+        let mut weight = 0.0_f32;
+        let mut row = 0_u32;
+        let mut variance = 0.0_f32;
+        if thread_index < params.used_k {
+            let source = query as usize * params.input_k as usize
+                + params.skip as usize
+                + thread_index as usize;
+            row = indices[source];
+            if params.has_yvar != 0 {
+                variance =
+                    variances[row as usize * params.metrics as usize + metric as usize] / scale_sq;
+            }
+            let total_variance = params.epsilon
+                + params.epistemic_scale * distances[source]
+                + params.aleatoric_scale
+                + variance;
+            weight = 1.0 / total_variance.max(params.epsilon);
+            if metric == 0 {
+                unsafe {
+                    *selected.get_unchecked_mut(
+                        query as usize * params.used_k as usize + thread_index as usize,
+                    ) = row;
+                }
+            }
+        }
+        unsafe { sums.add(thread_index as usize).write(weight) };
+        let inverse = 1.0 / unsafe { block_sum(sums) }.max(params.epsilon);
+
+        let normalized = if thread_index < params.used_k {
+            weight * inverse
+        } else {
+            0.0
+        };
+        if thread_index < params.used_k {
+            let output = (query as usize * params.used_k as usize + thread_index as usize)
+                * params.metrics as usize
+                + metric as usize;
+            unsafe { *weights_out.get_unchecked_mut(output) = normalized };
+        }
+
+        unsafe {
+            sums.add(thread_index as usize)
+                .write(normalized * normalized)
+        };
+        let l2 = unsafe { block_sum(sums) }.sqrt();
+
+        let weighted = if thread_index < params.used_k {
+            normalized * outcomes[row as usize * params.metrics as usize + metric as usize]
+        } else {
+            0.0
+        };
+        unsafe { sums.add(thread_index as usize).write(weighted) };
+        let mean = unsafe { block_sum(sums) };
+
+        let noise = if thread_index < params.used_k && params.observation_noise != 0 {
+            normalized * (params.aleatoric_scale + variance)
+        } else {
+            0.0
+        };
+        unsafe { sums.add(thread_index as usize).write(noise) };
+        let aleatoric_var = unsafe { block_sum(sums) };
+        let epistemic_var = inverse;
+        let total_variance = epistemic_var + aleatoric_var;
+        let (error, epi, ale) = if total_variance < params.epsilon {
+            let value = params.epsilon.sqrt() * scale;
+            (value, value, 0.0)
+        } else {
+            (
+                total_variance.sqrt() * scale,
+                epistemic_var.sqrt() * scale,
+                aleatoric_var.sqrt() * scale,
+            )
+        };
+        if thread_index == 0 {
+            unsafe {
+                *l2_out.get_unchecked_mut(block as usize) = l2;
+                *means.get_unchecked_mut(block as usize) = mean;
+                *errors.get_unchecked_mut(block as usize) = error;
+                *epistemic.get_unchecked_mut(block as usize) = epi;
+                *aleatoric.get_unchecked_mut(block as usize) = ale;
+            }
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn posterior_batch(
+        distances: &[f32],
+        indices: &[u32],
+        outcomes: &[f32],
+        variances: &[f32],
+        scales: &[f32],
+        values: &[BatchValue],
+        mut means: DisjointSlice<f32>,
+        mut errors: DisjointSlice<f32>,
+        mut epistemic: DisjointSlice<f32>,
+        mut aleatoric: DisjointSlice<f32>,
+        params: BatchParams,
+    ) {
+        static mut SUMS: SharedArray<f32, { THREADS as usize }> = SharedArray::UNINIT;
+
+        let block = thread::blockIdx_x();
+        let query_values = params.queries * params.metrics;
+        let total = params.param_count * query_values;
+        if block >= total {
+            return;
+        }
+        let param_index = block / query_values;
+        let query_metric = block - param_index * query_values;
+        let query = query_metric / params.metrics;
+        let metric = query_metric - query * params.metrics;
+        let value = values[param_index as usize];
+        let thread_index = thread::threadIdx_x();
+        let sums = unsafe { SharedArray::as_raw_mut_ptr(&raw mut SUMS) };
+        let scale = scales[metric as usize];
+        let scale_sq = scale * scale;
+        let mut row = 0_u32;
+        let mut variance = 0.0_f32;
+        let mut weight = 0.0_f32;
+        if thread_index < value.used_k {
+            let source = query as usize * params.input_k as usize
+                + value.skip as usize
+                + thread_index as usize;
+            row = indices[source];
+            if params.has_yvar != 0 {
+                variance =
+                    variances[row as usize * params.metrics as usize + metric as usize] / scale_sq;
+            }
+            let total_variance = params.epsilon
+                + value.epistemic_scale * distances[source]
+                + value.aleatoric_scale
+                + variance;
+            weight = 1.0 / total_variance.max(params.epsilon);
+        }
+        unsafe { sums.add(thread_index as usize).write(weight) };
+        let inverse = 1.0 / unsafe { block_sum(sums) }.max(params.epsilon);
+
+        let weighted = if thread_index < value.used_k {
+            weight * outcomes[row as usize * params.metrics as usize + metric as usize]
+        } else {
+            0.0
+        };
+        unsafe { sums.add(thread_index as usize).write(weighted) };
+        let mean = unsafe { block_sum(sums) } * inverse;
+
+        let noise = if thread_index < value.used_k && params.observation_noise != 0 {
+            weight * inverse * (value.aleatoric_scale + variance)
+        } else {
+            0.0
+        };
+        unsafe { sums.add(thread_index as usize).write(noise) };
+        let aleatoric_var = unsafe { block_sum(sums) };
+        let epistemic_var = inverse;
+        let total_variance = epistemic_var + aleatoric_var;
+        let (error, epi, ale) = if total_variance < params.epsilon {
+            let floor = params.epsilon.sqrt() * scale;
+            (floor, floor, 0.0)
+        } else {
+            (
+                total_variance.sqrt() * scale,
+                epistemic_var.sqrt() * scale,
+                aleatoric_var.sqrt() * scale,
+            )
+        };
+        if thread_index == 0 {
+            unsafe {
+                *means.get_unchecked_mut(block as usize) = mean;
+                *errors.get_unchecked_mut(block as usize) = error;
+                *epistemic.get_unchecked_mut(block as usize) = epi;
+                *aleatoric.get_unchecked_mut(block as usize) = ale;
+            }
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn posterior_draw(
+        weights: &[f32],
+        l2: &[f32],
+        means: &[f32],
+        errors: &[f32],
+        indices: &[u32],
+        seeds: &[u64],
+        mut draws: DisjointSlice<f64>,
+        params: DrawParams,
+    ) {
+        let output = thread::blockIdx_x() * THREADS + thread::threadIdx_x();
+        let query_values = params.queries * params.metrics;
+        let total = params.seed_count * query_values;
+        if output >= total {
+            return;
+        }
+        let seed_index = output / query_values;
+        let query_metric = output - seed_index * query_values;
+        let query = query_metric / params.metrics;
+        let metric = query_metric - query * params.metrics;
+        let mut weighted = 0.0_f64;
+        let mut neighbor = 0_u32;
+        while neighbor < params.neighbors {
+            let neighbor_offset = query as usize * params.neighbors as usize + neighbor as usize;
+            let weight_offset = neighbor_offset * params.metrics as usize + metric as usize;
+            weighted += weights[weight_offset] as f64
+                * draw_normal(seeds[seed_index as usize], indices[neighbor_offset], metric);
+            neighbor += 1;
+        }
+        let value_offset = query as usize * params.metrics as usize + metric as usize;
+        let scale = errors[value_offset] as f64 / (l2[value_offset] as f64).max(1.0e-12);
+        unsafe {
+            *draws.get_unchecked_mut(output as usize) =
+                means[value_offset] as f64 + scale * weighted;
+        }
+    }
 
     #[kernel(unchecked_indexing)]
     #[launch_bounds(THREADS)]
@@ -715,6 +1296,140 @@ pub mod trials {
             unsafe {
                 *scores.get_unchecked_mut(candidate as usize) = score;
             }
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn distance_bf16(
+        rows: &[u16],
+        history_slots: &[u32],
+        seeds: &[Seed],
+        leaves: &[Bf16Leaf],
+        tiles: &[DenseTile],
+        mut partials: DisjointSlice<f32>,
+        params: Bf16Score,
+    ) {
+        static mut VALUES: SharedArray<f32, 256> = SharedArray::UNINIT;
+        static mut DISTANCES: SharedArray<f32, MAX_HISTORY> = SharedArray::UNINIT;
+        static mut WARP_STATUS: SharedArray<u32, WARPS> = SharedArray::UNINIT;
+
+        let block_index = thread::blockIdx_x();
+        if block_index >= params.candidates * params.tiles {
+            return;
+        }
+        let candidate = block_index / params.tiles;
+        let tile_index = block_index % params.tiles;
+        let thread_index = thread::threadIdx_x();
+        let lane = warp::lane_id();
+        let warp_index = thread_index / 32;
+        let values = unsafe { SharedArray::as_raw_mut_ptr(&raw mut VALUES) };
+        let distances = unsafe { SharedArray::as_raw_mut_ptr(&raw mut DISTANCES) };
+        let warp_status = unsafe { SharedArray::as_raw_mut_ptr(&raw mut WARP_STATUS) };
+        if thread_index < params.history {
+            unsafe { distances.add(thread_index as usize).write(0.0) };
+        }
+        if lane == 0 {
+            unsafe { warp_status.add(warp_index as usize).write(0) };
+        }
+        thread::sync_threads();
+
+        let tile = tiles[tile_index as usize];
+        tile_distances(
+            rows,
+            history_slots,
+            seeds[candidate as usize],
+            leaves[tile.leaf as usize],
+            tile,
+            values,
+            distances,
+            warp_status,
+            params,
+        );
+        let invalid = warp_invalid(warp_status);
+        if thread_index < params.history {
+            let output = block_index as usize * params.history as usize + thread_index as usize;
+            unsafe {
+                *partials.get_unchecked_mut(output) = if invalid {
+                    f32::INFINITY
+                } else {
+                    distances.add(thread_index as usize).read()
+                };
+            }
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn score_bf16(
+        partials: &[f32],
+        outcomes: &[f32],
+        variances: &[f32],
+        draws: &[f32],
+        mut scores: DisjointSlice<f32>,
+        params: Bf16Score,
+    ) {
+        static mut DISTANCES: SharedArray<f32, MAX_HISTORY> = SharedArray::UNINIT;
+        static mut NEAREST_DISTANCES: SharedArray<f32, MAX_HISTORY> = SharedArray::UNINIT;
+        static mut NEAREST_INDICES: SharedArray<u32, MAX_HISTORY> = SharedArray::UNINIT;
+
+        let candidate = thread::blockIdx_x();
+        if candidate >= params.candidates {
+            return;
+        }
+        let thread_index = thread::threadIdx_x();
+        let distances = unsafe { SharedArray::as_raw_mut_ptr(&raw mut DISTANCES) };
+        let nearest_distances = unsafe { SharedArray::as_raw_mut_ptr(&raw mut NEAREST_DISTANCES) };
+        let nearest_indices = unsafe { SharedArray::as_raw_mut_ptr(&raw mut NEAREST_INDICES) };
+        if thread_index < params.history {
+            let mut distance = 0.0f32;
+            let mut tile_index = 0u32;
+            while tile_index < params.tiles {
+                let block_index = candidate * params.tiles + tile_index;
+                let input = block_index as usize * params.history as usize + thread_index as usize;
+                distance += partials[input];
+                tile_index += 1;
+            }
+            unsafe { distances.add(thread_index as usize).write(distance) };
+        }
+        thread::sync_threads();
+
+        if thread_index == 0 {
+            if unsafe { !distances.read().is_finite() } {
+                unsafe {
+                    *scores.get_unchecked_mut(candidate as usize) = f32::NEG_INFINITY;
+                }
+                return;
+            }
+            let score = acquisition_score(
+                distances,
+                nearest_distances,
+                nearest_indices,
+                outcomes,
+                variances,
+                draws,
+                candidate,
+                params,
+            );
+            unsafe {
+                *scores.get_unchecked_mut(candidate as usize) = score;
+            }
+        }
+    }
+
+    #[kernel]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn draw_bf16(mut draws: DisjointSlice<f32>, seed: u64, count: u32) {
+        let mut index = thread::threadIdx_x() + thread::blockIdx_x() * THREADS;
+        let stride = thread::gridDim_x() * THREADS;
+        while index < count {
+            unsafe {
+                *draws.get_unchecked_mut(index as usize) = draw_normal(seed, index, 0) as f32;
+            }
+            index += stride;
         }
     }
 
@@ -1264,6 +1979,227 @@ pub mod trials {
                 invalid |= !bf16_finite(value);
                 *output.get_unchecked_mut(index as usize) = value;
             }
+            item += THREADS;
+        }
+        let warp_invalid = warp::any(invalid);
+        if lane == 0 {
+            unsafe {
+                WARP_STATUS[warp_index as usize] = u32::from(warp_invalid);
+            }
+        }
+        thread::sync_threads();
+        if thread_index == 0 {
+            let mut block_status = 0;
+            let mut warp_index = 0;
+            while warp_index < WARPS {
+                block_status |= unsafe { WARP_STATUS[warp_index] };
+                warp_index += 1;
+            }
+            unsafe {
+                *status.get_unchecked_mut(tile_index as usize) = block_status;
+            }
+        }
+    }
+
+    #[kernel]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn write_bf16(
+        mut rows: DisjointSlice<u16>,
+        seeds: &[Seed],
+        selection: &[Selection],
+        leaves: &[Bf16Leaf],
+        tiles: &[DenseTile],
+        trial_slots: &[u32],
+        mut status: DisjointSlice<u32>,
+        row_stride: u64,
+        base_slot: u32,
+        tile_count: u32,
+        coefficient: f32,
+    ) {
+        static mut WARP_STATUS: SharedArray<u32, WARPS> = SharedArray::UNINIT;
+
+        let block = thread::blockIdx_x();
+        let region = block / tile_count;
+        let tile_index = block % tile_count;
+        if region as usize >= selection.len() || tile_index as usize >= tiles.len() {
+            return;
+        }
+        let tile = tiles[tile_index as usize];
+        let leaf = leaves[tile.leaf as usize];
+        let seed = seeds[selection[region as usize].index as usize];
+        let base_offset = base_slot as usize * row_stride as usize;
+        let row_offset = trial_slots[region as usize] as usize * row_stride as usize;
+        let rows_ptr = rows.as_mut_ptr() as *const u16;
+        let thread_index = thread::threadIdx_x();
+        let lane = warp::lane_id();
+        let warp_index = thread_index / 32;
+        let mut invalid = false;
+        let mut item = thread_index;
+        while item < tile.length {
+            let element = u64::from(tile.start + item);
+            let index = leaf.offset + element;
+            let value = bf16_seed(
+                unsafe { rows_ptr.add(base_offset + index as usize).read() },
+                leaf,
+                element,
+                seed,
+                coefficient,
+            );
+            invalid |= !bf16_finite(value);
+            unsafe {
+                *rows.get_unchecked_mut(row_offset + index as usize) = value;
+            }
+            item += THREADS;
+        }
+        let warp_invalid = warp::any(invalid);
+        if lane == 0 {
+            unsafe {
+                WARP_STATUS[warp_index as usize] = u32::from(warp_invalid);
+            }
+        }
+        thread::sync_threads();
+        if thread_index == 0 {
+            let mut block_status = 0;
+            let mut warp_index = 0;
+            while warp_index < WARPS {
+                block_status |= unsafe { WARP_STATUS[warp_index] };
+                warp_index += 1;
+            }
+            unsafe {
+                *status.get_unchecked_mut(block as usize) = block_status;
+            }
+        }
+    }
+
+    #[kernel]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn tell_bf16(
+        mut rows: DisjointSlice<u16>,
+        mut history_slots: DisjointSlice<u32>,
+        mut outcomes: DisjointSlice<f32>,
+        mut variances: DisjointSlice<f32>,
+        trial_slots: &[u32],
+        values: &[f32],
+        trial_variances: &[f32],
+        mut accepted: DisjointSlice<u32>,
+        mut state: DisjointSlice<SearchState>,
+        mut summary: DisjointSlice<TellSummary>,
+        params: TellParams,
+    ) {
+        static mut CONTROL: SharedArray<u32, 3> = SharedArray::UNINIT;
+
+        let thread_index = thread::threadIdx_x();
+        if thread_index == 0 {
+            let state_ptr = state.as_mut_ptr() as *const SearchState;
+            let status = tell_validate!(values, trial_variances, accepted, params.trials);
+            let mut best_slot = u32::MAX;
+            let mut restarted = 0_u32;
+            if status == 0 {
+                let mut local = unsafe { state_ptr.read() };
+                best_slot = tell_history!(
+                    local,
+                    history_slots,
+                    outcomes,
+                    variances,
+                    trial_slots,
+                    values,
+                    trial_variances,
+                    accepted,
+                    params
+                );
+                restarted = tell_adapt!(local, values, history_slots, outcomes, variances, params);
+                unsafe { *state.get_unchecked_mut(0) = local };
+                unsafe {
+                    *summary.get_unchecked_mut(0) = TellSummary {
+                        length: local.length,
+                        best: local.best,
+                        best_variance: local.best_variance,
+                        history: local.history,
+                        restarts: local.restarts,
+                        restarted,
+                        status: 0,
+                    };
+                }
+            } else {
+                let local = unsafe { state_ptr.read() };
+                unsafe {
+                    *summary.get_unchecked_mut(0) = TellSummary {
+                        length: local.length,
+                        best: local.best,
+                        best_variance: local.best_variance,
+                        history: local.history,
+                        restarts: local.restarts,
+                        restarted: 0,
+                        status,
+                    };
+                }
+            }
+            unsafe {
+                CONTROL[0] = best_slot;
+                CONTROL[1] = restarted;
+                CONTROL[2] = status;
+            }
+        }
+        thread::sync_threads();
+
+        if unsafe { CONTROL[2] } != 0 {
+            return;
+        }
+        let best_slot = unsafe { CONTROL[0] };
+        if best_slot != u32::MAX {
+            let source = best_slot as usize * params.row_stride as usize;
+            let rows_ptr = rows.as_mut_ptr() as *const u16;
+            let mut index = thread_index as u64;
+            while index < params.row_len {
+                let value = unsafe { rows_ptr.add(source + index as usize).read() };
+                unsafe { *rows.get_unchecked_mut(index as usize) = value };
+                index += u64::from(THREADS);
+            }
+        }
+        thread::sync_threads();
+
+        if unsafe { CONTROL[1] } != 0 {
+            let destination = params.row_stride as usize;
+            let rows_ptr = rows.as_mut_ptr() as *const u16;
+            let mut index = thread_index as u64;
+            while index < params.row_len {
+                let value = unsafe { rows_ptr.add(index as usize).read() };
+                unsafe { *rows.get_unchecked_mut(destination + index as usize) = value };
+                index += u64::from(THREADS);
+            }
+        }
+    }
+
+    #[kernel]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn check_search(
+        rows: &[u16],
+        leaves: &[Bf16Leaf],
+        tiles: &[DenseTile],
+        mut status: DisjointSlice<u32>,
+        row_stride: u64,
+        slot: u32,
+    ) {
+        static mut WARP_STATUS: SharedArray<u32, WARPS> = SharedArray::UNINIT;
+
+        let tile_index = thread::blockIdx_x();
+        if tile_index as usize >= tiles.len() {
+            return;
+        }
+        let tile = tiles[tile_index as usize];
+        let leaf = leaves[tile.leaf as usize];
+        let row_offset = slot as usize * row_stride as usize;
+        let thread_index = thread::threadIdx_x();
+        let lane = warp::lane_id();
+        let warp_index = thread_index / 32;
+        let mut invalid = false;
+        let mut item = thread_index;
+        while item < tile.length {
+            let index = leaf.offset + u64::from(tile.start + item);
+            invalid |= !bf16_finite(rows[row_offset + index as usize]);
             item += THREADS;
         }
         let warp_invalid = warp::any(invalid);

@@ -14,7 +14,6 @@ matplotlib = "*"
 llvm-openmp = "22.1.8.*"
 lld = "20.*"
 libfaiss = { version = "1.10.*", build = "cpu_openblas_*" }
-rust = "1.88.*"
 zig = ">=0.16.0,<0.17"
 
 [feature.py312.dependencies]
@@ -22,6 +21,9 @@ python = "3.12.*"
 
 [feature.py313.dependencies]
 python = "3.13.*"
+
+[feature.py314.dependencies]
+python = "3.14.*"
 
 [feature.ennx.tasks]
 test = "python -m pytest -q tests/test_turbo_config.py tests/test_candidate_gen_direct.py tests/test_encode.py tests/test_quantization.py"
@@ -31,10 +33,10 @@ buck2-build = "./buck2w --isolation-dir dev build //rust/crates/bpann:bpann //ru
 buck2-test = "./buck2w --isolation-dir dev test //buck2/tests:all --local-only --num-threads 4"
 buck2-wheel = "./buck2w --isolation-dir release build //:wheel --config ennx.profile=release --config ennx.python_version=3.13 --local-only --num-threads 4 --show-output"
 buck2-wheel-py312 = "./buck2w --isolation-dir release build //:wheel --config ennx.profile=release --config ennx.python_version=3.12 --local-only --num-threads 4 --show-output"
-cuda-wheel = "./buck2w --isolation-dir cuda build //:cuda-wheel --target-platforms //:linux-x86_64-platform --local-only --num-threads 4 --show-output"
-cuda-check = "./buck2w --isolation-dir cuda build //:cuda-parity --target-platforms //:linux-x86_64-platform --local-only --num-threads 4 --show-output"
+buck2-wheel-py314 = "./buck2w --isolation-dir release build //:wheel --config ennx.profile=release --config ennx.python_version=3.14 --local-only --num-threads 4 --show-output"
 buck2-verify = "tools/buck2-wheel-verify"
 buck2-verify-py312 = "ENNX_PYTHON_VERSION=3.12 ENNX_PYTHON=.pixi/envs/ennx-py312/bin/python tools/buck2-wheel-verify"
+buck2-verify-py314 = "ENNX_PYTHON_VERSION=3.14 ENNX_PYTHON=.pixi/envs/ennx-py314/bin/python tools/buck2-wheel-verify"
 buck2-gates = "tools/buck2-gates"
 zig-build = "zig build"
 zig-test = "zig build test"
@@ -44,3 +46,4 @@ zig-check = "zig fmt --check build.zig zig/src zig/tests && zig build test && to
 [environments]
 ennx = { features = ["ennx", "py313"], no-default-feature = true }
 ennx-py312 = { features = ["ennx", "py312"], no-default-feature = true }
+ennx-py314 = { features = ["ennx", "py314"], no-default-feature = true }

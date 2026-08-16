@@ -16,7 +16,36 @@ kiss_unit_refs!(kiss_fitter_refs, update_y, build_random_param_candidates,);
 
 kiss_unit_refs!(kiss_incumbent_tracker_refs, push_top_m, sorted_indices,);
 
-kiss_unit_refs!(kiss_index_refs, rebuild_from_scaled, memory_usage_bytes,);
+kiss_unit_refs!(
+    kiss_index_refs,
+    rebuild_from_scaled,
+    memory_usage_bytes,
+    IndexDriver,
+    cuda_posterior,
+    cuda_weighted,
+    cuda_batch,
+    cuda_draws,
+    cuda_conditional,
+    condition_draws,
+);
+
+kiss_unit_refs!(
+    kiss_knn_refs,
+    KnnPlan,
+    KnnProfile,
+    CudaParam,
+    bucket,
+    condition_draws,
+);
+
+kiss_unit_refs!(
+    kiss_backend_refs,
+    disk_read,
+    disk_write,
+    persist_enn_backend_index,
+    memory_yvar,
+    release_enn_observation_pages,
+);
 
 kiss_unit_refs!(
     kiss_model_access_refs,

@@ -50,7 +50,7 @@ zig-dense = []
 [dev-dependencies]
 approx = "0.5"
 ndarray = { workspace = true, features = ["approx"] }
-numpy = "0.22"
+numpy = { workspace = true }
 rand_chacha = "0.3"
 tempfile = "3"
 

@@ -6,6 +6,8 @@
 ./ennx wheel
 ./ennx verify
 ./ennx ci
+./ennx cuda wheel
+./ennx cuda parity
 ```
 
 `tools/buck2-deps` regenerates both `BUCK` dependency graphs from the checked-in

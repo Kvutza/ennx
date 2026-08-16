@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 
 import pytest
 
@@ -8,8 +9,6 @@ pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("ennx.ennx_rust") is None,
     reason="ennx_rust extension unavailable",
 )
-
-import inspect
 
 
 class TestPublicAPIExports:

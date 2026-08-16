@@ -27,7 +27,9 @@ class ENNSurrogateConfig:
         if self.y_bounds is not None:
             bounds = np.asarray(self.y_bounds, dtype=float)
             if bounds.ndim != 2 or bounds.shape[1] != 2:
-                raise ValueError(f"y_bounds must have shape (metrics, 2), got {bounds.shape}")
+                raise ValueError(
+                    f"y_bounds must have shape (metrics, 2), got {bounds.shape}"
+                )
             object.__setattr__(self, "y_bounds", bounds)
 
     @property
