@@ -141,16 +141,27 @@ def build() -> tuple[str, bytes]:
             "-c",
             (
                 "import numpy as np; "
-                "from ennx.experimental import WeightSearch; "
-                "base=np.zeros(8,dtype=np.uint8); "
-                "search=WeightSearch(base,0.0,[(0,16,4,0.25,1.0,0.25)],2,backend='cuda'); "
-                "search.ask(np.array([11,13],dtype=np.uint64),0.5,1); "
-                "assert search.row().shape==(8,); "
-                "search.tell(1.0,True); "
+                "from ennx.experimental import TurboSearch; "
+                "base=np.full(50,0x88,dtype=np.uint8); "
+                "leaves=[(0,100,4,0.25,1.0,0.25)]; "
+                "seeds=np.array([[11,13],[17,19]],dtype=np.uint64); "
+                "cpu=TurboSearch(base,0.0,leaves,4,backend='cpu',num_pert=20,max_pending=2); "
+                "gpu=TurboSearch(base,0.0,leaves,4,backend='cuda',num_pert=20,max_pending=2); "
+                "ct=cpu.ask_batch(seeds,1); gt=gpu.ask_batch(seeds,1); "
+                "assert [(x.index,x.seed) for x in ct]==[(x.index,x.seed) for x in gt]; "
+                "cr=[cpu.row_trial(x) for x in ct]; gr=[gpu.row_trial(x) for x in gt]; "
+                "assert all(np.array_equal(a,b) for a,b in zip(cr,gr)); "
+                "changed=lambda row: int(np.count_nonzero((row&15)!=8)+np.count_nonzero((row>>4)!=8)); "
+                "assert [changed(row) for row in gr]==[20,20]; "
+                "ptr,size,device=gpu.device_trial(gt[0]); "
+                "assert ptr>0 and size==50 and device==0; "
+                "assert gpu.tell_trial(gt[1],1.0) and not gpu.tell_trial(gt[0],0.5); "
+                "assert cpu.tell_trial(ct[1],1.0) and not cpu.tell_trial(ct[0],0.5); "
                 "print('CUDA_WHEEL ok=true')"
             ),
         ]
     )
+    _run([str(python), str(ENNX_DIR / "ops/cuda_sparse_bench.py")])
     return wheel.name, wheel.read_bytes()
 
 
