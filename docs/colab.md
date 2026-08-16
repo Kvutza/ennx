@@ -13,14 +13,15 @@ It then imports the Cargo-built extension in Python 3.12 and checks the public
 resident-session API against the CPU backend.
 
 For an applied walkthrough, open `examples/colab_jax_cuda_ennx.ipynb`. It uses
-`jax[cuda12]` to evaluate a quantized CNN on the T4 and the public
+Colab's preinstalled CUDA-enabled JAX to evaluate a quantized CNN on the T4 and the public
 `ennx.experimental.WeightSearch` API with `backend="cuda"` to optimize the CNN
 from scalar task rewards. The tutorial installs the prebuilt CPython 3.12,
 `sm_75` wheel, times proposal and evaluation separately, and identifies the
 selected packed-row transfer as the remaining host boundary. It does not clone
-the repository or install Rust, LLVM, and CUDA compiler tooling.
+the repository, replace Colab's JAX stack, or install Rust, LLVM, and CUDA
+compiler tooling.
 
-The notebook only orchestrates the environment. Toolchain setup lives in
+The development notebook only orchestrates the environment. Toolchain setup lives in
 `ops/colab_cuda_oxide_smoke.py`, and CUDA or ENNx implementation work belongs in
 normal repository source files. This keeps experiments reviewable and prevents
 the notebook from becoming a second implementation.

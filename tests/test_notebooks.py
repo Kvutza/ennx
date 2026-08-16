@@ -161,7 +161,6 @@ def test_colab():
 
     source = "\n".join(code)
     for required in (
-        '"jax[cuda12]"',
         "cuda-v0.1.0",
         "ennx-0.1.0%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
         "@jax.jit",
@@ -173,5 +172,10 @@ def test_colab():
     ):
         assert required in source
 
-    for removed in ("colab_cuda_oxide_smoke.py", "cargo oxide", "git clone"):
+    for removed in (
+        '"jax[cuda12]"',
+        "colab_cuda_oxide_smoke.py",
+        "cargo oxide",
+        "git clone",
+    ):
         assert removed not in source
