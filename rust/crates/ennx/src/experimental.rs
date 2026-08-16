@@ -5,6 +5,8 @@
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub use crate::apple_gpu::{device_info as apple_gpu_info, DeviceInfo as AppleGpuInfo};
+#[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+pub use crate::bf16_search::{Bf16Block, Bf16Search, Bf16Trial};
 pub use crate::dense::{
     apply as apply_dense, dist2 as dense_dist2, linear as dense_linear,
     tensor_key as dense_tensor_key, Bf16Tree, DenseLeaf, DenseLinear, DenseResult, DenseTerm,

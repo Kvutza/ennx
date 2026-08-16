@@ -22,6 +22,8 @@ pub mod adapter;
 )]
 mod dlpack;
 pub mod link_rpath;
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+pub mod py_bf16;
 pub mod py_experimental;
 pub mod py_fit;
 pub mod py_fitter;

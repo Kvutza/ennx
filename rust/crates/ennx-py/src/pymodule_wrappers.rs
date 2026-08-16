@@ -89,6 +89,12 @@ pub fn pymodule_optimizer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::py_weights::PyDenseLinear>()?;
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
     m.add_class::<crate::py_weights::PyBf16Tree>()?;
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    m.add_class::<crate::py_bf16::PyBf16Search>()?;
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    m.add_class::<crate::py_bf16::PyBf16Trial>()?;
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    m.add_class::<crate::py_bf16::PyBf16View>()?;
     m.add_class::<crate::py_weights::PyBpannHistory>()?;
     m.add_function(wrap_pyfunction!(
         crate::py_optimizer::create_optimizer_py,

@@ -7,7 +7,7 @@ use tempfile::NamedTempFile;
 const CUDA_IMAGE: &str = "im-tZRy6QPZXIJyPrv4zZqPOM";
 const CUDA_REV: &str = "1f4d813719012d384f2db12b88efc9314c8bf50c";
 const RUST_NIGHTLY: &str = "nightly-2026-04-03";
-const WHEEL_PATH: &str = "/tmp/ennx-wheel/ennx-0.1.5+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl";
+const WHEEL_PATH: &str = "/tmp/ennx-wheel/ennx-0.1.6+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl";
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -181,12 +181,13 @@ fn wheel_cmd(mjx: bool) -> String {
          --target-platforms //:linux-x86_64-platform --local-only --num-threads 4 \
          --out {WHEEL_PATH}; \
          /tmp/ennx-wheel-env/bin/python -m pip install --quiet {WHEEL_PATH}; \
-         /tmp/ennx-wheel-env/bin/python ops/cuda_sparse_bench.py",
+         /tmp/ennx-wheel-env/bin/python ops/cuda_sparse_bench.py; \
+         /tmp/ennx-wheel-env/bin/python ops/bf16_bench.py",
     );
     if mjx {
         command.push_str(
             "; /tmp/ennx-wheel-env/bin/python -m pip install --quiet \
-             cupy-cuda12x mujoco==3.6.0 mujoco-mjx==3.6.0; \
+             mujoco==3.6.0 mujoco-mjx==3.6.0; \
              /tmp/ennx-wheel-env/bin/python ops/mjx_batch.py",
         );
     }

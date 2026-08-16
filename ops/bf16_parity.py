@@ -7,7 +7,7 @@ import struct
 import jax
 import jax.numpy as jnp
 
-from ennx.experimental import Bf16Tree
+from ennx.experimental import Bf16Search, Bf16Tree
 
 MASK64 = (1 << 64) - 1
 MAX_F32 = 3.4028234663852886e38
@@ -74,6 +74,78 @@ def cpu_values(base, leaves, terms):
     return output
 
 
+def search_score(base, candidate, leaves, base_value, base_variance):
+    distance = 0.0
+    for (_, offset, length, _), weight in zip(leaves, (1.0, 0.5, 2.0)):
+        for index in range(offset, offset + length):
+            delta = decode(candidate[index]) - decode(base[index])
+            distance += delta * delta * weight
+    variance = 1.0e-9 + 0.7 * distance + 0.05 + base_variance
+    return base_value + 1.3 * math.sqrt(variance)
+
+
+def check_search(base, base_bits, leaves):
+    base_value = -0.75
+    base_variance = 0.04
+    blocks = [(*leaf, weight) for leaf, weight in zip(leaves, (1.0, 0.5, 2.0))]
+    search = Bf16Search(
+        base,
+        base_value,
+        blocks,
+        8,
+        max_pending=2,
+        base_variance=base_variance,
+    )
+    search.profile(True)
+    seeds = [
+        [3, 17, 0xDEADBEEFCAFEBABE, (1 << 64) - 10],
+        [5, 29, 0x0123456789ABCDEF, (1 << 64) - 4],
+    ]
+    trials = search.ask_batch(seeds, 1, beta=1.3, seed=23)
+    assert len(trials) == 2
+    assert search.last_profile is not None
+    assert search.last_profile[3] > 0.0
+
+    views = search.rows(trials)
+    candidates = [jax.dlpack.from_dlpack(view) for view in views]
+    batch = jnp.stack(candidates)
+    batch.block_until_ready()
+    assert batch.shape == (len(trials), len(base_bits))
+    for trial, candidate in zip(trials, candidates):
+        expected = cpu_values(base_bits, leaves, [(trial.seed, trial.length)])
+        actual = jax.device_get(
+            jax.lax.bitcast_convert_type(candidate, jnp.uint16)
+        ).tolist()
+        assert actual == expected
+        expected_score = search_score(
+            base_bits,
+            expected,
+            leaves,
+            base_value,
+            base_variance,
+        )
+        assert math.isclose(trial.score, expected_score, rel_tol=2.0e-5)
+
+    try:
+        search.tell_batch(trials, [1.0, 0.5], [0.01, 0.09])
+    except ValueError as error:
+        assert "live JAX BF16 rows" in str(error)
+    else:
+        raise AssertionError("live JAX BF16 rows did not hold their leases")
+
+    del candidate
+    del candidates
+    del views
+    gc.collect()
+    assert search.tell_batch(trials, [1.0, 0.5], [0.01, 0.09]) == [True, False]
+    assert search.best == 1.0
+    assert math.isclose(search.best_variance, 0.01, rel_tol=1.0e-6)
+    assert search.history_len == 3
+    assert search.len == len(base_bits)
+    assert batch.shape == (2, len(base_bits))
+    return len(trials)
+
+
 def main() -> None:
     size = 1_030
     base = jnp.linspace(-4.0, 4.0, size, dtype=jnp.bfloat16)
@@ -127,7 +199,12 @@ def main() -> None:
         ).tolist()
         raise AssertionError(f"BF16 perturbation overflow was accepted: {bits}")
 
-    print(f"BF16_PARITY ok=true exact={size} leases=true validation=true")
+    trials = check_search(base, base_bits, leaves)
+
+    print(
+        f"BF16_PARITY ok=true exact={size} trials={trials} "
+        "leases=true noise=true profile=true validation=true"
+    )
 
 
 if __name__ == "__main__":

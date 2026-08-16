@@ -2,6 +2,13 @@ use cuda_device::{
     DisjointSlice, SharedArray, cuda_module, kernel, launch_bounds, launch_contract, thread, warp,
 };
 
+mod bf16;
+pub use bf16::{Bf16Leaf, Bf16Score};
+use bf16::{
+    acquisition_score, bf16_decode, bf16_finite, bf16_seed, bf16_value, tile_distances,
+    warp_invalid,
+};
+
 pub const MODULE_NAME: &str = env!("CARGO_PKG_NAME");
 pub const THREADS: u32 = 256;
 const WARPS: usize = (THREADS / 32) as usize;
@@ -367,75 +374,6 @@ fn dense_value(
     }
 }
 
-#[inline(always)]
-fn bf16_decode(value: u16) -> f32 {
-    f32::from_bits(u32::from(value) << 16)
-}
-
-#[inline(always)]
-fn bf16_finite(value: u16) -> bool {
-    value & 0x7f80 != 0x7f80
-}
-
-#[inline(always)]
-fn bf16_encode(value: f32) -> u16 {
-    let bits = value.to_bits();
-    (bits.wrapping_add(0x7fff + ((bits >> 16) & 1)) >> 16) as u16
-}
-
-#[inline(always)]
-fn bf16_next(value: u16, positive: bool) -> u16 {
-    if value & 0x7fff == 0 {
-        return if positive { 1 } else { 0x8001 };
-    }
-    let grows = (value & 0x8000 == 0) == positive;
-    let candidate = if grows {
-        value.wrapping_add(1)
-    } else {
-        value.wrapping_sub(1)
-    };
-    if bf16_decode(candidate).is_finite() {
-        candidate
-    } else if grows {
-        value.wrapping_sub(1)
-    } else {
-        value.wrapping_add(1)
-    }
-}
-
-#[inline(always)]
-fn bf16_value(
-    value: u16,
-    leaf_key: u64,
-    element: u64,
-    scale: f32,
-    terms: &[DenseTerm],
-    term_count: u32,
-) -> u16 {
-    let mut sum = 0.0_f32;
-    let mut strongest = 0.0_f32;
-    let mut positive = true;
-    let mut term_index = 0;
-    while term_index < term_count {
-        let term = terms[term_index as usize];
-        if term.coefficient != 0.0 {
-            let direction = dense_sign(term.seed, leaf_key, element);
-            sum += term.coefficient * direction;
-            if term.coefficient.abs() > strongest {
-                strongest = term.coefficient.abs();
-                positive = (term.coefficient > 0.0) == (direction > 0.0);
-            }
-        }
-        term_index += 1;
-    }
-    let candidate = bf16_encode(bf16_decode(value) + scale * sum);
-    if sum == 0.0 || candidate == value {
-        bf16_next(value, positive)
-    } else {
-        candidate
-    }
-}
-
 #[cuda_module]
 pub mod trials {
     use super::*;
@@ -712,6 +650,126 @@ pub mod trials {
                 2 => mean + se,
                 _ => mean + beta * se,
             };
+            unsafe {
+                *scores.get_unchecked_mut(candidate as usize) = score;
+            }
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn distance_bf16(
+        rows: &[u16],
+        history_slots: &[u32],
+        seeds: &[Seed],
+        leaves: &[Bf16Leaf],
+        tiles: &[DenseTile],
+        mut partials: DisjointSlice<f32>,
+        params: Bf16Score,
+    ) {
+        static mut VALUES: SharedArray<f32, 256> = SharedArray::UNINIT;
+        static mut DISTANCES: SharedArray<f32, MAX_HISTORY> = SharedArray::UNINIT;
+        static mut WARP_STATUS: SharedArray<u32, WARPS> = SharedArray::UNINIT;
+
+        let block_index = thread::blockIdx_x();
+        if block_index >= params.candidates * params.tiles {
+            return;
+        }
+        let candidate = block_index / params.tiles;
+        let tile_index = block_index % params.tiles;
+        let thread_index = thread::threadIdx_x();
+        let lane = warp::lane_id();
+        let warp_index = thread_index / 32;
+        let values = unsafe { SharedArray::as_raw_mut_ptr(&raw mut VALUES) };
+        let distances = unsafe { SharedArray::as_raw_mut_ptr(&raw mut DISTANCES) };
+        let warp_status = unsafe { SharedArray::as_raw_mut_ptr(&raw mut WARP_STATUS) };
+        if thread_index < params.history {
+            unsafe { distances.add(thread_index as usize).write(0.0) };
+        }
+        if lane == 0 {
+            unsafe { warp_status.add(warp_index as usize).write(0) };
+        }
+        thread::sync_threads();
+
+        let tile = tiles[tile_index as usize];
+        tile_distances(
+            rows,
+            history_slots,
+            seeds[candidate as usize],
+            leaves[tile.leaf as usize],
+            tile,
+            values,
+            distances,
+            warp_status,
+            params,
+        );
+        let invalid = warp_invalid(warp_status);
+        if thread_index < params.history {
+            let output = block_index as usize * params.history as usize + thread_index as usize;
+            unsafe {
+                *partials.get_unchecked_mut(output) = if invalid {
+                    f32::INFINITY
+                } else {
+                    distances.add(thread_index as usize).read()
+                };
+            }
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn score_bf16(
+        partials: &[f32],
+        outcomes: &[f32],
+        variances: &[f32],
+        draws: &[f32],
+        mut scores: DisjointSlice<f32>,
+        params: Bf16Score,
+    ) {
+        static mut DISTANCES: SharedArray<f32, MAX_HISTORY> = SharedArray::UNINIT;
+        static mut NEAREST_DISTANCES: SharedArray<f32, MAX_HISTORY> = SharedArray::UNINIT;
+        static mut NEAREST_INDICES: SharedArray<u32, MAX_HISTORY> = SharedArray::UNINIT;
+
+        let candidate = thread::blockIdx_x();
+        if candidate >= params.candidates {
+            return;
+        }
+        let thread_index = thread::threadIdx_x();
+        let distances = unsafe { SharedArray::as_raw_mut_ptr(&raw mut DISTANCES) };
+        let nearest_distances = unsafe { SharedArray::as_raw_mut_ptr(&raw mut NEAREST_DISTANCES) };
+        let nearest_indices = unsafe { SharedArray::as_raw_mut_ptr(&raw mut NEAREST_INDICES) };
+        if thread_index < params.history {
+            let mut distance = 0.0f32;
+            let mut tile_index = 0u32;
+            while tile_index < params.tiles {
+                let block_index = candidate * params.tiles + tile_index;
+                let input = block_index as usize * params.history as usize + thread_index as usize;
+                distance += partials[input];
+                tile_index += 1;
+            }
+            unsafe { distances.add(thread_index as usize).write(distance) };
+        }
+        thread::sync_threads();
+
+        if thread_index == 0 {
+            if unsafe { !distances.read().is_finite() } {
+                unsafe {
+                    *scores.get_unchecked_mut(candidate as usize) = f32::NEG_INFINITY;
+                }
+                return;
+            }
+            let score = acquisition_score(
+                distances,
+                nearest_distances,
+                nearest_indices,
+                outcomes,
+                variances,
+                draws,
+                candidate,
+                params,
+            );
             unsafe {
                 *scores.get_unchecked_mut(candidate as usize) = score;
             }
@@ -1264,6 +1322,127 @@ pub mod trials {
                 invalid |= !bf16_finite(value);
                 *output.get_unchecked_mut(index as usize) = value;
             }
+            item += THREADS;
+        }
+        let warp_invalid = warp::any(invalid);
+        if lane == 0 {
+            unsafe {
+                WARP_STATUS[warp_index as usize] = u32::from(warp_invalid);
+            }
+        }
+        thread::sync_threads();
+        if thread_index == 0 {
+            let mut block_status = 0;
+            let mut warp_index = 0;
+            while warp_index < WARPS {
+                block_status |= unsafe { WARP_STATUS[warp_index] };
+                warp_index += 1;
+            }
+            unsafe {
+                *status.get_unchecked_mut(tile_index as usize) = block_status;
+            }
+        }
+    }
+
+    #[kernel]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn write_bf16(
+        mut rows: DisjointSlice<u16>,
+        seeds: &[Seed],
+        selection: &[Selection],
+        leaves: &[Bf16Leaf],
+        tiles: &[DenseTile],
+        trial_slots: &[u32],
+        mut status: DisjointSlice<u32>,
+        row_stride: u64,
+        base_slot: u32,
+        tile_count: u32,
+        coefficient: f32,
+    ) {
+        static mut WARP_STATUS: SharedArray<u32, WARPS> = SharedArray::UNINIT;
+
+        let block = thread::blockIdx_x();
+        let region = block / tile_count;
+        let tile_index = block % tile_count;
+        if region as usize >= selection.len() || tile_index as usize >= tiles.len() {
+            return;
+        }
+        let tile = tiles[tile_index as usize];
+        let leaf = leaves[tile.leaf as usize];
+        let seed = seeds[selection[region as usize].index as usize];
+        let base_offset = base_slot as usize * row_stride as usize;
+        let row_offset = trial_slots[region as usize] as usize * row_stride as usize;
+        let rows_ptr = rows.as_mut_ptr() as *const u16;
+        let thread_index = thread::threadIdx_x();
+        let lane = warp::lane_id();
+        let warp_index = thread_index / 32;
+        let mut invalid = false;
+        let mut item = thread_index;
+        while item < tile.length {
+            let element = u64::from(tile.start + item);
+            let index = leaf.offset + element;
+            let value = bf16_seed(
+                unsafe { rows_ptr.add(base_offset + index as usize).read() },
+                leaf,
+                element,
+                seed,
+                coefficient,
+            );
+            invalid |= !bf16_finite(value);
+            unsafe {
+                *rows.get_unchecked_mut(row_offset + index as usize) = value;
+            }
+            item += THREADS;
+        }
+        let warp_invalid = warp::any(invalid);
+        if lane == 0 {
+            unsafe {
+                WARP_STATUS[warp_index as usize] = u32::from(warp_invalid);
+            }
+        }
+        thread::sync_threads();
+        if thread_index == 0 {
+            let mut block_status = 0;
+            let mut warp_index = 0;
+            while warp_index < WARPS {
+                block_status |= unsafe { WARP_STATUS[warp_index] };
+                warp_index += 1;
+            }
+            unsafe {
+                *status.get_unchecked_mut(block as usize) = block_status;
+            }
+        }
+    }
+
+    #[kernel]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn check_search(
+        rows: &[u16],
+        leaves: &[Bf16Leaf],
+        tiles: &[DenseTile],
+        mut status: DisjointSlice<u32>,
+        row_stride: u64,
+        slot: u32,
+    ) {
+        static mut WARP_STATUS: SharedArray<u32, WARPS> = SharedArray::UNINIT;
+
+        let tile_index = thread::blockIdx_x();
+        if tile_index as usize >= tiles.len() {
+            return;
+        }
+        let tile = tiles[tile_index as usize];
+        let leaf = leaves[tile.leaf as usize];
+        let row_offset = slot as usize * row_stride as usize;
+        let thread_index = thread::threadIdx_x();
+        let lane = warp::lane_id();
+        let warp_index = thread_index / 32;
+        let mut invalid = false;
+        let mut item = thread_index;
+        while item < tile.length {
+            let index = leaf.offset + u64::from(tile.start + item);
+            invalid |= !bf16_finite(rows[row_offset + index as usize]);
             item += THREADS;
         }
         let warp_invalid = warp::any(invalid);

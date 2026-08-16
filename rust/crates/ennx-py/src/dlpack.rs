@@ -1,5 +1,5 @@
 use std::ffi::{c_char, c_void};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use pyo3::exceptions::{PyBufferError, PyTypeError, PyValueError};
@@ -189,7 +189,7 @@ struct LegacyOwner {
     managed: Managed,
     shape: i64,
     _owner: PyObject,
-    lease: Arc<AtomicBool>,
+    lease: Lease,
 }
 
 struct VersionOwner {
@@ -197,7 +197,24 @@ struct VersionOwner {
     shape: i64,
     stride: i64,
     _owner: PyObject,
-    lease: Arc<AtomicBool>,
+    lease: Lease,
+}
+
+#[derive(Clone)]
+enum Lease {
+    Flag(Arc<AtomicBool>),
+    Count(Arc<AtomicUsize>),
+}
+
+impl Lease {
+    fn release(&self) {
+        match self {
+            Self::Flag(lease) => lease.store(false, Ordering::Release),
+            Self::Count(lease) => {
+                lease.fetch_sub(1, Ordering::AcqRel);
+            }
+        }
+    }
 }
 
 unsafe extern "C" fn release_legacy(managed: *mut Managed) {
@@ -208,7 +225,7 @@ unsafe extern "C" fn release_legacy(managed: *mut Managed) {
     if !context.is_null() {
         Python::with_gil(|_| {
             let owner = unsafe { Box::from_raw(context) };
-            owner.lease.store(false, Ordering::Release);
+            owner.lease.release();
             drop(owner);
         });
     }
@@ -222,7 +239,7 @@ unsafe extern "C" fn release_versioned(managed: *mut ManagedV1) {
     if !context.is_null() {
         Python::with_gil(|_| {
             let owner = unsafe { Box::from_raw(context) };
-            owner.lease.store(false, Ordering::Release);
+            owner.lease.release();
             drop(owner);
         });
     }
@@ -264,6 +281,28 @@ pub(crate) fn export(
     len: usize,
     max_version: Option<(u32, u32)>,
 ) -> PyResult<PyObject> {
+    export_with(py, owner, Lease::Flag(lease), pointer, len, max_version)
+}
+
+pub(crate) fn export_count(
+    py: Python<'_>,
+    owner: PyObject,
+    lease: Arc<AtomicUsize>,
+    pointer: u64,
+    len: usize,
+    max_version: Option<(u32, u32)>,
+) -> PyResult<PyObject> {
+    export_with(py, owner, Lease::Count(lease), pointer, len, max_version)
+}
+
+fn export_with(
+    py: Python<'_>,
+    owner: PyObject,
+    lease: Lease,
+    pointer: u64,
+    len: usize,
+    max_version: Option<(u32, u32)>,
+) -> PyResult<PyObject> {
     if let Some((major, minor)) = max_version.filter(|version| version.0 >= 1) {
         let version = Version {
             major: 1,
@@ -278,7 +317,7 @@ pub(crate) fn export(
 fn export_legacy(
     py: Python<'_>,
     owner: PyObject,
-    lease: Arc<AtomicBool>,
+    lease: Lease,
     pointer: u64,
     len: usize,
 ) -> PyResult<PyObject> {
@@ -305,7 +344,7 @@ fn export_legacy(
 fn export_versioned(
     py: Python<'_>,
     owner: PyObject,
-    lease: Arc<AtomicBool>,
+    lease: Lease,
     pointer: u64,
     len: usize,
     version: Version,
