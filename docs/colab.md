@@ -14,7 +14,7 @@ resident-session API against the CPU backend.
 
 For an applied walkthrough, open `examples/colab_jax_cuda_ennx.ipynb`. It uses
 Colab's preinstalled CUDA-enabled JAX to evaluate a quantized CNN on the T4 and the public
-`ennx.experimental.WeightSearch` API with `backend="cuda"` to optimize the CNN
+`ennx.experimental.PackedSearch` API with `device="cuda"` to optimize the CNN
 from scalar task rewards. The tutorial installs the prebuilt CPython 3.12,
 `sm_75` wheel, times proposal and evaluation separately, and identifies the
 selected packed-row transfer as the remaining host boundary. It does not clone
@@ -22,9 +22,9 @@ the repository, replace Colab's JAX stack, or install Rust, LLVM, and CUDA
 compiler tooling.
 
 For the high-dimensional control experiment, open
-[`examples/colab_mjx_humanoid_ennx.ipynb`](https://colab.research.google.com/github/Kvutza/ennx/blob/cuda/examples/colab_mjx_humanoid_ennx.ipynb).
+[`examples/colab_mjx_humanoid_ennx.ipynb`](https://colab.research.google.com/github/Kvutza/ennx/blob/main/examples/colab_mjx_humanoid_ennx.ipynb).
 It runs a roughly 972,000-parameter JAX policy in a pure MJX Humanoid simulation,
-optimizes dense BF16 whole-policy perturbations with the ENNx CUDA backend, and renders the
+optimizes dense BF16 whole-policy perturbations with the ENNx CUDA device, and renders the
 incumbent policy to an MP4. The notebook installs the released ENNx wheel and
 `mujoco-mjx`; it does not require a source checkout or Rust toolchain.
 Its TOML parameter cell defaults to ten sequential repetitions and 32 BO rounds.
@@ -71,7 +71,7 @@ Install the CUDA-enabled Linux wheel directly from GitHub:
 The Colab gate is complete when a clean hosted runtime can:
 
 1. Install the ENNx wheel without changing the runtime Python installation.
-2. Import ENNx and select the CUDA backend.
+2. Import ENNx and select the CUDA device.
 3. Run deterministic CPU/CUDA parity tests for an ENNx kernel.
 4. Execute a representative ENN fit and prediction workload.
 

@@ -1,5 +1,5 @@
 use ennx::experimental::{
-    apply_dense, dense_linear, ComputeBackend, DenseLeaf, DenseLinear, DenseTerm, DenseView,
+    apply_dense, dense_linear, ComputeDevice, DenseLeaf, DenseLinear, DenseTerm, DenseView,
 };
 
 fn main() {
@@ -31,8 +31,8 @@ fn compare_materialization() -> Result<(), String> {
         DenseTerm::new(91, -0.125)?,
         DenseTerm::new(7, 0.03125)?,
     ];
-    let cpu = apply_dense(&base, &leaves, &terms, ComputeBackend::Cpu)?;
-    let cuda = apply_dense(&base, &leaves, &terms, ComputeBackend::Cuda)?;
+    let cpu = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu)?;
+    let cuda = apply_dense(&base, &leaves, &terms, ComputeDevice::Cuda)?;
     compare(&cpu.values, &cuda.values, 2.0e-6, "dense materialization")
 }
 
@@ -67,7 +67,7 @@ fn compare_linear() -> Result<(), String> {
         weight_view,
         Some(bias_view),
         &first_terms,
-        ComputeBackend::Cpu,
+        ComputeDevice::Cpu,
     )?;
     let cuda = dense_linear(
         &input,
@@ -76,7 +76,7 @@ fn compare_linear() -> Result<(), String> {
         weight_view,
         Some(bias_view),
         &first_terms,
-        ComputeBackend::Cuda,
+        ComputeDevice::Cuda,
     )?;
     compare(&cpu, &cuda, 2.0e-5, "dense linear")?;
 
@@ -86,7 +86,7 @@ fn compare_linear() -> Result<(), String> {
         Some(bias.clone()),
         weight_view,
         Some(bias_view),
-        ComputeBackend::Cpu,
+        ComputeDevice::Cpu,
     )?;
     let mut cuda = DenseLinear::new(
         weight,
@@ -94,7 +94,7 @@ fn compare_linear() -> Result<(), String> {
         Some(bias),
         weight_view,
         Some(bias_view),
-        ComputeBackend::Cuda,
+        ComputeDevice::Cuda,
     )?;
     compare(
         &cpu.eval(&input, &first_terms)?,

@@ -37,7 +37,7 @@ impl AcquisitionKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ComputeBackend {
+pub enum ComputeDevice {
     Auto,
     Cpu,
     Metal,
@@ -46,7 +46,7 @@ pub enum ComputeBackend {
     Cuda,
 }
 
-impl ComputeBackend {
+impl ComputeDevice {
     pub fn parse(name: &str) -> Result<Self, String> {
         match name.trim().to_ascii_lowercase().as_str() {
             "" | "auto" => Ok(Self::Auto),
@@ -56,7 +56,7 @@ impl ComputeBackend {
             "opencl" | "ocl" => Ok(Self::OpenCl),
             "cuda" => Ok(Self::Cuda),
             other => Err(format!(
-                "unknown compute backend {other:?}; expected 'auto', 'cpu', 'metal', 'agx', 'opencl', or 'cuda'"
+                "unknown compute device {other:?}; expected 'auto', 'cpu', 'metal', 'agx', 'opencl', or 'cuda'"
             )),
         }
     }
@@ -148,7 +148,7 @@ pub struct WeightSelectConfig {
     pub beta: f32,
     pub acquisition: AcquisitionKind,
     pub seed: u64,
-    pub backend: ComputeBackend,
+    pub device: ComputeDevice,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -193,9 +193,9 @@ pub fn select_weights(
         config.neighbors,
     )?;
 
-    match config.backend {
-        ComputeBackend::Cpu => {}
-        ComputeBackend::Metal => {
+    match config.device {
+        ComputeDevice::Cpu => {}
+        ComputeDevice::Metal => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
                 return metal_weights::select(
@@ -211,10 +211,10 @@ pub fn select_weights(
             }
             #[cfg(not(all(target_os = "macos", feature = "metal")))]
             {
-                return Err("Metal ENN backend is not available in this build".to_string());
+                return Err("Metal ENN device is not available in this build".to_string());
             }
         }
-        ComputeBackend::Agx => {
+        ComputeDevice::Agx => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
                 return metal_weights::select(
@@ -230,10 +230,10 @@ pub fn select_weights(
             }
             #[cfg(not(all(target_os = "macos", feature = "metal")))]
             {
-                return Err("AGX ENN backend is not available in this build".to_string());
+                return Err("AGX ENN device is not available in this build".to_string());
             }
         }
-        ComputeBackend::OpenCl => {
+        ComputeDevice::OpenCl => {
             #[cfg(feature = "opencl")]
             {
                 return opencl_weights::select(
@@ -249,16 +249,16 @@ pub fn select_weights(
             }
             #[cfg(not(feature = "opencl"))]
             {
-                return Err("OpenCL ENN backend is not available in this build".to_string());
+                return Err("OpenCL ENN device is not available in this build".to_string());
             }
         }
-        ComputeBackend::Cuda => {
+        ComputeDevice::Cuda => {
             return Err(
                 "CUDA materialized weight selection is not available; use resident trial search"
                     .to_string(),
             );
         }
-        ComputeBackend::Auto => {
+        ComputeDevice::Auto => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
                 return select_weights_auto(
@@ -320,10 +320,10 @@ fn select_weights_auto(
         .map_err(|_| "weight route cache poisoned")?
         .get(&bucket)
     {
-        let backend = if gpu {
-            ComputeBackend::Agx
+        let device = if gpu {
+            ComputeDevice::Agx
         } else {
-            ComputeBackend::Cpu
+            ComputeDevice::Cpu
         };
         return select_weights(
             input.observations,
@@ -332,7 +332,7 @@ fn select_weights_auto(
             input.candidates,
             input.candidate_count,
             input.blocks,
-            WeightSelectConfig { backend, ..config },
+            WeightSelectConfig { device, ..config },
         );
     }
 
@@ -345,7 +345,7 @@ fn select_weights_auto(
         input.candidate_count,
         input.blocks,
         WeightSelectConfig {
-            backend: ComputeBackend::Cpu,
+            device: ComputeDevice::Cpu,
             ..config
         },
     )?;
@@ -376,6 +376,11 @@ pub(crate) fn thompson_draws(count: usize, seed: u64) -> Vec<f32> {
     (0..count).map(|_| standard_normal(&mut rng)).collect()
 }
 
+#[cfg(any(
+    all(target_os = "linux", target_arch = "x86_64", feature = "cuda"),
+    all(target_os = "macos", feature = "metal"),
+    feature = "opencl"
+))]
 pub(crate) fn acquisition_code(acquisition: AcquisitionKind) -> u32 {
     match acquisition {
         AcquisitionKind::Ucb => 0,

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use ndarray::ArrayView2;
 
-use crate::weights::{AcquisitionKind, ComputeBackend};
+use crate::weights::{AcquisitionKind, ComputeDevice};
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 mod metal;
@@ -21,7 +21,9 @@ mod tree;
 mod sparse;
 
 pub use bpann_history::{BpannHistory, IndexedObservation, ObservationId};
-pub(crate) use layout::{check_layout, make_steps, make_tiles, Step, Tile};
+pub(crate) use layout::{check_layout, make_steps, LeafStep};
+#[cfg(any(feature = "cuda", feature = "metal", feature = "opencl"))]
+pub(crate) use layout::{make_tiles, Tile};
 pub use tree::Center;
 
 const MAX_HISTORY: usize = 128;
@@ -248,9 +250,9 @@ impl Search {
         base_value: f32,
         leaves: Vec<Leaf>,
         capacity: usize,
-        backend: ComputeBackend,
+        device: ComputeDevice,
     ) -> Result<Self, String> {
-        Self::new_batch(base, base_value, leaves, capacity, 1, backend)
+        Self::new_batch(base, base_value, leaves, capacity, 1, device)
     }
 
     pub fn new_batch(
@@ -259,7 +261,7 @@ impl Search {
         leaves: Vec<Leaf>,
         capacity: usize,
         pending_capacity: usize,
-        backend: ComputeBackend,
+        device: ComputeDevice,
     ) -> Result<Self, String> {
         if !base_value.is_finite() {
             return Err("base value must be finite".to_string());
@@ -281,7 +283,7 @@ impl Search {
             .checked_add(pending_capacity)
             .and_then(|slots| slots.checked_add(1))
             .ok_or("resident slot count overflow")?;
-        let engine = Engine::new(base, &leaves, slots, backend)?;
+        let engine = Engine::new(base, &leaves, slots, device)?;
         Ok(Self {
             leaves,
             row_bytes,

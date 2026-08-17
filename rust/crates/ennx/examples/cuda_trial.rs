@@ -1,6 +1,6 @@
 use ennx::experimental::{
-    AcquisitionKind, ComputeBackend, EncodingType, WeightAsk, WeightCenter, WeightLeaf,
-    WeightSearch, WeightTrial,
+    AcquisitionKind, ComputeDevice, EncodingType, PackedLeaf, PackedSearch, PackedTrial,
+    SearchCenter, SearchConfig,
 };
 
 fn main() {
@@ -25,18 +25,18 @@ fn run() -> Result<(), String> {
 
 fn test_basic_ask_tell() -> Result<(), String> {
     let leaves = vec![
-        WeightLeaf::new(0, 257, 4, 0.125, 1.0, 0.75)?,
-        WeightLeaf::new(257, 259, 8, 0.03125, 1.0, 0.5)?,
+        PackedLeaf::new(0, 257, 4, 0.125, 1.0, 0.75)?,
+        PackedLeaf::new(257, 259, 8, 0.03125, 1.0, 0.5)?,
     ];
     let row_bytes = 257_usize.div_ceil(2) + 259;
     let base = make_base(row_bytes);
-    let mut cpu = WeightSearch::new(&base, -0.75, leaves.clone(), 6, ComputeBackend::Cpu)?;
-    let mut cuda = WeightSearch::new(&base, -0.75, leaves, 6, ComputeBackend::Cuda)?;
+    let mut cpu = PackedSearch::new(&base, -0.75, leaves.clone(), 6, ComputeDevice::Cpu)?;
+    let mut cuda = PackedSearch::new(&base, -0.75, leaves, 6, ComputeDevice::Cuda)?;
 
-    let mut config = WeightAsk {
+    let mut config = SearchConfig {
         length: 0.8,
         neighbors: 1,
-        ..WeightAsk::default()
+        ..SearchConfig::default()
     };
     let first_seeds = [3_u64, 17, 0xdead_beef_cafe_babe, u64::MAX - 9];
     compare_round(&mut cpu, &mut cuda, &first_seeds, config, 1.25, true)?;
@@ -55,18 +55,18 @@ fn test_basic_ask_tell() -> Result<(), String> {
 
 fn test_lazy_ask() -> Result<(), String> {
     let leaves = vec![
-        WeightLeaf::new(0, 128, 4, 0.25, 1.0, 0.8)?,
-        WeightLeaf::new(128, 128, 8, 0.05, 1.0, 0.6)?,
+        PackedLeaf::new(0, 128, 4, 0.25, 1.0, 0.8)?,
+        PackedLeaf::new(128, 128, 8, 0.05, 1.0, 0.6)?,
     ];
     let row_bytes = 128_usize.div_ceil(2) + 128;
     let base = make_base(row_bytes);
-    let mut cpu = WeightSearch::new(&base, 0.0, leaves.clone(), 4, ComputeBackend::Cpu)?;
-    let mut cuda = WeightSearch::new(&base, 0.0, leaves, 4, ComputeBackend::Cuda)?;
+    let mut cpu = PackedSearch::new(&base, 0.0, leaves.clone(), 4, ComputeDevice::Cpu)?;
+    let mut cuda = PackedSearch::new(&base, 0.0, leaves, 4, ComputeDevice::Cuda)?;
 
-    let config = WeightAsk {
+    let config = SearchConfig {
         length: 0.75,
         neighbors: 1,
-        ..WeightAsk::default()
+        ..SearchConfig::default()
     };
     let seeds = [7_u64, 19, 43, 89];
     let cpu_trial = cpu.ask_lazy(&seeds, config)?;
@@ -97,8 +97,8 @@ fn test_lazy_ask() -> Result<(), String> {
 
 fn test_all_acquisitions() -> Result<(), String> {
     let leaves = vec![
-        WeightLeaf::new(0, 64, 4, 0.125, 1.0, 0.5)?,
-        WeightLeaf::new(64, 64, 8, 0.05, 1.0, 0.5)?,
+        PackedLeaf::new(0, 64, 4, 0.125, 1.0, 0.5)?,
+        PackedLeaf::new(64, 64, 8, 0.05, 1.0, 0.5)?,
     ];
     let row_bytes = 64_usize.div_ceil(2) + 64;
     let base = make_base(row_bytes);
@@ -109,25 +109,25 @@ fn test_all_acquisitions() -> Result<(), String> {
         AcquisitionKind::Thompson,
         AcquisitionKind::Pareto,
     ] {
-        let mut cpu = WeightSearch::new(&base, 0.5, leaves.clone(), 4, ComputeBackend::Cpu)?;
-        let mut cuda = WeightSearch::new(&base, 0.5, leaves.clone(), 4, ComputeBackend::Cuda)?;
-        let config = WeightAsk {
+        let mut cpu = PackedSearch::new(&base, 0.5, leaves.clone(), 4, ComputeDevice::Cpu)?;
+        let mut cuda = PackedSearch::new(&base, 0.5, leaves.clone(), 4, ComputeDevice::Cuda)?;
+        let config = SearchConfig {
             length: 0.6,
             neighbors: 1,
             acquisition: acq,
             seed: 42,
             beta: 1.5,
-            ..WeightAsk::default()
+            ..SearchConfig::default()
         };
         compare_round(&mut cpu, &mut cuda, &seeds, config, 1.0, true)?;
 
-        let next_config = WeightAsk {
+        let next_config = SearchConfig {
             length: 0.6,
             neighbors: 2,
             acquisition: acq,
             seed: 99,
             beta: 2.0,
-            ..WeightAsk::default()
+            ..SearchConfig::default()
         };
         compare_round(&mut cpu, &mut cuda, &seeds, next_config, 0.8, false)?;
     }
@@ -143,16 +143,16 @@ fn test_all_encodings() -> Result<(), String> {
         (EncodingType::Fp8E5M2, 8),
     ];
     for (encoding, bits) in encodings {
-        let leaf = WeightLeaf::new_with_encoding(0, 128, bits, encoding, 0.125, 1.0, 0.5)?;
+        let leaf = PackedLeaf::new_with_encoding(0, 128, bits, encoding, 0.125, 1.0, 0.5)?;
         let row_bytes = if bits == 4 { 64 } else { 128 };
         let base = make_base(row_bytes);
-        let mut cpu = WeightSearch::new(&base, 1.0, vec![leaf], 4, ComputeBackend::Cpu)?;
-        let mut cuda = WeightSearch::new(&base, 1.0, vec![leaf], 4, ComputeBackend::Cuda)?;
+        let mut cpu = PackedSearch::new(&base, 1.0, vec![leaf], 4, ComputeDevice::Cpu)?;
+        let mut cuda = PackedSearch::new(&base, 1.0, vec![leaf], 4, ComputeDevice::Cuda)?;
 
-        let config = WeightAsk {
+        let config = SearchConfig {
             length: 0.8,
             neighbors: 1,
-            ..WeightAsk::default()
+            ..SearchConfig::default()
         };
         let seeds = [5_u64, 17, 33, 65];
         compare_round(&mut cpu, &mut cuda, &seeds, config, 2.0, true)?;
@@ -162,13 +162,13 @@ fn test_all_encodings() -> Result<(), String> {
 
 fn test_replace_history() -> Result<(), String> {
     let leaves = vec![
-        WeightLeaf::new(0, 64, 4, 0.25, 1.0, 0.75)?,
-        WeightLeaf::new(64, 64, 8, 0.5, 0.5, 1.0)?,
+        PackedLeaf::new(0, 64, 4, 0.25, 1.0, 0.75)?,
+        PackedLeaf::new(64, 64, 8, 0.5, 0.5, 1.0)?,
     ];
     let row_bytes = 64_usize.div_ceil(2) + 64;
     let base = make_base(row_bytes);
-    let mut cpu = WeightSearch::new(&base, 0.0, leaves.clone(), 4, ComputeBackend::Cpu)?;
-    let mut cuda = WeightSearch::new(&base, 0.0, leaves, 4, ComputeBackend::Cuda)?;
+    let mut cpu = PackedSearch::new(&base, 0.0, leaves.clone(), 4, ComputeDevice::Cpu)?;
+    let mut cuda = PackedSearch::new(&base, 0.0, leaves, 4, ComputeDevice::Cuda)?;
 
     let mut replacement = Vec::new();
     for i in 0..2 {
@@ -182,10 +182,10 @@ fn test_replace_history() -> Result<(), String> {
     cpu.replace_history(&replacement, &values)?;
     cuda.replace_history(&replacement, &values)?;
 
-    let config = WeightAsk {
+    let config = SearchConfig {
         neighbors: 2,
         length: 1.0,
-        ..WeightAsk::default()
+        ..SearchConfig::default()
     };
     let seeds = [17_u64, 23, 47];
     compare_round(&mut cpu, &mut cuda, &seeds, config, 9.0, false)?;
@@ -194,21 +194,21 @@ fn test_replace_history() -> Result<(), String> {
 
 fn test_batch_candidates() -> Result<(), String> {
     let leaves = vec![
-        WeightLeaf::new(0, 512, 4, 0.125, 1.0, 0.75)?,
-        WeightLeaf::new(512, 512, 8, 0.03125, 1.0, 0.5)?,
+        PackedLeaf::new(0, 512, 4, 0.125, 1.0, 0.75)?,
+        PackedLeaf::new(512, 512, 8, 0.03125, 1.0, 0.5)?,
     ];
     let row_bytes = 512_usize.div_ceil(2) + 512;
     let base = make_base(row_bytes);
-    let mut cpu = WeightSearch::new(&base, 0.0, leaves.clone(), 8, ComputeBackend::Cpu)?;
-    let mut cuda = WeightSearch::new(&base, 0.0, leaves, 8, ComputeBackend::Cuda)?;
+    let mut cpu = PackedSearch::new(&base, 0.0, leaves.clone(), 8, ComputeDevice::Cpu)?;
+    let mut cuda = PackedSearch::new(&base, 0.0, leaves, 8, ComputeDevice::Cuda)?;
 
     let candidate_seeds = (1..=64)
         .map(|i| (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
         .collect::<Vec<_>>();
-    let mut config = WeightAsk {
+    let mut config = SearchConfig {
         length: 0.8,
         neighbors: 1,
-        ..WeightAsk::default()
+        ..SearchConfig::default()
     };
     for round in 1..=4 {
         config.neighbors = round;
@@ -226,19 +226,19 @@ fn test_batch_candidates() -> Result<(), String> {
 
 fn test_multi_regions() -> Result<(), String> {
     let leaves = vec![
-        WeightLeaf::new(0, 257, 4, 0.125, 1.0, 0.75)?,
-        WeightLeaf::new(257, 259, 8, 0.03125, 1.0, 0.5)?,
+        PackedLeaf::new(0, 257, 4, 0.125, 1.0, 0.75)?,
+        PackedLeaf::new(257, 259, 8, 0.03125, 1.0, 0.5)?,
     ];
     let row_bytes = 257_usize.div_ceil(2) + 259;
     let base = make_base(row_bytes);
-    let mut cpu = WeightSearch::new(&base, 0.25, leaves.clone(), 4, ComputeBackend::Cpu)?;
-    let mut cuda = WeightSearch::new(&base, 0.25, leaves, 4, ComputeBackend::Cuda)?;
+    let mut cpu = PackedSearch::new(&base, 0.25, leaves.clone(), 4, ComputeDevice::Cpu)?;
+    let mut cuda = PackedSearch::new(&base, 0.25, leaves, 4, ComputeDevice::Cuda)?;
     let seeds = [19_u64, 23, 29, 31, 37, 41, 43, 47, 53];
-    let config = WeightAsk {
+    let config = SearchConfig {
         neighbors: 1,
         length: 0.65,
         beta: 1.3,
-        ..WeightAsk::default()
+        ..SearchConfig::default()
     };
     let expected = cpu.ask_multi_tr(3, 3, &seeds, config)?;
     let actual = cuda.ask_multi_tr(3, 3, &seeds, config)?;
@@ -247,30 +247,30 @@ fn test_multi_regions() -> Result<(), String> {
 
 fn test_compact_center_tree() -> Result<(), String> {
     let leaves = vec![
-        WeightLeaf::new(0, 257, 4, 0.125, 1.0, 0.75)?,
-        WeightLeaf::new(257, 259, 8, 0.03125, 1.0, 0.5)?,
+        PackedLeaf::new(0, 257, 4, 0.125, 1.0, 0.75)?,
+        PackedLeaf::new(257, 259, 8, 0.03125, 1.0, 0.5)?,
     ];
     let row_bytes = 257_usize.div_ceil(2) + 259;
     let base = make_base(row_bytes);
-    let mut cpu = WeightSearch::new(&base, 0.25, leaves.clone(), 4, ComputeBackend::Cpu)?;
-    let mut cuda = WeightSearch::new(&base, 0.25, leaves, 4, ComputeBackend::Cuda)?;
+    let mut cpu = PackedSearch::new(&base, 0.25, leaves.clone(), 4, ComputeDevice::Cpu)?;
+    let mut cuda = PackedSearch::new(&base, 0.25, leaves, 4, ComputeDevice::Cuda)?;
     let centers = [
-        WeightCenter {
+        SearchCenter {
             parent: None,
             seed: 101,
         },
-        WeightCenter {
+        SearchCenter {
             parent: Some(0),
             seed: 103,
         },
     ];
     let region_centers = [0, 1];
     let seeds = [19_u64, 23, 29, 31, 37, 41];
-    let config = WeightAsk {
+    let config = SearchConfig {
         neighbors: 1,
         length: 0.65,
         beta: 1.3,
-        ..WeightAsk::default()
+        ..SearchConfig::default()
     };
     let expected = cpu.ask_multi_tr_tree(2, 3, &centers, &region_centers, &seeds, config)?;
     let actual = cuda.ask_multi_tr_tree(2, 3, &centers, &region_centers, &seeds, config)?;
@@ -304,10 +304,10 @@ fn compare_regions(expected: &[(usize, f32)], actual: &[(usize, f32)]) -> Result
 }
 
 fn compare_round(
-    cpu: &mut WeightSearch,
-    cuda: &mut WeightSearch,
+    cpu: &mut PackedSearch,
+    cuda: &mut PackedSearch,
     seeds: &[u64],
-    config: WeightAsk,
+    config: SearchConfig,
     reward: f32,
     accept: bool,
 ) -> Result<(), String> {
@@ -329,7 +329,7 @@ fn compare_round(
     Ok(())
 }
 
-fn compare_trial(cpu: WeightTrial, cuda: WeightTrial) -> Result<(), String> {
+fn compare_trial(cpu: PackedTrial, cuda: PackedTrial) -> Result<(), String> {
     if cpu.index != cuda.index || cpu.seed != cuda.seed {
         return Err(format!(
             "CUDA selected index={} seed={}, CPU selected index={} seed={}",

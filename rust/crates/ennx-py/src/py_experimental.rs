@@ -1,6 +1,6 @@
 use ennx::experimental::{
-    AcquisitionKind, ComputeBackend, ForwardProgram, PackedModel, ResidentBoState, ResidentRound,
-    WeightAsk, WeightLeaf,
+    AcquisitionKind, ComputeDevice, ForwardProgram, PackedLeaf, PackedModel, ResidentBoState,
+    ResidentRound, SearchConfig,
 };
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use ennx::experimental::{
@@ -81,12 +81,12 @@ impl PyModelPackage {
         self.inner.biases().len()
     }
 
-    #[pyo3(signature=(base_value,capacity,backend="auto",scale=1.0,weight=1.0,radius=1.0))]
+    #[pyo3(signature=(base_value,capacity,device="auto",scale=1.0,weight=1.0,radius=1.0))]
     fn resident_session(
         &self,
         base_value: f32,
         capacity: usize,
-        backend: &str,
+        device: &str,
         scale: f32,
         weight: f32,
         radius: f32,
@@ -99,7 +99,7 @@ impl PyModelPackage {
                     .trial_leaves(scale, weight, radius)
                     .map_err(err)?,
                 capacity,
-                ComputeBackend::parse(backend).map_err(err)?,
+                ComputeDevice::parse(device).map_err(err)?,
                 ForwardProgram::kda().map_err(err)?,
             )
             .map_err(err)?,
@@ -171,7 +171,7 @@ pub struct PyNativeKdaModel {
 #[pymethods]
 impl PyNativeKdaModel {
     #[new]
-    #[pyo3(signature=(packed,scales,biases,linears,num_layers,hidden_size,heads,head_width,gate_rank,num_experts,top_k,expert_width,residual_scale,rms_epsilon,embedding_scale,backend="metal"))]
+    #[pyo3(signature=(packed,scales,biases,linears,num_layers,hidden_size,heads,head_width,gate_rank,num_experts,top_k,expert_width,residual_scale,rms_epsilon,embedding_scale,device="metal"))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         packed: PyReadonlyArray1<'_, u8>,
@@ -189,7 +189,7 @@ impl PyNativeKdaModel {
         residual_scale: f32,
         rms_epsilon: f32,
         embedding_scale: f32,
-        backend: &str,
+        device: &str,
     ) -> PyResult<Self> {
         let packed = packed
             .as_slice()
@@ -210,7 +210,7 @@ impl PyNativeKdaModel {
             biases,
         })
         .map_err(err)?;
-        let backend = ComputeBackend::parse(backend).map_err(err)?;
+        let device = ComputeDevice::parse(device).map_err(err)?;
         let decay = vec![0.0_f32; heads];
         let time_bias = vec![0.0_f32; heads * head_width];
         let output_norm = vec![1.0_f32; head_width];
@@ -270,7 +270,7 @@ impl PyNativeKdaModel {
                         time_bias: &time_bias,
                         output_norm: &output_norm,
                     },
-                    backend,
+                    device,
                     &arena,
                 )
                 .map_err(err)?,
@@ -317,13 +317,13 @@ impl PyNativeKdaModel {
 #[pymethods]
 impl PyResidentBoSession {
     #[new]
-    #[pyo3(signature=(base,base_value,leaves,capacity,backend="auto"))]
+    #[pyo3(signature=(base,base_value,leaves,capacity,device="auto"))]
     fn new(
         base: Vec<u8>,
         base_value: f32,
         leaves: Vec<(usize, usize, u8, f32, f32, f32)>,
         capacity: usize,
-        backend: &str,
+        device: &str,
     ) -> PyResult<Self> {
         Ok(Self {
             inner: ResidentBoState::new(
@@ -331,7 +331,7 @@ impl PyResidentBoSession {
                 base_value,
                 trial_leaves(leaves)?,
                 capacity,
-                ComputeBackend::parse(backend).map_err(err)?,
+                ComputeDevice::parse(device).map_err(err)?,
                 ForwardProgram::kda().map_err(err)?,
             )
             .map_err(err)?,
@@ -402,8 +402,8 @@ fn ask_config(
     beta: f32,
     acquisition: &str,
     seed: u64,
-) -> PyResult<WeightAsk> {
-    Ok(WeightAsk {
+) -> PyResult<SearchConfig> {
+    Ok(SearchConfig {
         length,
         neighbors,
         epistemic_scale,
@@ -415,10 +415,10 @@ fn ask_config(
     })
 }
 
-fn trial_leaves(raw: Vec<(usize, usize, u8, f32, f32, f32)>) -> PyResult<Vec<WeightLeaf>> {
+fn trial_leaves(raw: Vec<(usize, usize, u8, f32, f32, f32)>) -> PyResult<Vec<PackedLeaf>> {
     raw.into_iter()
         .map(|(offset, length, bits, scale, weight, radius)| {
-            WeightLeaf::new(offset, length, bits, scale, weight, radius).map_err(err)
+            PackedLeaf::new(offset, length, bits, scale, weight, radius).map_err(err)
         })
         .collect()
 }

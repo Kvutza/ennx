@@ -157,7 +157,7 @@ fn row_distance(base: &[u8], row: &[u8], leaves: &[Leaf]) -> f32 {
     super::trial_distance(base, row, leaves, &steps, 0)
 }
 
-fn sparse_code(code: u32, seed: u64, element: u32, mut step: super::Step) -> u32 {
+fn sparse_code(code: u32, seed: u64, element: u32, mut step: super::LeafStep) -> u32 {
     if step.whole == 0 && step.threshold == 0 {
         return code;
     }

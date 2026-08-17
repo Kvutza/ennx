@@ -1,4 +1,4 @@
-use super::{make_steps, make_tiles, Ask, Center, Leaf, SparseEdit, Step, Tile};
+use super::{make_steps, make_tiles, Ask, Center, Leaf, LeafStep, SparseEdit, Tile};
 
 pub(super) struct Engine {
     inner: ennx_cuda::TrialEngine,
@@ -244,7 +244,7 @@ impl Engine {
         base_slot: usize,
         trial_slot: usize,
         seed: u64,
-        steps: &[Step],
+        steps: &[LeafStep],
     ) -> Result<(), String> {
         let steps = steps.iter().copied().map(cuda_leaf).collect::<Vec<_>>();
         self.inner.materialize(base_slot, trial_slot, seed, &steps)
@@ -267,7 +267,7 @@ impl Engine {
     }
 }
 
-fn cuda_leaf(step: Step) -> ennx_cuda::Leaf {
+fn cuda_leaf(step: LeafStep) -> ennx_cuda::Leaf {
     ennx_cuda::Leaf {
         byte_offset: step.byte_offset,
         element_offset: step.element_offset,

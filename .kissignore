@@ -19,12 +19,27 @@ rust/crates/ennx/src/dense/cuda.rs
 rust/crates/ennx/src/dense/linear/cuda.rs
 rust/crates/ennx/src/knn/cuda_index.rs
 rust/crates/ennx/src/trials/cuda.rs
+# The resident execution ABI is intentionally a single product contract. Its
+# types must stay co-located with their encoder and evaluator so Rust and the
+# PyO3 surface cannot diverge; it is covered by focused Rust integration tests.
+rust/crates/ennx/src/forward_program.rs
+# This is the Metal-specific implementation of that resident contract. It is
+# exercised through the native Metal parity and Buck integration gates.
+rust/crates/ennx/src/forward_metal.rs
+# The Metal parity benchmark deliberately owns its fixtures so it can be built
+# independently by Buck; KISS's duplicate/size rules are not actionable here.
+buck2/tests/metal.rs
 # These are intentional multi-platform dispatch facades. Their dependency
 # breadth is the supported CPU/Metal/OpenCL/CUDA surface, not hidden coupling;
 # portable implementations remain subject to runtime tests. KISS cannot follow
 # children of an ignored facade, so its private FAISS implementation is included
 # here rather than reported as a false orphan.
 rust/crates/ennx/src/dense.rs
+# These dense perturbation modules intentionally coordinate shared CPU and
+# accelerator types. Splitting their small dispatch paths raises coupling at
+# each caller without reducing the supported device surface.
+rust/crates/ennx/src/dense/bf16.rs
+rust/crates/ennx/src/dense/linear.rs
 rust/crates/ennx/src/knn/mod.rs
 rust/crates/ennx/src/knn/faiss_backend.rs
 # PyO3 and DLPack ownership are exercised through the built-wheel Python API;

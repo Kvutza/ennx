@@ -27,7 +27,7 @@ fn ucb_prefer() {
             beta: 0.0,
             acquisition: AcquisitionKind::Ucb,
             seed: 0,
-            backend: ComputeBackend::Cpu,
+            device: ComputeDevice::Cpu,
         },
     )
     .unwrap();
@@ -50,7 +50,7 @@ fn agx_match() {
         beta: 0.0,
         acquisition: AcquisitionKind::Ucb,
         seed: 0,
-        backend: ComputeBackend::Cpu,
+        device: ComputeDevice::Cpu,
     };
     let cpu = select_weights(&observations, 3, &outcomes, &candidates, 2, &blocks, config).unwrap();
     let agx = select_weights(
@@ -61,7 +61,7 @@ fn agx_match() {
         2,
         &blocks,
         WeightSelectConfig {
-            backend: ComputeBackend::Agx,
+            device: ComputeDevice::Agx,
             ..config
         },
     )

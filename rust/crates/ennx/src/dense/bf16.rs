@@ -1,4 +1,4 @@
-use crate::weights::ComputeBackend;
+use crate::weights::ComputeDevice;
 
 use super::{has_direction, sign, validate_leaves, validate_terms, DenseLeaf, DenseTerm};
 
@@ -35,23 +35,23 @@ impl Bf16Tree {
     pub fn new(
         base: Vec<u16>,
         leaves: Vec<DenseLeaf>,
-        backend: ComputeBackend,
+        device: ComputeDevice,
     ) -> Result<Self, String> {
         bf16_validate(&base, &leaves)?;
         let len = base.len();
-        let engine = match backend {
-            ComputeBackend::Cpu => Bf16Resident::Cpu {
+        let engine = match device {
+            ComputeDevice::Cpu => Bf16Resident::Cpu {
                 candidate: base.clone(),
                 base,
                 leaves,
             },
-            ComputeBackend::Metal | ComputeBackend::Agx | ComputeBackend::Auto => {
+            ComputeDevice::Metal | ComputeDevice::Agx | ComputeDevice::Auto => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
                     Bf16Resident::Metal(metal::Resident::new(
                         &base,
                         &leaves,
-                        backend != ComputeBackend::Metal,
+                        device != ComputeDevice::Metal,
                     )?)
                 }
                 #[cfg(not(all(target_os = "macos", feature = "metal")))]
@@ -59,8 +59,8 @@ impl Bf16Tree {
                     return Err("Metal BF16 pytree is not available in this build".into());
                 }
             }
-            ComputeBackend::OpenCl => return Err("OpenCL BF16 pytree is not available".into()),
-            ComputeBackend::Cuda => {
+            ComputeDevice::OpenCl => return Err("OpenCL BF16 pytree is not available".into()),
+            ComputeDevice::Cuda => {
                 #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
                 {
                     Bf16Resident::Cuda(cuda::Resident::new(&base, &leaves)?)
@@ -237,7 +237,7 @@ mod tests {
         let error = Bf16Tree::new(
             vec![bf16_encode(1.0)],
             vec![DenseLeaf::new(7, 0, 1, 1.0).unwrap()],
-            ComputeBackend::Auto,
+            ComputeDevice::Auto,
         )
         .err()
         .unwrap();
@@ -250,7 +250,7 @@ mod tests {
         let tree = Bf16Tree::new(
             base.clone(),
             vec![DenseLeaf::new(7, 0, base.len(), 1.0).unwrap()],
-            ComputeBackend::Cpu,
+            ComputeDevice::Cpu,
         )
         .unwrap();
         assert_eq!(tree.candidate().unwrap(), base);
@@ -267,7 +267,7 @@ mod tests {
         let mut tree = Bf16Tree::new(
             base.clone(),
             vec![DenseLeaf::new(11, 0, base.len(), 1.0e-6).unwrap()],
-            ComputeBackend::Cpu,
+            ComputeDevice::Cpu,
         )
         .unwrap();
         tree.materialize(&[DenseTerm::new(17, 1.0e-6).unwrap()])
@@ -292,7 +292,7 @@ mod tests {
         let mut tree = Bf16Tree::new(
             base.clone(),
             vec![DenseLeaf::new(7, 0, 1, f32::MAX).unwrap()],
-            ComputeBackend::Cpu,
+            ComputeDevice::Cpu,
         )
         .unwrap();
         let error = tree

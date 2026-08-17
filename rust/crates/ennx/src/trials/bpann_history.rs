@@ -19,7 +19,7 @@ pub struct IndexedObservation {
 ///
 /// Full quantized model rows deliberately do not live here. A caller stores or
 /// regenerates those rows separately and uses the returned [`ObservationId`]s
-/// to resolve only the shortlist loaded into `WeightSearch::replace_history`.
+/// to resolve only the shortlist loaded into `PackedSearch::replace_history`.
 pub struct BpannHistory {
     backend: BpannBackend,
     descriptor_dim: usize,
@@ -127,7 +127,7 @@ impl BpannHistory {
     }
 
     /// Return a stable, deduplicated union of per-candidate neighbors and their
-    /// objective values, suitable for resolving and loading into WeightSearch.
+    /// objective values, suitable for resolving and loading into PackedSearch.
     pub fn shortlist(
         &self,
         queries: &ArrayView2<'_, f64>,

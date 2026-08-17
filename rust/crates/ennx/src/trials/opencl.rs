@@ -8,7 +8,7 @@ use opencl3::memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE};
 use opencl3::program::Program;
 use opencl3::types::{cl_mem_flags, CL_BLOCKING, CL_NON_BLOCKING};
 
-use super::{make_steps, make_tiles, Ask, Center, Leaf, Step, Tile};
+use super::{make_steps, make_tiles, Ask, Center, Leaf, LeafStep, Tile};
 
 const THREADS: usize = 256;
 const SOURCE: &str = include_str!("trials.cl");
@@ -54,7 +54,7 @@ struct Scratch {
     scores: Buffer<f32>,
     partials: Buffer<f32>,
     choice: Buffer<u32>,
-    leaves: Buffer<Step>,
+    leaves: Buffer<LeafStep>,
     tiles: Buffer<Tile>,
     centers: Buffer<CenterStep>,
     candidate_centers: Buffer<u32>,
@@ -282,7 +282,7 @@ impl Engine {
         base_slot: usize,
         trial_slot: usize,
         seed: u64,
-        steps: &[Step],
+        steps: &[LeafStep],
     ) -> Result<(), String> {
         self.ensure_candidates(1)?;
         let seeds = [Seed {
@@ -553,7 +553,7 @@ impl Engine {
         outcomes: &[f32],
         seeds: &[Seed],
         draws: &[f32],
-        leaves: &[Step],
+        leaves: &[LeafStep],
     ) -> Result<(), String> {
         unsafe {
             self.queue

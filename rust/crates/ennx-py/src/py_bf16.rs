@@ -110,7 +110,7 @@ impl PyBf16Search {
             .ask_batch(
                 &seeds,
                 arms,
-                ennx::experimental::WeightAsk {
+                ennx::experimental::SearchConfig {
                     length: 0.0,
                     neighbors,
                     epistemic_scale,

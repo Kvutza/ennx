@@ -12,8 +12,8 @@ fn leaves() -> Vec<Leaf> {
 #[test]
 fn cpu_search() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
-    let mut left = Search::new(&base, 1.0, leaves(), 4, ComputeBackend::Cpu).unwrap();
-    let mut right = Search::new(&base, 1.0, leaves(), 4, ComputeBackend::Cpu).unwrap();
+    let mut left = Search::new(&base, 1.0, leaves(), 4, ComputeDevice::Cpu).unwrap();
+    let mut right = Search::new(&base, 1.0, leaves(), 4, ComputeDevice::Cpu).unwrap();
     let config = Ask {
         neighbors: 1,
         length: 1.0,
@@ -31,7 +31,7 @@ fn cpu_search() {
 #[test]
 fn accepted_center() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
-    let mut search = Search::new(&base, 0.0, leaves(), 2, ComputeBackend::Cpu).unwrap();
+    let mut search = Search::new(&base, 0.0, leaves(), 2, ComputeDevice::Cpu).unwrap();
     let config = Ask {
         neighbors: 1,
         length: 1.0,
@@ -46,10 +46,10 @@ fn accepted_center() {
     assert_eq!(search.history_len(), 2);
 }
 
-fn lazy_match(backend: ComputeBackend) {
+fn lazy_match(device: ComputeDevice) {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
-    let mut eager = Search::new(&base, 0.0, leaves(), 3, backend).unwrap();
-    let mut lazy = Search::new(&base, 0.0, leaves(), 3, backend).unwrap();
+    let mut eager = Search::new(&base, 0.0, leaves(), 3, device).unwrap();
+    let mut lazy = Search::new(&base, 0.0, leaves(), 3, device).unwrap();
     let config = Ask {
         neighbors: 1,
         length: 0.65,
@@ -69,7 +69,7 @@ fn lazy_match(backend: ComputeBackend) {
 
 #[test]
 fn lazy_history() {
-    lazy_match(ComputeBackend::Cpu);
+    lazy_match(ComputeDevice::Cpu);
 }
 
 #[test]
@@ -95,16 +95,16 @@ fn sparse_rows() {
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[test]
 fn metal_history() {
-    lazy_match(ComputeBackend::Metal);
-    lazy_match(ComputeBackend::Agx);
+    lazy_match(ComputeDevice::Metal);
+    lazy_match(ComputeDevice::Agx);
 }
 
 #[cfg(feature = "opencl")]
 #[test]
 fn opencl_history() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
-    match Search::new(&base, 0.0, leaves(), 3, ComputeBackend::OpenCl) {
-        Ok(_) => lazy_match(ComputeBackend::OpenCl),
+    match Search::new(&base, 0.0, leaves(), 3, ComputeDevice::OpenCl) {
+        Ok(_) => lazy_match(ComputeDevice::OpenCl),
         Err(error) if error.contains("no OpenCL GPU or CPU device") => {}
         Err(error) => panic!("{error}"),
     }
@@ -113,8 +113,8 @@ fn opencl_history() {
 #[test]
 fn rejected_center() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
-    let mut search = Search::new(&base, 0.0, leaves(), 2, ComputeBackend::Cpu).unwrap();
-    let mut control = Search::new(&base, 0.0, leaves(), 2, ComputeBackend::Cpu).unwrap();
+    let mut search = Search::new(&base, 0.0, leaves(), 2, ComputeDevice::Cpu).unwrap();
+    let mut control = Search::new(&base, 0.0, leaves(), 2, ComputeDevice::Cpu).unwrap();
     let config = Ask {
         neighbors: 1,
         length: 1.0,
@@ -130,7 +130,7 @@ fn rejected_center() {
 #[test]
 fn history_score() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
-    let mut search = Search::new(&base, 0.0, leaves(), 3, ComputeBackend::Cpu).unwrap();
+    let mut search = Search::new(&base, 0.0, leaves(), 3, ComputeDevice::Cpu).unwrap();
     let rows = [
         0x11, 0x22, 0x03, 10, 20, 30, 40, 0x44, 0x55, 0x06, 70, 80, 90, 100,
     ];
@@ -159,7 +159,7 @@ fn history_score() {
             },
         )
         .unwrap();
-    let mut control = Search::new(&base, 0.0, leaves(), 3, ComputeBackend::Cpu).unwrap();
+    let mut control = Search::new(&base, 0.0, leaves(), 3, ComputeDevice::Cpu).unwrap();
     control.replace_history(&rows, &[3.0, 7.0]).unwrap();
     let expected = control
         .ask(
@@ -177,7 +177,7 @@ fn history_score() {
 #[test]
 fn history_state() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
-    let mut search = Search::new(&base, 0.0, leaves(), 2, ComputeBackend::Cpu).unwrap();
+    let mut search = Search::new(&base, 0.0, leaves(), 2, ComputeDevice::Cpu).unwrap();
     assert!(search.replace_history(&[], &[]).is_err());
     assert!(search.replace_history(&base, &[1.0, 2.0]).is_err());
     let trial = search
@@ -211,7 +211,7 @@ fn indexed_row() {
         },
     ];
     let mut resolved = Vec::new();
-    let mut search = Search::new(&base, 0.0, leaves(), 2, ComputeBackend::Cpu).unwrap();
+    let mut search = Search::new(&base, 0.0, leaves(), 2, ComputeDevice::Cpu).unwrap();
     search
         .replace_indexed_history(&observations, |id| {
             resolved.push(id);
@@ -249,7 +249,7 @@ fn indexed_search() {
     }
     let candidate_descriptors = array![[0.1, 0.0], [3.9, 0.0]];
     let mut resolved = Vec::new();
-    let mut search = Search::new(&base, 0.0, leaves(), 3, ComputeBackend::Cpu).unwrap();
+    let mut search = Search::new(&base, 0.0, leaves(), 3, ComputeDevice::Cpu).unwrap();
     let trial = search
         .ask_indexed(
             &history,

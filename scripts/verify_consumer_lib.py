@@ -1,6 +1,6 @@
 """End-to-end consumer verification script for ENNX library.
 
-Exercises real FP4/FP8 quantized WeightSearch, BPANN indexing, and high-level
+Exercises real FP4/FP8 quantized PackedSearch, BPANN indexing, and high-level
 TuRBO optimization to guarantee runtime library functionality beyond unit tests.
 """
 
@@ -20,19 +20,19 @@ except ImportError as e:
 
 
 def test_end_to_end_quantized_search():
-    print("\n--- Running End-to-End FP4/FP8 Quantized WeightSearch ---")
+    print("\n--- Running End-to-End FP4/FP8 Quantized PackedSearch ---")
     raw_data = np.random.randn(512).astype(np.float32)
 
     # 1. Quantize data using quantization module
     packed_bytes = quantize_fp4_e2m1(raw_data, scale=0.5)
     print(f"Quantized 512 floats into {len(packed_bytes)} packed bytes.")
 
-    # 2. Build WeightLeaf schema tuples: (offset, length, bits, scale, weight, radius)
+    # 2. Build PackedLeaf schema tuples: (offset, length, bits, scale, weight, radius)
     leaf = (0, 512, 4, 0.5, 1.0, 0.75)
 
-    # 3. Instantiate native WeightSearch engine (CPU & GPU backend)
+    # 3. Instantiate native PackedSearch engine (CPU & GPU backend)
     for backend in ["cpu", "metal"]:
-        search = optimizer.WeightSearch(packed_bytes, 0.25, [leaf], 4, backend)
+        search = optimizer.PackedSearch(packed_bytes, 0.25, [leaf], 4, backend)
 
         trial_index, trial_seed, trial_score = search.ask(
             np.array([19, 23, 29, 31], dtype=np.uint64), 0.65, 1
@@ -45,7 +45,7 @@ def test_end_to_end_quantized_search():
         assert len(row_bytes) == len(packed_bytes), "Materialized row length mismatch"
         search.tell(0.85, True)
 
-    print("[✓] FP4/FP8 Quantized WeightSearch verified across backends.")
+    print("[✓] FP4/FP8 Quantized PackedSearch verified across backends.")
 
 
 if __name__ == "__main__":

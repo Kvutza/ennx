@@ -31,12 +31,12 @@ pub use crate::optimizer::{
 pub use crate::optimizer_factory::create_optimizer_enn_multi_tr;
 pub use crate::quantization::{quantize_fp4_e2m1, quantize_int4, FP4_E2M1_LUT};
 pub use crate::trials::{
-    Ask as WeightAsk, BpannHistory, Center as WeightCenter, EncodingType, IndexedObservation,
-    Leaf as WeightLeaf, ObservationId, Search as WeightSearch, Trial as WeightTrial,
+    Ask as SearchConfig, BpannHistory, Center as SearchCenter, EncodingType, IndexedObservation,
+    Leaf as PackedLeaf, ObservationId, Search as PackedSearch, Trial as PackedTrial,
 };
-pub use crate::turbo_search::{TurboSearch, TurboTrial};
+pub use crate::turbo_search::{PackedTurbo, TurboTrial};
 pub use crate::weights::{
     apply_sparse, blocks_for_words, draw_sparse, merge_values, missing_words, select_weights,
-    sparse_union, sparse_xor, take_words, AcquisitionKind, ComputeBackend, WeightBlock,
+    sparse_union, sparse_xor, take_words, AcquisitionKind, ComputeDevice, WeightBlock,
     WeightSelectConfig, WeightSelectResult,
 };

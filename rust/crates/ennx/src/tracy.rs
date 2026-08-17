@@ -38,6 +38,7 @@ pub fn client() -> &'static Client {
     })
 }
 
+#[cfg(all(target_os = "macos", feature = "metal"))]
 pub(crate) fn knn(profile: &crate::knn::KnnProfile) {
     let client = client();
     for (name, value) in [

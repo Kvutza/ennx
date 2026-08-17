@@ -1,14 +1,14 @@
 use ennx::experimental::{
-    apply_dense, dense_linear, AcquisitionKind, BpannHistory, ComputeBackend, DenseLeaf,
-    DenseLinear, DenseTerm, DenseView, WeightAsk, WeightCenter, WeightLeaf, WeightSearch,
+    apply_dense, dense_linear, AcquisitionKind, BpannHistory, ComputeDevice, DenseLeaf,
+    DenseLinear, DenseTerm, DenseView, PackedLeaf, PackedSearch, SearchCenter, SearchConfig,
 };
 use ndarray::{array, Axis};
 use tempfile::TempDir;
 
-fn leaves() -> Vec<WeightLeaf> {
+fn leaves() -> Vec<PackedLeaf> {
     vec![
-        WeightLeaf::new(0, 257, 4, 0.25, 1.0, 0.75).unwrap(),
-        WeightLeaf::new(257, 263, 8, 0.5, 0.5, 1.0).unwrap(),
+        PackedLeaf::new(0, 257, 4, 0.25, 1.0, 0.75).unwrap(),
+        PackedLeaf::new(257, 263, 8, 0.5, 0.5, 1.0).unwrap(),
     ]
 }
 
@@ -55,28 +55,28 @@ fn linear_input() -> (
 }
 
 fn ask(
-    backend: ComputeBackend,
+    device: ComputeDevice,
     acquisition: AcquisitionKind,
 ) -> Result<(usize, f32, Vec<u8>), String> {
-    let mut search = WeightSearch::new(&base(), 0.25, leaves(), 4, backend)?;
+    let mut search = PackedSearch::new(&base(), 0.25, leaves(), 4, device)?;
     let warm = search.ask(
         &[17],
-        WeightAsk {
+        SearchConfig {
             neighbors: 1,
             length: 1.0,
-            ..WeightAsk::default()
+            ..SearchConfig::default()
         },
     )?;
     search.tell(warm, 0.75, true)?;
     let trial = search.ask(
         &[19, 23, 29, 31],
-        WeightAsk {
+        SearchConfig {
             neighbors: 2,
             length: 0.65,
             beta: 1.3,
             acquisition,
             seed: 41,
-            ..WeightAsk::default()
+            ..SearchConfig::default()
         },
     )?;
     Ok((trial.index, trial.score, search.row(trial)?))
@@ -89,8 +89,8 @@ fn cpu_trial_search_is_repeatable() {
         AcquisitionKind::Thompson,
         AcquisitionKind::Pareto,
     ] {
-        let left = ask(ComputeBackend::Cpu, acquisition).unwrap();
-        let right = ask(ComputeBackend::Cpu, acquisition).unwrap();
+        let left = ask(ComputeDevice::Cpu, acquisition).unwrap();
+        let right = ask(ComputeDevice::Cpu, acquisition).unwrap();
         assert_eq!(left, right);
     }
 }
@@ -103,9 +103,9 @@ fn metal_matches_cpu_trial_bytes() {
         AcquisitionKind::Thompson,
         AcquisitionKind::Pareto,
     ] {
-        let cpu = ask(ComputeBackend::Cpu, acquisition).unwrap();
-        let metal = ask(ComputeBackend::Metal, acquisition).unwrap();
-        let agx = ask(ComputeBackend::Agx, acquisition).unwrap();
+        let cpu = ask(ComputeDevice::Cpu, acquisition).unwrap();
+        let metal = ask(ComputeDevice::Metal, acquisition).unwrap();
+        let agx = ask(ComputeDevice::Agx, acquisition).unwrap();
         assert_eq!(metal.0, cpu.0);
         assert!((metal.1 - cpu.1).abs() <= 1.0e-5, "{metal:?} != {cpu:?}");
         assert_eq!(metal.2, cpu.2);
@@ -125,23 +125,23 @@ fn agx_acquisition_reductions_match_cpu_across_simd_boundaries() {
             AcquisitionKind::Thompson,
             AcquisitionKind::Pareto,
         ] {
-            let run = |backend| -> Result<(usize, f32), String> {
-                let mut search = WeightSearch::new(&base(), 0.25, leaves(), 4, backend)?;
+            let run = |device| -> Result<(usize, f32), String> {
+                let mut search = PackedSearch::new(&base(), 0.25, leaves(), 4, device)?;
                 let trial = search.ask(
                     &seeds,
-                    WeightAsk {
+                    SearchConfig {
                         neighbors: 1,
                         length: 0.65,
                         beta: 1.3,
                         acquisition,
                         seed: 41,
-                        ..WeightAsk::default()
+                        ..SearchConfig::default()
                     },
                 )?;
                 Ok((trial.index, trial.score))
             };
-            let cpu = run(ComputeBackend::Cpu).unwrap();
-            let agx = run(ComputeBackend::Agx).unwrap();
+            let cpu = run(ComputeDevice::Cpu).unwrap();
+            let agx = run(ComputeDevice::Agx).unwrap();
             assert_eq!(agx.0, cpu.0, "candidate count {count}");
             assert!(
                 (agx.1 - cpu.1).abs() <= 1.0e-5,
@@ -154,13 +154,13 @@ fn agx_acquisition_reductions_match_cpu_across_simd_boundaries() {
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[test]
 fn agx_resident_state_matches_cpu_across_rolling_history() {
-    let mut cpu = WeightSearch::new(&base(), 0.25, leaves(), 4, ComputeBackend::Cpu).unwrap();
-    let mut agx = WeightSearch::new(&base(), 0.25, leaves(), 4, ComputeBackend::Agx).unwrap();
+    let mut cpu = PackedSearch::new(&base(), 0.25, leaves(), 4, ComputeDevice::Cpu).unwrap();
+    let mut agx = PackedSearch::new(&base(), 0.25, leaves(), 4, ComputeDevice::Agx).unwrap();
     for round in 0..9 {
         let seeds: Vec<u64> = (0..7)
             .map(|candidate| 100 + round * 7 + candidate)
             .collect();
-        let config = WeightAsk {
+        let config = SearchConfig {
             neighbors: (round as usize + 1).min(4),
             length: if round % 3 == 0 { 0.65 } else { 0.8 },
             acquisition: if round % 2 == 0 {
@@ -169,7 +169,7 @@ fn agx_resident_state_matches_cpu_across_rolling_history() {
                 AcquisitionKind::Thompson
             },
             seed: 900 + round,
-            ..WeightAsk::default()
+            ..SearchConfig::default()
         };
         let cpu_trial = cpu.ask(&seeds, config).unwrap();
         let agx_trial = agx.ask(&seeds, config).unwrap();
@@ -187,9 +187,9 @@ fn agx_resident_state_matches_cpu_across_rolling_history() {
 #[test]
 fn dense_directions_match_cpu() {
     let (base, leaves, terms) = dense_input();
-    let cpu = apply_dense(&base, &leaves, &terms, ComputeBackend::Cpu).unwrap();
-    for backend in [ComputeBackend::Metal, ComputeBackend::Agx] {
-        let gpu = apply_dense(&base, &leaves, &terms, backend).unwrap();
+    let cpu = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu).unwrap();
+    for device in [ComputeDevice::Metal, ComputeDevice::Agx] {
+        let gpu = apply_dense(&base, &leaves, &terms, device).unwrap();
         assert_eq!(gpu.changed, base.len());
         for (left, right) in gpu.values.iter().zip(&cpu.values) {
             assert!((left - right).abs() <= f32::EPSILON);
@@ -201,7 +201,7 @@ fn dense_directions_match_cpu() {
 #[test]
 fn dense_linear_matches_cpu() {
     let (input, weight, bias, weight_view, bias_view, terms) = linear_input();
-    let run = |backend| {
+    let run = |device| {
         dense_linear(
             &input,
             &weight,
@@ -209,13 +209,13 @@ fn dense_linear_matches_cpu() {
             weight_view,
             Some(bias_view),
             &terms,
-            backend,
+            device,
         )
         .unwrap()
     };
-    let cpu = run(ComputeBackend::Cpu);
-    for backend in [ComputeBackend::Metal, ComputeBackend::Agx] {
-        let gpu = run(backend);
+    let cpu = run(ComputeDevice::Cpu);
+    for device in [ComputeDevice::Metal, ComputeDevice::Agx] {
+        let gpu = run(device);
         for (left, right) in gpu.iter().zip(&cpu) {
             assert!((left - right).abs() <= 1.0e-5);
         }
@@ -225,7 +225,7 @@ fn dense_linear_matches_cpu() {
             Some(bias.clone()),
             weight_view,
             Some(bias_view),
-            backend,
+            device,
         )
         .unwrap();
         for (left, right) in resident.eval(&input, &terms).unwrap().iter().zip(&gpu) {
@@ -244,23 +244,23 @@ fn metal_matches_cpu_with_external_history_shortlist() {
         .map(|(index, value)| value.wrapping_add((index % 7) as u8))
         .collect();
     let values = [0.5, 1.5];
-    let run = |backend| -> Result<(usize, f32, Vec<u8>), String> {
-        let mut search = WeightSearch::new(&base(), 0.25, leaves(), 4, backend)?;
+    let run = |device| -> Result<(usize, f32, Vec<u8>), String> {
+        let mut search = PackedSearch::new(&base(), 0.25, leaves(), 4, device)?;
         search.replace_history(&packed_rows, &values)?;
         let trial = search.ask(
             &[19, 23, 29, 31],
-            WeightAsk {
+            SearchConfig {
                 neighbors: 2,
                 length: 0.65,
                 beta: 1.3,
                 seed: 41,
-                ..WeightAsk::default()
+                ..SearchConfig::default()
             },
         )?;
         Ok((trial.index, trial.score, search.row(trial)?))
     };
-    let cpu = run(ComputeBackend::Cpu).unwrap();
-    let metal = run(ComputeBackend::Metal).unwrap();
+    let cpu = run(ComputeDevice::Cpu).unwrap();
+    let metal = run(ComputeDevice::Metal).unwrap();
     assert_eq!(metal.0, cpu.0);
     assert!((metal.1 - cpu.1).abs() <= 1.0e-5, "{metal:?} != {cpu:?}");
     assert_eq!(metal.2, cpu.2);
@@ -270,21 +270,21 @@ fn metal_matches_cpu_with_external_history_shortlist() {
 #[test]
 fn metal_multi_tr_matches_independent_cpu_regions() {
     let seeds = [19, 23, 29, 31, 37, 41];
-    let config = WeightAsk {
+    let config = SearchConfig {
         neighbors: 1,
         length: 0.65,
         beta: 1.3,
         acquisition: AcquisitionKind::Ucb,
         seed: 43,
-        ..WeightAsk::default()
+        ..SearchConfig::default()
     };
-    let warm = |backend| -> Result<WeightSearch, String> {
-        let mut search = WeightSearch::new(&base(), 0.25, leaves(), 4, backend)?;
+    let warm = |device| -> Result<PackedSearch, String> {
+        let mut search = PackedSearch::new(&base(), 0.25, leaves(), 4, device)?;
         let trial = search.ask(
             &[17],
-            WeightAsk {
+            SearchConfig {
                 neighbors: 1,
-                ..WeightAsk::default()
+                ..SearchConfig::default()
             },
         )?;
         search.tell(trial, 0.75, true)?;
@@ -293,15 +293,15 @@ fn metal_multi_tr_matches_independent_cpu_regions() {
 
     let mut expected = Vec::new();
     for (region, region_seeds) in seeds.chunks_exact(3).enumerate() {
-        let trial = warm(ComputeBackend::Cpu)
+        let trial = warm(ComputeDevice::Cpu)
             .unwrap()
             .ask(region_seeds, config)
             .unwrap();
         expected.push((region * 3 + trial.index, trial.score));
     }
 
-    for backend in [ComputeBackend::Metal, ComputeBackend::Agx] {
-        let actual = warm(backend)
+    for device in [ComputeDevice::Metal, ComputeDevice::Agx] {
+        let actual = warm(device)
             .unwrap()
             .ask_multi_tr(2, 3, &seeds, config)
             .unwrap();
@@ -319,34 +319,34 @@ fn metal_multi_tr_matches_independent_cpu_regions() {
 #[test]
 fn metal_multi_tr_resolves_perturbation_tree() {
     let centers = [
-        WeightCenter {
+        SearchCenter {
             parent: None,
             seed: 101,
         },
-        WeightCenter {
+        SearchCenter {
             parent: Some(0),
             seed: 103,
         },
     ];
     let region_centers = [0, 1];
     let seeds = [19, 23, 29, 31, 37, 41];
-    let config = WeightAsk {
+    let config = SearchConfig {
         neighbors: 1,
         length: 0.65,
         acquisition: AcquisitionKind::Ucb,
         seed: 43,
-        ..WeightAsk::default()
+        ..SearchConfig::default()
     };
-    let run = |backend| {
-        WeightSearch::new(&base(), 0.25, leaves(), 4, backend)
+    let run = |device| {
+        PackedSearch::new(&base(), 0.25, leaves(), 4, device)
             .unwrap()
             .ask_multi_tr_tree(2, 3, &centers, &region_centers, &seeds, config)
             .unwrap()
     };
 
-    let cpu = run(ComputeBackend::Cpu);
-    let metal = run(ComputeBackend::Metal);
-    let agx = run(ComputeBackend::Agx);
+    let cpu = run(ComputeDevice::Cpu);
+    let metal = run(ComputeDevice::Metal);
+    let agx = run(ComputeDevice::Agx);
     for result in [metal, agx] {
         assert_eq!(result.len(), cpu.len());
         for ((index, score), &(cpu_index, cpu_score)) in result.into_iter().zip(&cpu) {
@@ -360,33 +360,33 @@ fn metal_multi_tr_resolves_perturbation_tree() {
 #[test]
 fn opencl_multi_tr_resolves_perturbation_tree() {
     let centers = [
-        WeightCenter {
+        SearchCenter {
             parent: None,
             seed: 101,
         },
-        WeightCenter {
+        SearchCenter {
             parent: Some(0),
             seed: 103,
         },
     ];
     let region_centers = [0, 1];
     let seeds = [19, 23, 29, 31, 37, 41];
-    let config = WeightAsk {
+    let config = SearchConfig {
         neighbors: 1,
         length: 0.65,
         acquisition: AcquisitionKind::Ucb,
         seed: 43,
-        ..WeightAsk::default()
+        ..SearchConfig::default()
     };
-    let run = |backend| {
-        WeightSearch::new(&base(), 0.25, leaves(), 4, backend)
+    let run = |device| {
+        PackedSearch::new(&base(), 0.25, leaves(), 4, device)
             .unwrap()
             .ask_multi_tr_tree(2, 3, &centers, &region_centers, &seeds, config)
             .unwrap()
     };
 
-    let cpu = run(ComputeBackend::Cpu);
-    let opencl = run(ComputeBackend::OpenCl);
+    let cpu = run(ComputeDevice::Cpu);
+    let opencl = run(ComputeDevice::OpenCl);
     assert_eq!(opencl.len(), cpu.len());
     for ((opencl_index, opencl_score), (cpu_index, cpu_score)) in opencl.into_iter().zip(cpu) {
         assert_eq!(opencl_index, cpu_index);
@@ -394,7 +394,7 @@ fn opencl_multi_tr_resolves_perturbation_tree() {
     }
 }
 
-fn ask_with_bpann(backend: ComputeBackend) -> Result<(usize, f32, Vec<u8>), String> {
+fn ask_with_bpann(device: ComputeDevice) -> Result<(usize, f32, Vec<u8>), String> {
     let archive = [
         base(),
         base()
@@ -414,18 +414,18 @@ fn ask_with_bpann(backend: ComputeBackend) -> Result<(usize, f32, Vec<u8>), Stri
     }
 
     let candidate_descriptors = array![[0.1, 0.0], [3.9, 0.0]];
-    let mut search = WeightSearch::new(&base(), 0.25, leaves(), 4, backend)?;
+    let mut search = PackedSearch::new(&base(), 0.25, leaves(), 4, device)?;
     let trial = search.ask_indexed(
         &history,
         &candidate_descriptors.view(),
         1,
         &[19, 23],
-        WeightAsk {
+        SearchConfig {
             neighbors: 1,
             length: 0.65,
             beta: 1.3,
             seed: 41,
-            ..WeightAsk::default()
+            ..SearchConfig::default()
         },
         |id| Ok(archive[id.0 as usize].clone()),
     )?;
@@ -435,8 +435,8 @@ fn ask_with_bpann(backend: ComputeBackend) -> Result<(usize, f32, Vec<u8>), Stri
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[test]
 fn bpann_shortlist_to_metal_exact_search_matches_cpu() {
-    let cpu = ask_with_bpann(ComputeBackend::Cpu).unwrap();
-    let metal = ask_with_bpann(ComputeBackend::Metal).unwrap();
+    let cpu = ask_with_bpann(ComputeDevice::Cpu).unwrap();
+    let metal = ask_with_bpann(ComputeDevice::Metal).unwrap();
     assert_eq!(metal.0, cpu.0);
     assert!((metal.1 - cpu.1).abs() <= 1.0e-5, "{metal:?} != {cpu:?}");
     assert_eq!(metal.2, cpu.2);
@@ -450,8 +450,8 @@ fn opencl_matches_cpu_when_a_device_exists() {
         AcquisitionKind::Thompson,
         AcquisitionKind::Pareto,
     ] {
-        let cpu = ask(ComputeBackend::Cpu, acquisition).unwrap();
-        let opencl = match ask(ComputeBackend::OpenCl, acquisition) {
+        let cpu = ask(ComputeDevice::Cpu, acquisition).unwrap();
+        let opencl = match ask(ComputeDevice::OpenCl, acquisition) {
             Ok(value) => value,
             Err(error) if error.contains("no OpenCL GPU or CPU device") => return,
             Err(error) => panic!("{error}"),
@@ -466,7 +466,7 @@ fn opencl_matches_cpu_when_a_device_exists() {
 #[test]
 fn opencl_dense_linear_matches_cpu_when_a_device_exists() {
     let (input, weight, bias, weight_view, bias_view, terms) = linear_input();
-    let run = |backend| {
+    let run = |device| {
         dense_linear(
             &input,
             &weight,
@@ -474,11 +474,11 @@ fn opencl_dense_linear_matches_cpu_when_a_device_exists() {
             weight_view,
             Some(bias_view),
             &terms,
-            backend,
+            device,
         )
     };
-    let cpu = run(ComputeBackend::Cpu).unwrap();
-    let opencl = match run(ComputeBackend::OpenCl) {
+    let cpu = run(ComputeDevice::Cpu).unwrap();
+    let opencl = match run(ComputeDevice::OpenCl) {
         Ok(value) => value,
         Err(error)
             if error.contains("no OpenCL GPU or CPU device")
@@ -497,7 +497,7 @@ fn opencl_dense_linear_matches_cpu_when_a_device_exists() {
         Some(bias),
         weight_view,
         Some(bias_view),
-        ComputeBackend::OpenCl,
+        ComputeDevice::OpenCl,
     )
     .unwrap();
     for (left, right) in resident.eval(&input, &terms).unwrap().iter().zip(opencl) {
@@ -509,8 +509,8 @@ fn opencl_dense_linear_matches_cpu_when_a_device_exists() {
 #[test]
 fn opencl_dense_directions_match_cpu_when_a_device_exists() {
     let (base, leaves, terms) = dense_input();
-    let cpu = apply_dense(&base, &leaves, &terms, ComputeBackend::Cpu).unwrap();
-    let opencl = match apply_dense(&base, &leaves, &terms, ComputeBackend::OpenCl) {
+    let cpu = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu).unwrap();
+    let opencl = match apply_dense(&base, &leaves, &terms, ComputeDevice::OpenCl) {
         Ok(result) => result,
         Err(error) if error.contains("no OpenCL GPU or CPU device") => return,
         Err(error) => panic!("{error}"),
