@@ -216,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn kiss_private_top_m_helpers() {
+    fn helpers_order() {
         let mut entries = vec![(0usize, 1.0), (1, 3.0), (2, 2.0)];
         IncrementalIncumbentTracker::push_top_m(&mut entries, 3, 4.0, 2);
         let idx = IncrementalIncumbentTracker::sorted_indices(&entries);

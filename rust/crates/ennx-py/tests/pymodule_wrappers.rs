@@ -27,8 +27,3 @@ fn pymodule_fit() {
 fn pymodule_optimizer() {
     std::hint::black_box(ennx_rust::pymodule_optimizer);
 }
-
-#[test]
-fn kiss_link_child_pymodule_exports() {
-    ennx_rust::kiss_link_child_pymodule_exports();
-}

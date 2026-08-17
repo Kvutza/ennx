@@ -1,4 +1,4 @@
-//! Integration tests exercising bpann modules for kiss coverage and behavior.
+//! Integration tests for BPANN indexing and search behavior.
 
 use bpann::backend::open_rejects_record_stride;
 use bpann::index::kmeans::PartitionTree;
@@ -336,41 +336,4 @@ fn search_tree_path_for_large_index() {
     b.ensure_index_sync().unwrap();
     let (_, idx) = b.search(&x.slice(ndarray::s![0..1, ..]), 5, false).unwrap();
     assert!(idx[[0, 0]] >= 0 && (idx[[0, 0]] as usize) < rows);
-}
-
-#[test]
-#[allow(non_snake_case)]
-fn kiss_incremental_index_module_symbols() {
-    use bpann::index::IncrementalIndex;
-    fn IndexBuildContext() {}
-    fn ensure_sync_for_backend() {}
-    let names = [
-        "IncrementalIndex",
-        "new",
-        "reset",
-        "ensure_sync_for_backend",
-        "ensure_sync",
-        "persist_to_disk",
-        "persist_to_disk_for_backend",
-        "maybe_compact",
-        "build_index_batch",
-        "build_batch",
-        "amalgamate_smallest_pair",
-        "concat_merge",
-        "compact_indices",
-        "compact",
-        "search_index_candidates",
-        "search_candidates",
-        "index_memory_bytes",
-    ];
-    let _dir = tempfile::TempDir::new().unwrap();
-    let _idx = IncrementalIndex::new(_dir.path().join("index"));
-    let _ = (IndexBuildContext, ensure_sync_for_backend);
-    assert_eq!(names.len(), 17);
-}
-
-#[test]
-fn kiss_small_n_search_equality() {
-    fn eq() {}
-    let _ = eq;
 }

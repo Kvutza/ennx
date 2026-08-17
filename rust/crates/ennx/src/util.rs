@@ -458,11 +458,6 @@ mod tests {
     }
 
     #[test]
-    fn kiss_argmax_random_tie_unit_name() {
-        assert_eq!("argmax_random_tie", "argmax_random_tie");
-    }
-
-    #[test]
     fn test_argmax_random_tie_picks_among_ties() {
         let values = [1.0, 3.0, 3.0, 2.0];
         let mut rng = rand::rngs::StdRng::seed_from_u64(7);

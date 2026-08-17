@@ -232,33 +232,12 @@ pub fn bpann_parse_json_string_field(text: &str, field: &str) -> Option<String> 
 }
 
 #[cfg(test)]
-mod kiss_coverage_tests {
+mod tests {
     use super::*;
     use crate::mmap_store::MmapColumnStore;
     use ndarray::array;
     use std::sync::Mutex;
     use tempfile::TempDir;
-
-    #[test]
-    fn observation_units_are_linked() {
-        let _ = (
-            crate::observation::bpann_validate_dim_limits,
-            crate::observation::bpann_check_append_row_limit,
-            crate::observation::bpann_validate_index_backend,
-            crate::observation::bpann_load_num_obs,
-            crate::observation::write_num_obs,
-            crate::observation::write_indexed_rows,
-            crate::observation::bpann_load_indexed_rows,
-            crate::observation::bpann_load_index_backend,
-            crate::observation::bpann_write_metadata,
-            crate::observation::bpann_open_or_append_yvar,
-            crate::observation::bpann_append_yvar_on_add,
-            crate::observation::bpann_train_rows_at,
-            crate::observation::bpann_mark_index_dirty,
-            crate::observation::bpann_parse_json_string_field,
-            crate::observation::parse_json_usize_field,
-        );
-    }
 
     #[test]
     fn bpann_validate_dim_limits_accepts_max_rejects_above() {

@@ -1193,28 +1193,3 @@ fn pack_sparse_rows(
     }
     Ok(bytes)
 }
-
-#[cfg(test)]
-mod kiss_coverage_tests {
-    use super::*;
-
-    #[test]
-    fn py_weights_symbols_are_linked() {
-        let _ = (
-            std::mem::size_of::<PyPackedSearch>(),
-            weight_int4_select_ucb_py,
-            weight_select_ucb_py,
-            sparse_union_py,
-            sparse_xor_py,
-            sparse_missing_py,
-            sparse_merge_py,
-            sparse_take_py,
-            sparse_apply_py,
-            sparse_blocks_py,
-            sparse_draw_py,
-            sparse_select_py,
-            sparse_select_ucb_py,
-            std::mem::size_of::<PyArray1<u8>>,
-        );
-    }
-}

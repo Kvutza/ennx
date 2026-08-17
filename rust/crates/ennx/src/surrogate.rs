@@ -593,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn kiss_surrogate_config_default() {
+    fn default_neighbors() {
         let cfg = ENNSurrogateConfig::default();
         assert!(cfg.k >= 1);
     }

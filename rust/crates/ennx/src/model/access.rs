@@ -1,4 +1,4 @@
-//! Focused accessors for ENN row and index operations (kiss method-count split).
+//! Focused accessors for ENN row and index operations.
 
 use ndarray::{Array1, Array2, ArrayView2};
 

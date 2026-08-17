@@ -534,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn kiss_index_helper_unit_names() {
+    fn helpers_preserve() {
         use crate::knn::{arr2_rows_to_f32, pad_neighbor_cols_to_search_k, unpack_batch_search};
         assert_eq!(faiss_spec_for_test(IndexDriver::Exact), "Flat");
         let rows = array![[1.0, 2.0], [3.0, 4.0]];

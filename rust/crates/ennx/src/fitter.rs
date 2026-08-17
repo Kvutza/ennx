@@ -361,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn kiss_fitter_update_y_and_random_params() {
+    fn fitter_updates() {
         let mut fitter = ENNFitter::new(2, true);
         let y = array![[1.0], [2.0]];
         fitter.update_y(&y.view());

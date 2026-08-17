@@ -57,21 +57,6 @@ pub(crate) fn apply_scalar_overrides(
     Ok(())
 }
 
-#[cfg(test)]
-mod kiss_coverage_tests {
-    use super::{apply_scalar_overrides, optional_bool, optional_f64, optional_usize};
-
-    #[test]
-    fn py_optimizer_helpers_are_linked() {
-        let _ = (
-            optional_f64 as fn(_, _) -> _,
-            optional_usize as fn(_, _) -> _,
-            optional_bool as fn(_, _) -> _,
-            apply_scalar_overrides as fn(_, _) -> _,
-        );
-    }
-}
-
 fn parse_index_driver(s: &str) -> PyResult<ennx::index::IndexDriver> {
     use ennx::index::IndexDriver;
     match s.to_lowercase().as_str() {
@@ -711,33 +696,5 @@ impl PyMultiTrustRegion {
         self.inner
             .restart_region(region, &new_center.as_array())
             .map_err(|e| PyValueError::new_err(e.to_string()))
-    }
-}
-
-#[cfg(test)]
-mod kiss_pymethods_coverage {
-    use super::{PyMultiTrustRegion, PyOptimizer, PyTelemetry};
-
-    #[test]
-    fn py_optimizer_pymethods_are_linked() {
-        let _ = (
-            PyOptimizer::ask,
-            PyOptimizer::tell,
-            PyOptimizer::init_progress,
-            PyOptimizer::telemetry,
-            PyOptimizer::tr_obs_count,
-            PyOptimizer::tr_length,
-            PyOptimizer::x_obs,
-            PyOptimizer::y_obs,
-            PyOptimizer::incumbent_x_unit,
-            PyOptimizer::bounds,
-            PyMultiTrustRegion::allocate,
-            PyMultiTrustRegion::allocate_with,
-            PyMultiTrustRegion::select,
-            PyMultiTrustRegion::variance,
-            PyMultiTrustRegion::restart_region,
-            std::mem::size_of::<PyOptimizer>,
-            std::mem::size_of::<PyTelemetry>,
-        );
     }
 }

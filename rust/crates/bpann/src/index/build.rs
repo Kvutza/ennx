@@ -537,23 +537,9 @@ fn read_skip_edges(path: &Path) -> Result<HashMap<u32, Vec<u32>>, BpannError> {
 }
 
 #[cfg(test)]
-mod kiss_coverage_tests {
+mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    #[test]
-    fn build_units_are_linked() {
-        let _ = (
-            remap_page,
-            BpannIndex::build_row_ids_leaf_with_persist,
-            BpannIndex::concat_merge,
-            BpannIndex::root_centroid,
-            BpannIndex::leaf_row_ids,
-            BpannIndex::on_disk_index_matches,
-            read_skip_edges,
-            std::mem::size_of::<IndexHeader>,
-        );
-    }
 
     #[test]
     fn on_disk_index_matches_detects_valid_and_corrupt_pages() {

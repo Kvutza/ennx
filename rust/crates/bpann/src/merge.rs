@@ -72,13 +72,13 @@ pub fn merge_topk_precomputed_dist(
 }
 
 #[cfg(test)]
-mod kiss_coverage_tests {
+mod tests {
     use crate::mmap_store::MmapColumnStore;
     use ndarray::array;
     use tempfile::TempDir;
 
     #[test]
-    fn merge_units_are_linked() {
+    fn merge_returns() {
         let dir = TempDir::new().unwrap();
         let mut store =
             MmapColumnStore::mmap_open_or_create(dir.path().join("x.bin"), 2, None).unwrap();
