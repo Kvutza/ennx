@@ -1,4 +1,4 @@
-use super::{decode_code, make_steps, Ask, Center, Leaf, SparseEdit, Step};
+use super::{decode_code, make_steps, Ask, Center, Leaf, LeafStep, SparseEdit};
 use super::{sparse, tree};
 use crate::util::insert_neighbor;
 use crate::weights::AcquisitionKind;
@@ -144,7 +144,7 @@ pub(super) fn check_ask(seeds: &[u64], observations: usize, config: Ask) -> Resu
     Ok(())
 }
 
-pub(crate) fn perturb(code: u32, seed: u64, element: u32, step: Step) -> u32 {
+pub(crate) fn perturb(code: u32, seed: u64, element: u32, step: LeafStep) -> u32 {
     let random = hash(seed, element);
     let sign = random & 1;
     let extra = u32::from((random >> 1) < (step.threshold >> 1));
@@ -175,7 +175,7 @@ pub(super) fn hash(seed: u64, element: u32) -> u32 {
     value ^ (value >> 15)
 }
 
-pub(super) fn materialize(base: &[u8], leaves: &[Leaf], steps: &[Step], seed: u64) -> Vec<u8> {
+pub(super) fn materialize(base: &[u8], leaves: &[Leaf], steps: &[LeafStep], seed: u64) -> Vec<u8> {
     let mut row = vec![0u8; base.len()];
     for (&leaf, &step) in leaves.iter().zip(steps) {
         match leaf.bits {
@@ -206,7 +206,7 @@ pub(super) fn trial_distance(
     base: &[u8],
     observation: &[u8],
     leaves: &[Leaf],
-    steps: &[Step],
+    steps: &[LeafStep],
     seed: u64,
 ) -> f32 {
     let mut distance = 0.0f32;

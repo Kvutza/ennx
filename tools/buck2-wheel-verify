@@ -141,7 +141,7 @@ assert np.max(np.abs(actual[0] - expected[0])) == 0.0
 base = np.array([0.5, -1.0, 2.0, 0.25, 4.0, -2.0, 0.75, -0.125], dtype=np.float32)
 leaves = [(11, 0, 4, 0.5), (29, 4, 4, 1.25)]
 terms = [(0x123456789ABCDEF0, 0.01), (91, -0.0025)]
-trial, changed = dense_apply(base, leaves, terms, backend="cpu")
+trial, changed = dense_apply(base, leaves, terms, device="cpu")
 assert changed == base.size
 assert np.all(trial != base)
 assert dense_dist2(leaves, terms, []) > 0.0
@@ -158,7 +158,7 @@ linear = dense_linear(
     terms,
     bias=np.array([0.125, -0.25], dtype=np.float32),
     bias_view=(29, 0, 0.01),
-    backend="cpu",
+    device="cpu",
 )
 assert linear.shape == (2,)
 assert np.all(np.isfinite(linear))
@@ -173,7 +173,7 @@ resident = DenseLinear(
     (11, 0, 0.02),
     bias=np.array([0.125, -0.25], dtype=np.float32),
     bias_view=(29, 0, 0.01),
-    backend="cpu",
+    device="cpu",
 )
 assert resident.input_size == 4
 assert resident.output_size == 2

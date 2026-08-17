@@ -1,4 +1,4 @@
-use crate::weights::ComputeBackend;
+use crate::weights::ComputeDevice;
 
 pub const METAL_OPS: &str = include_str!("dense/ops.metal");
 pub const OPENCL_OPS: &str = include_str!("dense/ops.cl");
@@ -92,13 +92,13 @@ pub fn apply(
     base: &[f32],
     leaves: &[DenseLeaf],
     terms: &[DenseTerm],
-    backend: ComputeBackend,
+    device: ComputeDevice,
 ) -> Result<DenseResult, String> {
     dense_validate(base, leaves, terms)?;
 
-    let values = match backend {
-        ComputeBackend::Cpu => dense_cpu(base, leaves, terms)?,
-        ComputeBackend::Metal => {
+    let values = match device {
+        ComputeDevice::Cpu => dense_cpu(base, leaves, terms)?,
+        ComputeDevice::Metal => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
                 metal::apply(base, leaves, terms, false)?
@@ -108,7 +108,7 @@ pub fn apply(
                 return Err("Metal dense directions are not available in this build".into());
             }
         }
-        ComputeBackend::Agx => {
+        ComputeDevice::Agx => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
                 metal::apply(base, leaves, terms, true)?
@@ -118,7 +118,7 @@ pub fn apply(
                 return Err("AGX dense directions are not available in this build".into());
             }
         }
-        ComputeBackend::OpenCl => {
+        ComputeDevice::OpenCl => {
             #[cfg(feature = "opencl")]
             {
                 opencl::apply(base, leaves, terms)?
@@ -128,7 +128,7 @@ pub fn apply(
                 return Err("OpenCL dense directions are not available in this build".into());
             }
         }
-        ComputeBackend::Cuda => {
+        ComputeDevice::Cuda => {
             #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
             {
                 cuda::apply(base, leaves, terms)?
@@ -138,7 +138,7 @@ pub fn apply(
                 return Err("CUDA dense directions are not available in this build".into());
             }
         }
-        ComputeBackend::Auto => {
+        ComputeDevice::Auto => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
                 metal::apply(base, leaves, terms, true)
@@ -489,7 +489,7 @@ mod tests {
     fn cpu_changes_the_complete_pytree() {
         let base = [0.5, -1.0, 2.0, 0.25, 4.0, -2.0, 0.75, -0.125];
         let terms = [DenseTerm::new(0x1234_5678_9abc_def0, 0.01).unwrap()];
-        let result = apply(&base, &leaves(), &terms, ComputeBackend::Cpu).unwrap();
+        let result = apply(&base, &leaves(), &terms, ComputeDevice::Cpu).unwrap();
         assert_eq!(result.changed, base.len());
         assert!(base
             .iter()

@@ -200,7 +200,7 @@ fn kiss_turbo() {
 fn kiss_weights() {
     fn AcquisitionKind() {}
     fn parse() {}
-    fn ComputeBackend() {}
+    fn ComputeDevice() {}
     fn new_with_encoding() {}
     fn WeightSelectConfig() {}
     fn WeightSelectResult() {}
@@ -218,7 +218,7 @@ fn kiss_weights() {
     fn draw_sparse() {}
     AcquisitionKind();
     parse();
-    ComputeBackend();
+    ComputeDevice();
     new_with_encoding();
     WeightSelectConfig();
     WeightSelectResult();
@@ -242,4 +242,84 @@ fn kiss_posterior() {
     fn WeightedPosteriorData() {}
     conditional_posterior_function_draw();
     WeightedPosteriorData();
+}
+
+#[test]
+fn kiss_program() {
+    fn ForwardOp() {}
+    fn ResidentRound() {}
+    fn WorkAxis() {}
+    fn WorkGrid() {}
+    fn KdaPackedLinear() {}
+    fn KdaForwardRequest() {}
+    fn KdaControlRequest() {}
+    fn KdaDispatch() {}
+    fn KdaMoeLayerRequest() {}
+    fn KdaMoeDispatch() {}
+    fn validate() {}
+    fn packed_bytes() {}
+    fn groups_per_row() {}
+    fn request() {}
+    fn program() {}
+    ForwardOp();
+    ResidentRound();
+    WorkAxis();
+    WorkGrid();
+    KdaPackedLinear();
+    KdaForwardRequest();
+    KdaControlRequest();
+    KdaDispatch();
+    KdaMoeLayerRequest();
+    KdaMoeDispatch();
+    validate();
+    packed_bytes();
+    groups_per_row();
+    request();
+    program();
+}
+
+#[test]
+fn kiss_accelerator() {
+    fn KdaMoeMetalWeights() {}
+    fn KdaMoeMetalKdaVectors() {}
+    fn KdaMoeMetalMemory() {}
+    fn KdaMoeMetalHead() {}
+    fn MetalDecoderParams() {}
+    fn MetalKdaParams() {}
+    fn MetalKdaControlParams() {}
+    fn MetalEmbeddingParams() {}
+    fn bind_pending_search() {}
+    fn attention_rms_norm() {}
+    fn logit_bits() {}
+    fn generate() {}
+    fn hidden() {}
+    fn layers_mut() {}
+    fn IndexedObservation() {}
+    fn descriptor_dim() {}
+    fn check_layout() {}
+    fn LeafStep() {}
+    fn Tile() {}
+    fn make_tiles() {}
+    fn knn() {}
+    KdaMoeMetalWeights();
+    KdaMoeMetalKdaVectors();
+    KdaMoeMetalMemory();
+    KdaMoeMetalHead();
+    MetalDecoderParams();
+    MetalKdaParams();
+    MetalKdaControlParams();
+    MetalEmbeddingParams();
+    bind_pending_search();
+    attention_rms_norm();
+    logit_bits();
+    generate();
+    hidden();
+    layers_mut();
+    IndexedObservation();
+    descriptor_dim();
+    check_layout();
+    LeafStep();
+    Tile();
+    make_tiles();
+    knn();
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use metal::{Buffer, ComputePipelineState, MTLSize};
 
-use super::{make_steps, make_tiles, Ask, Center, Leaf, Step, Tile};
+use super::{make_steps, make_tiles, Ask, Center, Leaf, LeafStep, Tile};
 use crate::apple_gpu::{thread_group, Runtime};
 
 const THREADS: u64 = 256;
@@ -70,7 +70,7 @@ struct Scratch {
 #[derive(Default)]
 struct Resident {
     history: Vec<(usize, f32)>,
-    steps: Vec<Step>,
+    steps: Vec<LeafStep>,
     centers: Vec<Center>,
     region_centers: Vec<usize>,
     candidates_per_region: usize,
@@ -149,7 +149,7 @@ impl Engine {
             selected_scores: shared(&runtime, size_of::<f32>(), "selected scores")?,
             leaves: shared(
                 &runtime,
-                leaves.len().saturating_mul(size_of::<Step>()),
+                leaves.len().saturating_mul(size_of::<LeafStep>()),
                 "leaves",
             )?,
             tiles: shared(
@@ -293,7 +293,7 @@ impl Engine {
         base_slot: usize,
         trial_slot: usize,
         seed: u64,
-        steps: &[Step],
+        steps: &[LeafStep],
     ) -> Result<(), String> {
         self.ensure_candidates(1)?;
         self.sync_steps(steps);
@@ -609,7 +609,7 @@ impl Engine {
         Ok(())
     }
 
-    fn sync_steps(&mut self, steps: &[Step]) {
+    fn sync_steps(&mut self, steps: &[LeafStep]) {
         if self.resident.steps == steps {
             return;
         }

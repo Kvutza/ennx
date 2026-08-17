@@ -164,8 +164,8 @@ def test_colab():
         "cuda-v0.1.0",
         "ennx-0.1.0%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
         "@jax.jit",
-        "WeightSearch",
-        'backend="cuda"',
+        "PackedSearch",
+        'device="cuda"',
         "search.ask(",
         "search.row()",
         "search.tell(",
@@ -247,7 +247,7 @@ def test_mjx_colab():
         assert required in source
 
     for removed in (
-        "TurboSearch",
+        "PackedTurbo",
         "cp.cuda.UnownedMemory",
         "import numpy as",
         "reward.tolist()",

@@ -1,5 +1,5 @@
 use ennx::experimental::{
-    apply_dense, dense_dist2, dense_linear, ComputeBackend, DenseLeaf, DenseTerm, DenseView,
+    apply_dense, dense_dist2, dense_linear, ComputeDevice, DenseLeaf, DenseTerm, DenseView,
 };
 
 fn input() -> (Vec<f32>, Vec<DenseLeaf>, Vec<DenseTerm>) {
@@ -19,7 +19,7 @@ fn input() -> (Vec<f32>, Vec<DenseLeaf>, Vec<DenseTerm>) {
 #[test]
 fn zig_changes_the_complete_pytree() {
     let (base, leaves, terms) = input();
-    let result = apply_dense(&base, &leaves, &terms, ComputeBackend::Cpu).unwrap();
+    let result = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu).unwrap();
     assert_eq!(result.changed, base.len());
     assert!(base
         .iter()
@@ -30,7 +30,7 @@ fn zig_changes_the_complete_pytree() {
     assert!(dense_dist2(&leaves, &terms, &origin).unwrap() > 0.0);
 }
 
-fn linear(backend: ComputeBackend) -> Vec<f32> {
+fn linear(device: ComputeDevice) -> Vec<f32> {
     dense_linear(
         &[0.25, -0.5, 1.5, 2.0],
         &[0.5, -1.0, 0.75, 0.25, -0.5, 2.0, 1.25, -0.75],
@@ -41,29 +41,29 @@ fn linear(backend: ComputeBackend) -> Vec<f32> {
             DenseTerm::new(0x1234_5678_9abc_def0, 0.5).unwrap(),
             DenseTerm::new(91, -0.125).unwrap(),
         ],
-        backend,
+        device,
     )
     .unwrap()
 }
 
 #[test]
 fn zig_linear_consumes_procedural_weights() {
-    assert_eq!(linear(ComputeBackend::Cpu).len(), 2);
+    assert_eq!(linear(ComputeDevice::Cpu).len(), 2);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn apple_gpu_matches_zig() {
     let (base, leaves, terms) = input();
-    let zig = apply_dense(&base, &leaves, &terms, ComputeBackend::Cpu).unwrap();
-    let zig_linear = linear(ComputeBackend::Cpu);
-    for backend in [ComputeBackend::Metal, ComputeBackend::Agx] {
-        let gpu = apply_dense(&base, &leaves, &terms, backend).unwrap();
+    let zig = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu).unwrap();
+    let zig_linear = linear(ComputeDevice::Cpu);
+    for device in [ComputeDevice::Metal, ComputeDevice::Agx] {
+        let gpu = apply_dense(&base, &leaves, &terms, device).unwrap();
         assert_eq!(gpu.changed, zig.changed);
         for (left, right) in gpu.values.iter().zip(&zig.values) {
             assert!((left - right).abs() <= f32::EPSILON);
         }
-        for (left, right) in linear(backend).iter().zip(&zig_linear) {
+        for (left, right) in linear(device).iter().zip(&zig_linear) {
             assert!((left - right).abs() <= 1.0e-5);
         }
     }
@@ -73,8 +73,8 @@ fn apple_gpu_matches_zig() {
 #[test]
 fn opencl_matches_zig_when_a_device_exists() {
     let (base, leaves, terms) = input();
-    let zig = apply_dense(&base, &leaves, &terms, ComputeBackend::Cpu).unwrap();
-    let opencl = match apply_dense(&base, &leaves, &terms, ComputeBackend::OpenCl) {
+    let zig = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu).unwrap();
+    let opencl = match apply_dense(&base, &leaves, &terms, ComputeDevice::OpenCl) {
         Ok(result) => result,
         Err(error)
             if error.contains("no OpenCL GPU or CPU device")
@@ -88,9 +88,9 @@ fn opencl_matches_zig_when_a_device_exists() {
     for (left, right) in opencl.values.iter().zip(zig.values) {
         assert!((left - right).abs() <= f32::EPSILON);
     }
-    for (left, right) in linear(ComputeBackend::OpenCl)
+    for (left, right) in linear(ComputeDevice::OpenCl)
         .iter()
-        .zip(linear(ComputeBackend::Cpu))
+        .zip(linear(ComputeDevice::Cpu))
     {
         assert!((left - right).abs() <= 1.0e-5);
     }

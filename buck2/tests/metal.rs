@@ -1,18 +1,18 @@
 use ennx::experimental::{
-    AcquisitionKind, Bf16Tree, ComputeBackend, DenseLeaf, DenseTerm, ForwardProgram,
+    AcquisitionKind, Bf16Tree, ComputeDevice, DenseLeaf, DenseTerm, ForwardProgram,
     KdaControlRequest, KdaForwardRequest, KdaMoeLayerRequest, KdaMoeMetalArena,
     KdaMoeMetalExecutor, KdaMoeMetalKdaVectors, KdaMoeMetalModel, KdaMoeMetalWeights,
-    KdaPackedLinear, KdaTensorLayout, ResidentBoState, WeightAsk, WeightLeaf, WeightSearch,
+    KdaPackedLinear, KdaTensorLayout, ResidentBoState, SearchConfig, PackedLeaf, PackedSearch,
 };
 use ennx::{
     compute_posterior_internals, ENNParams, EpistemicNearestNeighbors, IndexDriver, PosteriorFlags,
 };
 use ndarray::Array2;
 
-fn leaves() -> Vec<WeightLeaf> {
+fn leaves() -> Vec<PackedLeaf> {
     vec![
-        WeightLeaf::new(0, 257, 4, 0.25, 1.0, 0.75).unwrap(),
-        WeightLeaf::new(257, 263, 8, 0.5, 0.5, 1.0).unwrap(),
+        PackedLeaf::new(0, 257, 4, 0.25, 1.0, 0.75).unwrap(),
+        PackedLeaf::new(257, 263, 8, 0.5, 0.5, 1.0).unwrap(),
     ]
 }
 
@@ -23,27 +23,27 @@ fn base() -> Vec<u8> {
         .collect()
 }
 
-fn ask(backend: ComputeBackend) -> Result<(usize, f32, Vec<u8>), String> {
+fn ask(device: ComputeDevice) -> Result<(usize, f32, Vec<u8>), String> {
     let base = base();
-    let mut search = WeightSearch::new(&base, 0.25, leaves(), 4, backend)?;
+    let mut search = PackedSearch::new(&base, 0.25, leaves(), 4, device)?;
     let warm = search.ask(
         &[17],
-        WeightAsk {
+        SearchConfig {
             neighbors: 1,
             length: 1.0,
-            ..WeightAsk::default()
+            ..SearchConfig::default()
         },
     )?;
     search.tell(warm, 0.75, true)?;
     let trial = search.ask(
         &[19, 23, 29, 31],
-        WeightAsk {
+        SearchConfig {
             neighbors: 2,
             length: 0.65,
             beta: 1.3,
             acquisition: AcquisitionKind::Ucb,
             seed: 41,
-            ..WeightAsk::default()
+            ..SearchConfig::default()
         },
     )?;
     Ok((trial.index, trial.score, search.row(trial)?))
@@ -51,8 +51,8 @@ fn ask(backend: ComputeBackend) -> Result<(usize, f32, Vec<u8>), String> {
 
 #[test]
 fn metal_matches_cpu() {
-    let cpu = ask(ComputeBackend::Cpu).unwrap();
-    let metal = ask(ComputeBackend::Metal).unwrap();
+    let cpu = ask(ComputeDevice::Cpu).unwrap();
+    let metal = ask(ComputeDevice::Metal).unwrap();
     assert_eq!(metal.0, cpu.0);
     assert!((metal.1 - cpu.1).abs() <= 1.0e-5);
     assert_eq!(metal.2, cpu.2);
@@ -60,8 +60,8 @@ fn metal_matches_cpu() {
 
 #[test]
 fn agx_matches_cpu() {
-    let cpu = ask(ComputeBackend::Cpu).unwrap();
-    let agx = match ask(ComputeBackend::Agx) {
+    let cpu = ask(ComputeDevice::Cpu).unwrap();
+    let agx = match ask(ComputeDevice::Agx) {
         Ok(result) => result,
         Err(error) if error.contains("binary archive contains no items eligible") => {
             eprintln!("AGX archive serialization is unavailable: {error}");
@@ -132,11 +132,11 @@ fn bf16_pytree_matches_cpu() {
         DenseTerm::new(0x1234_5678_9abc_def0, 0.01).unwrap(),
         DenseTerm::new(91, -0.0025).unwrap(),
     ];
-    let mut cpu = Bf16Tree::new(base.to_vec(), leaves.clone(), ComputeBackend::Cpu).unwrap();
+    let mut cpu = Bf16Tree::new(base.to_vec(), leaves.clone(), ComputeDevice::Cpu).unwrap();
     assert_eq!(cpu.candidate(), base);
     cpu.materialize(&terms).unwrap();
-    for backend in [ComputeBackend::Metal, ComputeBackend::Agx] {
-        let mut tree = Bf16Tree::new(base.to_vec(), leaves.clone(), backend).unwrap();
+    for device in [ComputeDevice::Metal, ComputeDevice::Agx] {
+        let mut tree = Bf16Tree::new(base.to_vec(), leaves.clone(), device).unwrap();
         assert_eq!(tree.candidate(), base);
         tree.materialize(&terms).unwrap();
         assert_eq!(tree.candidate(), cpu.candidate());
@@ -148,15 +148,15 @@ fn bf16_pytree_preserves_sub_ulp_directions() {
     let base = [1.0f32, -2.0, 4.0, -8.0].map(|value| (value.to_bits() >> 16) as u16);
     let leaves = vec![DenseLeaf::new(11, 0, base.len(), 1.0e-6).unwrap()];
     let terms = [DenseTerm::new(17, 1.0e-6).unwrap()];
-    let mut cpu = Bf16Tree::new(base.to_vec(), leaves.clone(), ComputeBackend::Cpu).unwrap();
+    let mut cpu = Bf16Tree::new(base.to_vec(), leaves.clone(), ComputeDevice::Cpu).unwrap();
     cpu.materialize(&terms).unwrap();
     assert!(cpu
         .candidate()
         .iter()
         .zip(base)
         .all(|(candidate, base)| *candidate != base));
-    for backend in [ComputeBackend::Metal, ComputeBackend::Agx] {
-        let mut tree = Bf16Tree::new(base.to_vec(), leaves.clone(), backend).unwrap();
+    for device in [ComputeDevice::Metal, ComputeDevice::Agx] {
+        let mut tree = Bf16Tree::new(base.to_vec(), leaves.clone(), device).unwrap();
         tree.materialize(&terms).unwrap();
         assert_eq!(tree.candidate(), cpu.candidate());
     }
@@ -236,7 +236,7 @@ fn resident_kda_binds_the_search_row() {
         &request,
         control,
         vectors,
-        ComputeBackend::Metal,
+        ComputeDevice::Metal,
         KdaMoeMetalWeights {
             packed: &packed,
             scales: &scales,
@@ -247,18 +247,18 @@ fn resident_kda_binds_the_search_row() {
     let mut state = ResidentBoState::new(
         &[0],
         0.0,
-        vec![WeightLeaf::new(0, 1, 8, 1.0, 1.0, 1.0).unwrap()],
+        vec![PackedLeaf::new(0, 1, 8, 1.0, 1.0, 1.0).unwrap()],
         2,
-        ComputeBackend::Metal,
+        ComputeDevice::Metal,
         ForwardProgram::kda().unwrap(),
     )
     .unwrap();
     let round = state
         .ask(
             &[17],
-            WeightAsk {
+            SearchConfig {
                 neighbors: 1,
-                ..WeightAsk::default()
+                ..SearchConfig::default()
             },
         )
         .unwrap();
@@ -283,7 +283,7 @@ fn new_kda_executor(
             time_bias,
             output_norm,
         },
-        ComputeBackend::Metal,
+        ComputeDevice::Metal,
         KdaMoeMetalWeights {
             packed,
             scales,
@@ -334,19 +334,19 @@ fn materialized_row_matches_seeded_forward() {
     let mut state = ResidentBoState::new(
         &packed,
         0.0,
-        vec![WeightLeaf::new(0, 48, 8, 1.0, 1.0, 1.0).unwrap()],
+        vec![PackedLeaf::new(0, 48, 8, 1.0, 1.0, 1.0).unwrap()],
         2,
-        ComputeBackend::Metal,
+        ComputeDevice::Metal,
         ForwardProgram::kda().unwrap(),
     )
     .unwrap();
     let round = state
         .ask(
             &[17],
-            WeightAsk {
+            SearchConfig {
                 neighbors: 1,
                 length: 1.0,
-                ..WeightAsk::default()
+                ..SearchConfig::default()
             },
         )
         .unwrap();
@@ -629,7 +629,7 @@ fn production_decode_layer_benchmark() {
                 time_bias: &[0.0; 1_024],
                 output_norm: &[1.0; 128],
             },
-            ComputeBackend::Metal,
+            ComputeDevice::Metal,
             &arena,
         )
         .unwrap();

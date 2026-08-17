@@ -33,8 +33,8 @@ subsample_loglik = _ext.fit.subsample_loglik
 Optimizer = _ext.optimizer.Optimizer
 Telemetry = _ext.optimizer.Telemetry
 MultiTrustRegion = _ext.optimizer.MultiTrustRegion
-WeightSearch = _ext.optimizer.WeightSearch
-TurboSearch = _ext.optimizer.TurboSearch
+PackedSearch = _ext.optimizer.PackedSearch
+PackedTurbo = _ext.optimizer.PackedTurbo
 TurboTrial = _ext.optimizer.TurboTrial
 BpannHistory = _ext.optimizer.BpannHistory
 create_optimizer = _ext.optimizer.create_optimizer
@@ -73,9 +73,9 @@ __all__ = [
     "Optimizer",
     "ResidentBoSession",
     "Telemetry",
-    "TurboSearch",
+    "PackedTurbo",
     "TurboTrial",
-    "WeightSearch",
+    "PackedSearch",
     "arms_from_pareto_fronts",
     "calculate_sobol_indices",
     "create_optimizer",

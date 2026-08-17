@@ -67,8 +67,8 @@ pub(super) fn select(
     }
     let metal_blocks = to_metal_blocks(blocks)?;
     let context = if matches!(
-        config.backend,
-        crate::weights::ComputeBackend::Agx | crate::weights::ComputeBackend::Auto
+        config.device,
+        crate::weights::ComputeDevice::Agx | crate::weights::ComputeDevice::Auto
     ) {
         &AGX_CTX
     } else {
@@ -77,8 +77,8 @@ pub(super) fn select(
     context.with(|cell| {
         if cell.borrow().is_none() {
             *cell.borrow_mut() = Some(MetalCtx::new(matches!(
-                config.backend,
-                crate::weights::ComputeBackend::Agx | crate::weights::ComputeBackend::Auto
+                config.device,
+                crate::weights::ComputeDevice::Agx | crate::weights::ComputeDevice::Auto
             ))?);
         }
         let borrow = cell.borrow();

@@ -2,7 +2,7 @@ use ndarray::Array1;
 
 use crate::trials::{Ask, Leaf, Search, Trial};
 use crate::trust_region::{TRLengthConfig, TurboTrustRegion};
-use crate::weights::ComputeBackend;
+use crate::weights::ComputeDevice;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TurboTrial {
@@ -15,7 +15,7 @@ pub struct TurboTrial {
 }
 
 /// TuRBO control state around a resident packed-weight search engine.
-pub struct TurboSearch {
+pub struct PackedTurbo {
     search: Search,
     trust: TurboTrustRegion,
     dimensions: usize,
@@ -25,19 +25,19 @@ pub struct TurboSearch {
     restarts: usize,
 }
 
-impl TurboSearch {
+impl PackedTurbo {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         base: &[u8],
         base_value: f32,
         leaves: Vec<Leaf>,
         capacity: usize,
-        backend: ComputeBackend,
+        device: ComputeDevice,
         num_pert: usize,
         length: TRLengthConfig,
     ) -> Result<Self, String> {
         Self::new_batch(
-            base, base_value, leaves, capacity, backend, num_pert, length, 1,
+            base, base_value, leaves, capacity, device, num_pert, length, 1,
         )
     }
 
@@ -47,7 +47,7 @@ impl TurboSearch {
         base_value: f32,
         leaves: Vec<Leaf>,
         capacity: usize,
-        backend: ComputeBackend,
+        device: ComputeDevice,
         num_pert: usize,
         length: TRLengthConfig,
         pending_capacity: usize,
@@ -72,7 +72,7 @@ impl TurboSearch {
                 leaves,
                 capacity,
                 pending_capacity,
-                backend,
+                device,
             )?,
             trust,
             dimensions,
@@ -209,12 +209,12 @@ mod tests {
 
     #[test]
     fn owns_state() {
-        let mut search = TurboSearch::new(
+        let mut search = PackedTurbo::new(
             &[8; 100],
             0.0,
             leaves(),
             8,
-            ComputeBackend::Cpu,
+            ComputeDevice::Cpu,
             20,
             TRLengthConfig::default(),
         )
@@ -234,12 +234,12 @@ mod tests {
 
     #[test]
     fn adapts_length() {
-        let mut search = TurboSearch::new(
+        let mut search = PackedTurbo::new(
             &[8; 100],
             0.0,
             leaves(),
             8,
-            ComputeBackend::Cpu,
+            ComputeDevice::Cpu,
             20,
             TRLengthConfig::default(),
         )
@@ -258,12 +258,12 @@ mod tests {
 
     #[test]
     fn batches_trials() {
-        let mut search = TurboSearch::new_batch(
+        let mut search = PackedTurbo::new_batch(
             &[8; 100],
             0.0,
             leaves(),
             8,
-            ComputeBackend::Cpu,
+            ComputeDevice::Cpu,
             20,
             TRLengthConfig::default(),
             2,
@@ -284,12 +284,12 @@ mod tests {
 
     #[test]
     fn tells_batch() {
-        let mut search = TurboSearch::new_batch(
+        let mut search = PackedTurbo::new_batch(
             &[8; 100],
             0.0,
             leaves(),
             8,
-            ComputeBackend::Cpu,
+            ComputeDevice::Cpu,
             20,
             TRLengthConfig::default(),
             2,

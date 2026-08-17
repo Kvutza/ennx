@@ -165,8 +165,7 @@ fn kiss_optimizer_and_weight_surfaces() {
     fn get_incumbents() {}
     fn tell() {}
     fn trial_leaves() {}
-    fn trial_leaves_with_encoding() {}
-    fn PyWeightSearch() {}
+    fn PyPackedSearch() {}
     fn ask() {}
     fn row() {}
     fn replace_history() {}
@@ -194,8 +193,7 @@ fn kiss_optimizer_and_weight_surfaces() {
         get_incumbents,
         tell,
         trial_leaves,
-        trial_leaves_with_encoding,
-        PyWeightSearch,
+        PyPackedSearch,
         ask,
         row,
         replace_history,

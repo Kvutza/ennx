@@ -1,5 +1,6 @@
 use super::Leaf;
 
+#[cfg(any(feature = "cuda", feature = "metal", feature = "opencl"))]
 const TILE_ELEMENTS: usize = 65_536;
 
 pub(crate) fn check_layout(leaves: &[Leaf]) -> Result<usize, String> {
@@ -30,7 +31,7 @@ pub(crate) fn check_layout(leaves: &[Leaf]) -> Result<usize, String> {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Step {
+pub(crate) struct LeafStep {
     pub byte_offset: u32,
     pub element_offset: u32,
     pub length: u32,
@@ -42,7 +43,7 @@ pub(crate) struct Step {
     pub threshold: u32,
 }
 
-pub(crate) fn make_steps(leaves: &[Leaf], length: f32) -> Vec<Step> {
+pub(crate) fn make_steps(leaves: &[Leaf], length: f32) -> Vec<LeafStep> {
     let mut byte_offset = 0usize;
     leaves
         .iter()
@@ -55,7 +56,7 @@ pub(crate) fn make_steps(leaves: &[Leaf], length: f32) -> Vec<Step> {
             } else {
                 ((amplitude - whole as f32) * (u32::MAX as f32)) as u32
             };
-            let step = Step {
+            let step = LeafStep {
                 byte_offset: byte_offset as u32,
                 element_offset: leaf.offset as u32,
                 length: leaf.length as u32,
@@ -72,6 +73,7 @@ pub(crate) fn make_steps(leaves: &[Leaf], length: f32) -> Vec<Step> {
         .collect()
 }
 
+#[cfg(any(feature = "cuda", feature = "metal", feature = "opencl"))]
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Tile {
@@ -81,6 +83,7 @@ pub(crate) struct Tile {
     pub pad: u32,
 }
 
+#[cfg(any(feature = "cuda", feature = "metal", feature = "opencl"))]
 pub(crate) fn make_tiles(leaves: &[Leaf]) -> Vec<Tile> {
     let mut tiles = Vec::new();
     for (leaf_index, leaf) in leaves.iter().enumerate() {
@@ -97,4 +100,31 @@ pub(crate) fn make_tiles(leaves: &[Leaf]) -> Vec<Tile> {
         }
     }
     tiles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn steps() {
+        let leaves = [Leaf::new(0, 8, 4, 0.5, 1.0, 0.25).unwrap()];
+        assert_eq!(check_layout(&leaves).unwrap(), 4);
+        let steps: Vec<super::LeafStep> = make_steps(&leaves, 1.0);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].length, 8);
+        assert_eq!(steps[0].bits, 4);
+        let step = super::LeafStep {
+            byte_offset: 0,
+            element_offset: 0,
+            length: 8,
+            bits: 4,
+            encoding: 0,
+            scale: 0.5,
+            weight: 1.0,
+            whole: 0,
+            threshold: 2_147_483_648,
+        };
+        assert_eq!(step, steps[0]);
+    }
 }

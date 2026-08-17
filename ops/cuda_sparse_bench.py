@@ -7,19 +7,19 @@ import time
 
 import numpy as np
 
-from ennx.experimental import TurboSearch
+from ennx.experimental import PackedTurbo
 
 
 def main() -> None:
     dimensions = 1_000_000
     base = np.full(dimensions // 2, 0x88, dtype=np.uint8)
     leaves = [(0, dimensions, 4, 0.25, 1.0 / dimensions, 0.25)]
-    search = TurboSearch(
+    search = PackedTurbo(
         base,
         0.0,
         leaves,
         8,
-        backend="cuda",
+        device="cuda",
         num_pert=20,
     )
     rng = np.random.default_rng(71)

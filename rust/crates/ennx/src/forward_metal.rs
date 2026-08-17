@@ -12,7 +12,7 @@ use metal::{Buffer, ComputePipelineState};
 use crate::apple_gpu::{thread_group, Runtime};
 use crate::forward_program::{KdaControlRequest, KdaMoeLayerRequest, KdaPackedLinear};
 use crate::trials::{Search, Trial};
-use crate::weights::ComputeBackend;
+use crate::weights::ComputeDevice;
 
 const KERNELS: &[&str] = &[
     "decoder_rms_norm",
@@ -168,31 +168,31 @@ pub struct KdaMoeMetalExecutor {
 
 impl KdaMoeMetalExecutor {
     /// Compile or load every layer pipeline and allocate its resident buffers.
-    /// `ComputeBackend::Agx` uses ENNX's Metal binary archive cache.
+    /// `ComputeDevice::Agx` uses ENNX's Metal binary archive cache.
     pub fn new(
         request: &KdaMoeLayerRequest,
         control: KdaControlRequest,
         vectors: KdaMoeMetalKdaVectors<'_>,
-        backend: ComputeBackend,
+        device: ComputeDevice,
         weights: KdaMoeMetalWeights<'_>,
     ) -> Result<Self, String> {
         let arena = KdaMoeMetalArena::new(weights)?;
-        Self::new_with_arena(request, control, vectors, backend, &arena)
+        Self::new_with_arena(request, control, vectors, device, &arena)
     }
 
     pub fn new_with_arena(
         request: &KdaMoeLayerRequest,
         control: KdaControlRequest,
         vectors: KdaMoeMetalKdaVectors<'_>,
-        backend: ComputeBackend,
+        device: ComputeDevice,
         arena: &KdaMoeMetalArena,
     ) -> Result<Self, String> {
         request.validate()?;
         control.validate(request.kda.tensor, request.kda.qkv.input_width)?;
-        let agx = match backend {
-            ComputeBackend::Metal => false,
-            ComputeBackend::Agx => true,
-            _ => return Err("KDA-MoE Metal executor requires backend 'metal' or 'agx'".to_string()),
+        let agx = match device {
+            ComputeDevice::Metal => false,
+            ComputeDevice::Agx => true,
+            _ => return Err("KDA-MoE Metal executor requires device 'metal' or 'agx'".to_string()),
         };
         let runtime = Runtime::shared()?;
         let mut pipelines = BTreeMap::new();

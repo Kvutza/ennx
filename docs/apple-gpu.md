@@ -1,6 +1,6 @@
 # Apple GPU execution
 
-ENNX uses one Rust-owned Apple GPU runtime for every Metal backend. Python makes
+ENNX uses one Rust-owned Apple GPU runtime for every Metal device. Python makes
 one `ask` or `tell` call; it does not schedule kernels, own tensors, or enter the
 numerical hot path.
 
@@ -15,9 +15,9 @@ numerical hot path.
   first real query in each logarithmic workload bucket, checks exact
   neighbor-index agreement, and caches the faster valid route. Other platforms
   resolve `Auto` to exact CPU.
-- `ComputeBackend::Metal` forces the source-compiled quantized Metal engines;
-  `ComputeBackend::Agx` forces native-archive trial and weight kernels.
-  `ComputeBackend::Auto` uses the available accelerator; weight selection also
+- `ComputeDevice::Metal` forces the source-compiled quantized Metal engines;
+  `ComputeDevice::Agx` forces native-archive trial and weight kernels.
+  `ComputeDevice::Auto` uses the available accelerator; weight selection also
   calibrates CPU against Metal and accepts Metal only when the selected index
   and score agree.
 - Multi-region optimization concatenates all region candidate blocks, performs

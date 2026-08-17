@@ -1,5 +1,5 @@
 use super::{make_steps, materialize, Ask, Cpu, Engine, Leaf, SparseEdit};
-use crate::weights::ComputeBackend;
+use crate::weights::ComputeDevice;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
 use super::cuda;
@@ -14,11 +14,11 @@ impl Engine {
         base: &[u8],
         leaves: &[Leaf],
         slots: usize,
-        backend: ComputeBackend,
+        device: ComputeDevice,
     ) -> Result<Self, String> {
-        match backend {
-            ComputeBackend::Cpu => Ok(Self::Cpu(Cpu::new(base, slots))),
-            ComputeBackend::Metal => {
+        match device {
+            ComputeDevice::Cpu => Ok(Self::Cpu(Cpu::new(base, slots))),
+            ComputeDevice::Metal => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
                     Ok(Self::Metal(metal::Engine::new(base, leaves, slots)?))
@@ -28,7 +28,7 @@ impl Engine {
                     Err("Metal trial search is not available in this build".to_string())
                 }
             }
-            ComputeBackend::Agx => {
+            ComputeDevice::Agx => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
                     Ok(Self::Metal(metal::Engine::new_agx(base, leaves, slots)?))
@@ -38,7 +38,7 @@ impl Engine {
                     Err("AGX trial search is not available in this build".to_string())
                 }
             }
-            ComputeBackend::OpenCl => {
+            ComputeDevice::OpenCl => {
                 #[cfg(feature = "opencl")]
                 {
                     Ok(Self::OpenCl(opencl::Engine::new(base, leaves, slots)?))
@@ -48,7 +48,7 @@ impl Engine {
                     Err("OpenCL trial search is not available in this build".to_string())
                 }
             }
-            ComputeBackend::Cuda => {
+            ComputeDevice::Cuda => {
                 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
                 {
                     Ok(Self::Cuda(cuda::Engine::new(base, leaves, slots)?))
@@ -58,7 +58,7 @@ impl Engine {
                     Err("CUDA trial search is not available in this build".to_string())
                 }
             }
-            ComputeBackend::Auto => {
+            ComputeDevice::Auto => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
                     return Ok(Self::Metal(

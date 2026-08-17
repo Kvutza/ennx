@@ -1,9 +1,9 @@
 use ennx::experimental::{
     apply_dense, apply_sparse, blocks_for_words, dense_dist2, dense_linear, draw_sparse,
     merge_values, missing_words, select_weights, sparse_union, sparse_xor, take_words,
-    AcquisitionKind, BpannHistory, ComputeBackend, DenseLeaf, DenseLinear, DenseTerm, DenseView,
-    TurboSearch, TurboTrial as CoreTrial, WeightAsk, WeightBlock, WeightLeaf, WeightSearch,
-    WeightSelectConfig, WeightTrial,
+    AcquisitionKind, BpannHistory, ComputeDevice, DenseLeaf, DenseLinear, DenseTerm, DenseView,
+    PackedLeaf, PackedSearch, PackedTrial, PackedTurbo, SearchConfig, TurboTrial as CoreTrial,
+    WeightBlock, WeightSelectConfig,
 };
 use ennx::TRLengthConfig;
 use numpy::{
@@ -155,23 +155,10 @@ fn mixed_blocks(raw: Vec<(usize, usize, u8, f32, f32, f32)>) -> PyResult<Vec<Wei
         .collect()
 }
 
-fn trial_leaves(raw: Vec<(usize, usize, u8, f32, f32, f32)>) -> PyResult<Vec<WeightLeaf>> {
+fn trial_leaves(raw: Vec<(usize, usize, u8, f32, f32, f32)>) -> PyResult<Vec<PackedLeaf>> {
     raw.into_iter()
         .map(|(offset, length, bits, scale, weight, radius)| {
-            WeightLeaf::new(offset, length, bits, scale, weight, radius).map_err(err)
-        })
-        .collect()
-}
-
-fn trial_leaves_with_encoding(
-    raw: Vec<(usize, usize, u8, Option<String>, f32, f32, f32)>,
-) -> PyResult<Vec<WeightLeaf>> {
-    raw.into_iter()
-        .map(|(offset, length, bits, mode, scale, weight, radius)| {
-            let encoding =
-                ennx::experimental::EncodingType::parse(bits, mode.as_deref()).map_err(err)?;
-            WeightLeaf::new_with_encoding(offset, length, bits, encoding, scale, weight, radius)
-                .map_err(err)
+            PackedLeaf::new(offset, length, bits, scale, weight, radius).map_err(err)
         })
         .collect()
 }
@@ -193,19 +180,19 @@ fn dense_view(raw: (u64, u64, f32)) -> PyResult<DenseView> {
 }
 
 #[pyfunction(name = "dense_apply")]
-#[pyo3(signature=(base,leaves,terms,backend="auto"))]
+#[pyo3(signature=(base,leaves,terms,device="auto"))]
 pub fn dense_apply_py<'py>(
     py: Python<'py>,
     base: PyReadonlyArray1<'_, f32>,
     leaves: Vec<(u64, usize, usize, f32)>,
     terms: Vec<(u64, f32)>,
-    backend: &str,
+    device: &str,
 ) -> PyResult<(Bound<'py, PyArray1<f32>>, usize)> {
     let result = apply_dense(
         &array1_vec(base),
         &dense_leaves(leaves)?,
         &dense_terms(terms)?,
-        ComputeBackend::parse(backend).map_err(err)?,
+        ComputeDevice::parse(device).map_err(err)?,
     )
     .map_err(err)?;
     Ok((result.values.into_pyarray(py), result.changed))
@@ -226,7 +213,7 @@ pub fn dense_dist2_py(
 }
 
 #[pyfunction(name = "dense_linear")]
-#[pyo3(signature=(input,weight,weight_view,terms,bias=None,bias_view=None,backend="auto"))]
+#[pyo3(signature=(input,weight,weight_view,terms,bias=None,bias_view=None,device="auto"))]
 #[allow(clippy::too_many_arguments)]
 pub fn dense_linear_py<'py>(
     py: Python<'py>,
@@ -236,7 +223,7 @@ pub fn dense_linear_py<'py>(
     terms: Vec<(u64, f32)>,
     bias: Option<PyReadonlyArray1<'_, f32>>,
     bias_view: Option<(u64, u64, f32)>,
-    backend: &str,
+    device: &str,
 ) -> PyResult<Bound<'py, PyArray1<f32>>> {
     let input = array1_vec(input);
     let weight = array2_vec(&weight);
@@ -249,7 +236,7 @@ pub fn dense_linear_py<'py>(
         dense_view(weight_view)?,
         bias_view,
         &dense_terms(terms)?,
-        ComputeBackend::parse(backend).map_err(err)?,
+        ComputeDevice::parse(device).map_err(err)?,
     )
     .map(|values| values.into_pyarray(py))
     .map_err(err)
@@ -263,13 +250,13 @@ pub struct PyDenseLinear {
 #[pymethods]
 impl PyDenseLinear {
     #[new]
-    #[pyo3(signature=(weight,weight_view,bias=None,bias_view=None,backend="auto"))]
+    #[pyo3(signature=(weight,weight_view,bias=None,bias_view=None,device="auto"))]
     fn new(
         weight: PyReadonlyArray2<'_, f32>,
         weight_view: (u64, u64, f32),
         bias: Option<PyReadonlyArray1<'_, f32>>,
         bias_view: Option<(u64, u64, f32)>,
-        backend: &str,
+        device: &str,
     ) -> PyResult<Self> {
         let columns = weight.as_array().ncols();
         let bias = bias.map(array1_vec);
@@ -280,7 +267,7 @@ impl PyDenseLinear {
                 bias,
                 dense_view(weight_view)?,
                 bias_view.map(dense_view).transpose()?,
-                ComputeBackend::parse(backend).map_err(err)?,
+                ComputeDevice::parse(device).map_err(err)?,
             )
             .map_err(err)?,
         })
@@ -309,30 +296,30 @@ impl PyDenseLinear {
     }
 }
 
-#[pyclass(name = "WeightSearch", unsendable)]
-pub struct PyWeightSearch {
-    pub(crate) inner: WeightSearch,
-    pub(crate) pending: Option<WeightTrial>,
+#[pyclass(name = "PackedSearch", unsendable)]
+pub struct PyPackedSearch {
+    pub(crate) inner: PackedSearch,
+    pub(crate) pending: Option<PackedTrial>,
 }
 
 #[pymethods]
-impl PyWeightSearch {
+impl PyPackedSearch {
     #[new]
-    #[pyo3(signature=(base,base_value,leaves,capacity,backend="auto"))]
+    #[pyo3(signature=(base,base_value,leaves,capacity,device="auto"))]
     fn new(
         base: PyReadonlyArray1<'_, u8>,
         base_value: f32,
         leaves: Vec<(usize, usize, u8, f32, f32, f32)>,
         capacity: usize,
-        backend: &str,
+        device: &str,
     ) -> PyResult<Self> {
         Ok(Self {
-            inner: WeightSearch::new(
+            inner: PackedSearch::new(
                 &array1_vec(base),
                 base_value,
                 trial_leaves(leaves)?,
                 capacity,
-                ComputeBackend::parse(backend).map_err(err)?,
+                ComputeDevice::parse(device).map_err(err)?,
             )
             .map_err(err)?,
             pending: None,
@@ -357,7 +344,7 @@ impl PyWeightSearch {
             .inner
             .ask(
                 &array1_vec(seeds),
-                WeightAsk {
+                SearchConfig {
                     length,
                     neighbors,
                     epistemic_scale,
@@ -393,7 +380,7 @@ impl PyWeightSearch {
             .inner
             .ask_lazy(
                 &array1_vec(seeds),
-                WeightAsk {
+                SearchConfig {
                     length,
                     neighbors,
                     epistemic_scale,
@@ -475,9 +462,9 @@ impl PyWeightSearch {
     }
 }
 
-#[pyclass(name = "TurboSearch", unsendable)]
-pub struct PyTurboSearch {
-    inner: TurboSearch,
+#[pyclass(name = "PackedTurbo", unsendable)]
+pub struct PyPackedTurbo {
+    inner: PackedTurbo,
     pending: Vec<CoreTrial>,
 }
 
@@ -516,30 +503,30 @@ impl PyTurboTrial {
 }
 
 #[pymethods]
-impl PyTurboSearch {
+impl PyPackedTurbo {
     #[new]
-    #[pyo3(signature=(base,base_value,leaves,capacity,backend="auto",num_pert=20,length_init=0.8,length_min=0.0078125,length_max=1.6,max_pending=1))]
+    #[pyo3(signature=(base,base_value,leaves,capacity,device="auto",num_pert=20,length_init=0.8,length_min=0.0078125,length_max=1.6,max_pending=1))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         base: PyReadonlyArray1<'_, u8>,
         base_value: f32,
         leaves: Vec<(usize, usize, u8, f32, f32, f32)>,
         capacity: usize,
-        backend: &str,
+        device: &str,
         num_pert: usize,
         length_init: f64,
         length_min: f64,
         length_max: f64,
         max_pending: usize,
     ) -> PyResult<Self> {
-        let backend = ComputeBackend::parse(backend).map_err(err)?;
+        let device = ComputeDevice::parse(device).map_err(err)?;
         Ok(Self {
-            inner: TurboSearch::new_batch(
+            inner: PackedTurbo::new_batch(
                 &array1_vec(base),
                 base_value,
                 trial_leaves(leaves)?,
                 capacity,
-                backend,
+                device,
                 num_pert,
                 TRLengthConfig::new(length_init, length_min, length_max),
                 max_pending,
@@ -566,7 +553,7 @@ impl PyTurboSearch {
             .inner
             .ask(
                 &array1_vec(seeds),
-                WeightAsk {
+                SearchConfig {
                     length: 0.0,
                     neighbors,
                     epistemic_scale,
@@ -608,7 +595,7 @@ impl PyTurboSearch {
             .ask_batch(
                 &array2_vec(&seeds),
                 arms,
-                WeightAsk {
+                SearchConfig {
                     length: 0.0,
                     neighbors,
                     epistemic_scale,
@@ -713,7 +700,7 @@ impl PyTurboSearch {
     }
 }
 
-impl PyTurboSearch {
+impl PyPackedTurbo {
     fn only_pending(&self) -> PyResult<CoreTrial> {
         match self.pending.as_slice() {
             [trial] => Ok(*trial),
@@ -812,7 +799,7 @@ fn weight_ucb<'py>(
     aleatoric_scale: f32,
     y_scale: f32,
     beta: f32,
-    backend: &str,
+    device: &str,
 ) -> PyResult<(Bound<'py, PyArray1<u8>>, usize, f32)> {
     let observation_count = observations.as_array().nrows();
     let candidate_count = candidates.as_array().nrows();
@@ -834,7 +821,7 @@ fn weight_ucb<'py>(
             beta,
             acquisition: AcquisitionKind::Ucb,
             seed: 0,
-            backend: ComputeBackend::parse(backend).map_err(err)?,
+            device: ComputeDevice::parse(device).map_err(err)?,
         },
     )
     .map_err(err)?;
@@ -845,7 +832,7 @@ fn weight_ucb<'py>(
 }
 
 #[pyfunction(name = "weight_int4_select_ucb")]
-#[pyo3(signature=(observations,outcomes,candidates,blocks,neighbors,epistemic_scale,aleatoric_scale,y_scale,beta,backend="auto"))]
+#[pyo3(signature=(observations,outcomes,candidates,blocks,neighbors,epistemic_scale,aleatoric_scale,y_scale,beta,device="auto"))]
 pub fn weight_int4_select_ucb_py<'py>(
     py: Python<'py>,
     observations: PyReadonlyArray2<'_, u8>,
@@ -857,7 +844,7 @@ pub fn weight_int4_select_ucb_py<'py>(
     aleatoric_scale: f32,
     y_scale: f32,
     beta: f32,
-    backend: &str,
+    device: &str,
 ) -> PyResult<(Bound<'py, PyArray1<u8>>, usize, f32)> {
     weight_ucb(
         py,
@@ -870,12 +857,12 @@ pub fn weight_int4_select_ucb_py<'py>(
         aleatoric_scale,
         y_scale,
         beta,
-        backend,
+        device,
     )
 }
 
 #[pyfunction(name = "weight_select_ucb")]
-#[pyo3(signature=(observations,outcomes,candidates,blocks,neighbors,epistemic_scale,aleatoric_scale,y_scale,beta,backend="auto"))]
+#[pyo3(signature=(observations,outcomes,candidates,blocks,neighbors,epistemic_scale,aleatoric_scale,y_scale,beta,device="auto"))]
 pub fn weight_select_ucb_py<'py>(
     py: Python<'py>,
     observations: PyReadonlyArray2<'_, u8>,
@@ -887,7 +874,7 @@ pub fn weight_select_ucb_py<'py>(
     aleatoric_scale: f32,
     y_scale: f32,
     beta: f32,
-    backend: &str,
+    device: &str,
 ) -> PyResult<(Bound<'py, PyArray1<u8>>, usize, f32)> {
     weight_ucb(
         py,
@@ -900,7 +887,7 @@ pub fn weight_select_ucb_py<'py>(
         aleatoric_scale,
         y_scale,
         beta,
-        backend,
+        device,
     )
 }
 
@@ -1055,7 +1042,7 @@ fn sparse_select_impl(
     aleatoric_scale: f32,
     y_scale: f32,
     beta: f32,
-    backend: &str,
+    device: &str,
 ) -> PyResult<(usize, f32)> {
     if observation_words.len() != observation_masks.len()
         || candidate_words.len() != candidate_masks.len()
@@ -1089,7 +1076,7 @@ fn sparse_select_impl(
             beta,
             acquisition: AcquisitionKind::parse(acquisition).map_err(err)?,
             seed,
-            backend: ComputeBackend::parse(backend).map_err(err)?,
+            device: ComputeDevice::parse(device).map_err(err)?,
         },
     )
     .map_err(err)?;
@@ -1097,7 +1084,7 @@ fn sparse_select_impl(
 }
 
 #[pyfunction(name = "sparse_select")]
-#[pyo3(signature=(base,indices,observation_words,observation_masks,outcomes,candidate_words,candidate_masks,blocks,acquisition,seed,neighbors,epistemic_scale,aleatoric_scale,y_scale,beta,backend="auto"))]
+#[pyo3(signature=(base,indices,observation_words,observation_masks,outcomes,candidate_words,candidate_masks,blocks,acquisition,seed,neighbors,epistemic_scale,aleatoric_scale,y_scale,beta,device="auto"))]
 #[allow(clippy::too_many_arguments)]
 pub fn sparse_select_py(
     base: PyReadonlyArray1<'_, u32>,
@@ -1115,7 +1102,7 @@ pub fn sparse_select_py(
     aleatoric_scale: f32,
     y_scale: f32,
     beta: f32,
-    backend: &str,
+    device: &str,
 ) -> PyResult<(usize, f32)> {
     sparse_select_impl(
         base,
@@ -1133,7 +1120,7 @@ pub fn sparse_select_py(
         aleatoric_scale,
         y_scale,
         beta,
-        backend,
+        device,
     )
 }
 
@@ -1214,7 +1201,7 @@ mod kiss_coverage_tests {
     #[test]
     fn py_weights_symbols_are_linked() {
         let _ = (
-            std::mem::size_of::<PyWeightSearch>(),
+            std::mem::size_of::<PyPackedSearch>(),
             weight_int4_select_ucb_py,
             weight_select_ucb_py,
             sparse_union_py,

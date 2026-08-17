@@ -83,8 +83,8 @@ pub fn pymodule_optimizer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::py_optimizer::PyOptimizer>()?;
     m.add_class::<crate::py_optimizer::PyMultiTrustRegion>()?;
     m.add_class::<crate::py_optimizer::PyTelemetry>()?;
-    m.add_class::<crate::py_weights::PyWeightSearch>()?;
-    m.add_class::<crate::py_weights::PyTurboSearch>()?;
+    m.add_class::<crate::py_weights::PyPackedSearch>()?;
+    m.add_class::<crate::py_weights::PyPackedTurbo>()?;
     m.add_class::<crate::py_weights::PyTurboTrial>()?;
     m.add_class::<crate::py_weights::PyDenseLinear>()?;
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]

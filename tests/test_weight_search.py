@@ -21,7 +21,7 @@ def _base():
 
 
 def _ask(backend):
-    search = optimizer.WeightSearch(_base(), 0.25, _leaves(), 4, backend)
+    search = optimizer.PackedSearch(_base(), 0.25, _leaves(), 4, backend)
     _, _, _ = search.ask(np.asarray([17], dtype=np.uint64), 1.0, 1)
     search.tell(0.75, True)
     index, seed, score = search.ask(
@@ -71,7 +71,7 @@ def test_weight_search_accepts_bpann_resolved_history():
             np.bitwise_xor(base, np.uint8(0x22)),
         ]
     )
-    search = optimizer.WeightSearch(base, 0.25, _leaves(), 4, "cpu")
+    search = optimizer.PackedSearch(base, 0.25, _leaves(), 4, "cpu")
     search.replace_history(rows, np.asarray([3.0, 7.0], dtype=np.float32))
     assert search.history_len == 2
     assert search.history_capacity == 4

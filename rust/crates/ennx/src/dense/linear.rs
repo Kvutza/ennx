@@ -1,4 +1,4 @@
-use crate::weights::ComputeBackend;
+use crate::weights::ComputeDevice;
 
 use super::{dense_next, sign, DenseTerm};
 
@@ -56,17 +56,17 @@ impl DenseLinear {
         bias: Option<Vec<f32>>,
         weight_view: DenseView,
         bias_view: Option<DenseView>,
-        backend: ComputeBackend,
+        device: ComputeDevice,
     ) -> Result<Self, String> {
         let rows = validate_model(&weight, columns, bias.as_deref(), weight_view, bias_view)?;
-        let engine = match backend {
-            ComputeBackend::Cpu => LinearResident::Cpu {
+        let engine = match device {
+            ComputeDevice::Cpu => LinearResident::Cpu {
                 weight,
                 bias,
                 weight_view,
                 bias_view,
             },
-            ComputeBackend::Metal => {
+            ComputeDevice::Metal => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
                     LinearResident::Metal(metal::Resident::new(
@@ -83,7 +83,7 @@ impl DenseLinear {
                     return Err("Metal dense linear is not available in this build".into());
                 }
             }
-            ComputeBackend::Agx => {
+            ComputeDevice::Agx => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
                     LinearResident::Metal(metal::Resident::new(
@@ -100,7 +100,7 @@ impl DenseLinear {
                     return Err("AGX dense linear is not available in this build".into());
                 }
             }
-            ComputeBackend::OpenCl => {
+            ComputeDevice::OpenCl => {
                 #[cfg(feature = "opencl")]
                 {
                     LinearResident::OpenCl(opencl::Resident::new(
@@ -116,7 +116,7 @@ impl DenseLinear {
                     return Err("OpenCL dense linear is not available in this build".into());
                 }
             }
-            ComputeBackend::Cuda => {
+            ComputeDevice::Cuda => {
                 #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
                 {
                     LinearResident::Cuda(cuda::Resident::new(
@@ -132,7 +132,7 @@ impl DenseLinear {
                     return Err("CUDA dense linear is not available in this build".into());
                 }
             }
-            ComputeBackend::Auto => {
+            ComputeDevice::Auto => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
                     LinearResident::Metal(
@@ -253,14 +253,12 @@ pub fn linear(
     weight_view: DenseView,
     bias_view: Option<DenseView>,
     terms: &[DenseTerm],
-    backend: ComputeBackend,
+    device: ComputeDevice,
 ) -> Result<Vec<f32>, String> {
     let rows = linear_validate(input, weight, bias, weight_view, bias_view, terms)?;
-    let values = match backend {
-        ComputeBackend::Cpu => {
-            linear_cpu(input, weight, bias, weight_view, bias_view, terms, rows)?
-        }
-        ComputeBackend::Metal => {
+    let values = match device {
+        ComputeDevice::Cpu => linear_cpu(input, weight, bias, weight_view, bias_view, terms, rows)?,
+        ComputeDevice::Metal => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
                 metal::linear(
@@ -279,7 +277,7 @@ pub fn linear(
                 return Err("Metal dense linear is not available in this build".into());
             }
         }
-        ComputeBackend::Agx => {
+        ComputeDevice::Agx => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
                 metal::linear(
@@ -298,7 +296,7 @@ pub fn linear(
                 return Err("AGX dense linear is not available in this build".into());
             }
         }
-        ComputeBackend::OpenCl => {
+        ComputeDevice::OpenCl => {
             #[cfg(feature = "opencl")]
             {
                 opencl::linear(input, weight, bias, weight_view, bias_view, terms, rows)?
@@ -308,7 +306,7 @@ pub fn linear(
                 return Err("OpenCL dense linear is not available in this build".into());
             }
         }
-        ComputeBackend::Cuda => {
+        ComputeDevice::Cuda => {
             #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
             {
                 cuda::linear(input, weight, bias, weight_view, bias_view, terms, rows)?
@@ -318,7 +316,7 @@ pub fn linear(
                 return Err("CUDA dense linear is not available in this build".into());
             }
         }
-        ComputeBackend::Auto => {
+        ComputeDevice::Auto => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
                 metal::linear(
@@ -587,7 +585,7 @@ mod tests {
             weight_view,
             Some(bias_view),
             &terms,
-            ComputeBackend::Cpu,
+            ComputeDevice::Cpu,
         )
         .unwrap();
 

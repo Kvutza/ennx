@@ -7,7 +7,7 @@
 //! - Hardware-Resident BO: Bafna et al. (2026) "Hardware-Resident Bayesian Optimization in ENNX".
 
 use crate::trials::{Ask, Leaf, Search, Trial};
-use crate::weights::ComputeBackend;
+use crate::weights::ComputeDevice;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForwardOp {
@@ -341,7 +341,7 @@ pub enum KdaDispatch {
 
 /// Packed descriptors for one complete KDA-MoE decoder layer.
 ///
-/// This is deliberately a data-only ABI: the Rust Metal backend owns buffers
+/// This is deliberately a data-only ABI: the Rust Metal device owns buffers
 /// and command encoding, while Python only supplies the model layout once.
 #[derive(Debug, Clone, PartialEq)]
 pub struct KdaMoeLayerRequest {
@@ -632,7 +632,7 @@ impl KdaTensorLayout {
 
 /// Rust-owned BO session for a resident forward evaluator.
 ///
-/// `Search` owns the backend model slots and history. The forward backend binds
+/// `Search` owns the device model slots and history. The forward device binds
 /// the selected slot directly, so candidate weights are materialized once and
 /// are not regenerated or perturbed a second time during evaluation.
 pub struct ResidentBoState {
@@ -648,11 +648,11 @@ impl ResidentBoState {
         base_value: f32,
         leaves: Vec<Leaf>,
         history_capacity: usize,
-        backend: ComputeBackend,
+        device: ComputeDevice,
         program: ForwardProgram,
     ) -> Result<Self, String> {
         Ok(Self {
-            search: Search::new(base, base_value, leaves, history_capacity, backend)?,
+            search: Search::new(base, base_value, leaves, history_capacity, device)?,
             program,
             pending: None,
             rewards: Vec::with_capacity(history_capacity),
@@ -736,7 +736,7 @@ mod tests {
         ResidentBoState, ResidentRound, WorkAxis,
     };
     use crate::trials::{Ask, Leaf};
-    use crate::weights::ComputeBackend;
+    use crate::weights::ComputeDevice;
 
     fn leaves() -> Vec<Leaf> {
         vec![Leaf::new(0, 1, 8, 1.0, 1.0, 1.0).unwrap()]
@@ -902,7 +902,7 @@ mod tests {
             0.0,
             leaves(),
             4,
-            ComputeBackend::Cpu,
+            ComputeDevice::Cpu,
             ForwardProgram::kda().unwrap(),
         )
         .unwrap();
@@ -938,7 +938,7 @@ mod tests {
             0.0,
             leaves(),
             4,
-            ComputeBackend::Cpu,
+            ComputeDevice::Cpu,
             ForwardProgram::kda().unwrap(),
         )
         .unwrap();
