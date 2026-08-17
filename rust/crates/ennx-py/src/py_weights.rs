@@ -102,7 +102,7 @@ impl PyBf16Tree {
         };
         let len = slf.inner.len();
         let lease = Arc::clone(&slf.exported);
-        let owner = slf.into_py(py);
+        let owner = slf.into_pyobject(py).unwrap().into_any().unbind();
         match crate::dlpack::export(py, owner, Arc::clone(&lease), pointer, len, max_version) {
             Ok(capsule) => Ok(capsule),
             Err(error) => {

@@ -12,7 +12,7 @@ fn err(error: String) -> PyErr {
     PyValueError::new_err(error)
 }
 
-#[pyclass(name = "Bf16Trial", frozen)]
+#[pyclass(name = "Bf16Trial", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PyBf16Trial {
     inner: CoreTrial,
@@ -177,14 +177,14 @@ impl PyBf16Search {
     fn row(slf: PyRef<'_, Self>, trial: PyRef<'_, PyBf16Trial>) -> PyBf16View {
         let py = slf.py();
         PyBf16View {
-            owner: slf.into_py(py),
+            owner: slf.into_pyobject(py).unwrap().into_any().unbind(),
             trial: trial.inner,
         }
     }
 
     fn rows(slf: PyRef<'_, Self>, trials: Vec<PyRef<'_, PyBf16Trial>>) -> Vec<PyBf16View> {
         let py = slf.py();
-        let owner = slf.into_py(py);
+        let owner = slf.into_pyobject(py).unwrap().into_any().unbind();
         trials
             .into_iter()
             .map(|trial| PyBf16View {
@@ -293,7 +293,7 @@ impl PyBf16View {
             (pointer, len, lease)
         };
         lease.fetch_add(1, Ordering::AcqRel);
-        let owner = slf.into_py(py);
+        let owner = slf.into_pyobject(py).unwrap().into_any().unbind();
         match crate::dlpack::export_count(py, owner, Arc::clone(&lease), pointer, len, max_version)
         {
             Ok(capsule) => Ok(capsule),
