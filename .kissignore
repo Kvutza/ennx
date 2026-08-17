@@ -19,6 +19,14 @@ rust/crates/ennx/src/dense/cuda.rs
 rust/crates/ennx/src/dense/linear/cuda.rs
 rust/crates/ennx/src/knn/cuda_index.rs
 rust/crates/ennx/src/trials/cuda.rs
+# These are intentional multi-platform dispatch facades. Their dependency
+# breadth is the supported CPU/Metal/OpenCL/CUDA surface, not hidden coupling;
+# portable implementations remain subject to runtime tests. KISS cannot follow
+# children of an ignored facade, so its private FAISS implementation is included
+# here rather than reported as a false orphan.
+rust/crates/ennx/src/dense.rs
+rust/crates/ennx/src/knn/mod.rs
+rust/crates/ennx/src/knn/faiss_backend.rs
 # PyO3 and DLPack ownership are exercised through the built-wheel Python API;
 # KISS cannot infer coverage across the native Python extension boundary.
 rust/crates/ennx-py/src/

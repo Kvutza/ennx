@@ -35,7 +35,7 @@ pub(super) fn make_edits(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn select(
+pub(super) fn sparse_select(
     base: &[u8],
     rows: &[&[u8]],
     history: &[(usize, f32)],
@@ -75,7 +75,7 @@ pub(super) fn select(
     best
 }
 
-pub(super) fn materialize(
+pub(super) fn sparse_materialize(
     base: &[u8],
     seed: u64,
     edits: &[SparseEdit],
@@ -213,7 +213,7 @@ mod tests {
         let leaves = [Leaf::new(0, 16, 4, 0.25, 1.0, 0.25).unwrap()];
         let base = [0x88; 8];
         let edits = make_edits(&[7], &leaves, 6).unwrap();
-        let row = materialize(&base, 7, &edits, &leaves, 0.8);
+        let row = sparse_materialize(&base, 7, &edits, &leaves, 0.8);
         let changes = (0..16)
             .filter(|&element| {
                 let byte = element / 2;

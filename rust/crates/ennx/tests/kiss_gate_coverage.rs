@@ -108,14 +108,14 @@ fn kiss_linear() {
 
 #[test]
 fn kiss_sparse() {
-    fn select() {}
-    fn materialize() {}
+    fn sparse_select() {}
+    fn sparse_materialize() {}
     fn edit_distance() {}
     fn row_distance() {}
     fn sparse_code() {}
     fn byte_offset() {}
-    select();
-    materialize();
+    sparse_select();
+    sparse_materialize();
     edit_distance();
     row_distance();
     sparse_code();
@@ -124,6 +124,7 @@ fn kiss_sparse() {
 
 #[test]
 fn kiss_trials() {
+    fn Cpu() {}
     fn EncodingType() {}
     fn parse() {}
     fn new_with_encoding() {}
@@ -151,6 +152,7 @@ fn kiss_trials() {
     fn materialize() {}
     fn trial_distance() {}
     fn score() {}
+    Cpu();
     EncodingType();
     parse();
     new_with_encoding();
@@ -232,4 +234,12 @@ fn kiss_weights() {
     apply_sparse();
     blocks_for_words();
     draw_sparse();
+}
+
+#[test]
+fn kiss_posterior() {
+    fn conditional_posterior_function_draw() {}
+    fn WeightedPosteriorData() {}
+    conditional_posterior_function_draw();
+    WeightedPosteriorData();
 }

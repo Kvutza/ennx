@@ -8,7 +8,7 @@ mod neighbor;
 pub mod neighbor_dist;
 mod tie_break;
 
-use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis};
+use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2};
 
 use self::draw_compute::draw_from_internals;
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
@@ -172,7 +172,7 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
             paramss.iter().map(|p| p.k_num_neighbors).collect();
 
         if k_values.len() == 1 && self.num_obs() > 0 {
-            compute_batch_with_shared_neighbors(
+            shared_batch(
                 self,
                 x,
                 paramss,
@@ -183,7 +183,7 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
                 &mut se_ale_all,
             )?;
         } else {
-            compute_batch_separate_neighbors(
+            separate_batch(
                 self,
                 x,
                 paramss,
@@ -390,95 +390,8 @@ pub(crate) fn index_search(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn compute_batch_with_shared_neighbors(
-    model: &EpistemicNearestNeighbors,
-    x: &ArrayView2<f64>,
-    paramss: &[ENNParams],
-    flags: &PosteriorFlags,
-    mu_all: &mut Array3<f64>,
-    se_all: &mut Array3<f64>,
-    se_epi_all: &mut Array3<f64>,
-    se_ale_all: &mut Array3<f64>,
-) -> Result<(), ENNError> {
-    let neighbor_data = get_neighbor_data(
-        model,
-        x,
-        &paramss[0],
-        flags.exclude_nearest,
-        flags.tie_break_neighbors,
-    )?;
-
-    if let Some(data) = neighbor_data {
-        let wp_data = WeightedPosteriorData {
-            dist2s: &data.dist2s.view(),
-            idx: &data.idx,
-            y_neighbors: &data.y_neighbors.view(),
-            params: &paramss[0],
-            observation_noise: flags.observation_noise,
-            yvar_neighbors_override: None,
-        };
-
-        for (i, params) in paramss.iter().enumerate() {
-            let data_with_params = WeightedPosteriorData { params, ..wp_data };
-            let internals = compute_weighted_posterior(model, data_with_params, None)?;
-            assign_posterior_results(&internals, mu_all, se_all, se_epi_all, se_ale_all, i);
-        }
-    } else {
-        let batch_size = x.nrows();
-        let internals = empty_posterior_internals(model, batch_size);
-        for i in 0..paramss.len() {
-            assign_posterior_results(&internals, mu_all, se_all, se_epi_all, se_ale_all, i);
-        }
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn compute_batch_separate_neighbors(
-    model: &EpistemicNearestNeighbors,
-    x: &ArrayView2<f64>,
-    paramss: &[ENNParams],
-    flags: &PosteriorFlags,
-    mu_all: &mut Array3<f64>,
-    se_all: &mut Array3<f64>,
-    se_epi_all: &mut Array3<f64>,
-    se_ale_all: &mut Array3<f64>,
-) -> Result<(), ENNError> {
-    for (i, params) in paramss.iter().enumerate() {
-        let internals = compute_posterior_internals(model, x, params, flags)?;
-        assign_posterior_results(&internals, mu_all, se_all, se_epi_all, se_ale_all, i);
-    }
-    Ok(())
-}
-
-fn assign_posterior_results(
-    internals: &DrawInternals,
-    mu_all: &mut Array3<f64>,
-    se_all: &mut Array3<f64>,
-    se_epi_all: &mut Array3<f64>,
-    se_ale_all: &mut Array3<f64>,
-    index: usize,
-) {
-    let slice = ndarray::Slice::from(index..index + 1);
-    mu_all
-        .slice_axis_mut(Axis(0), slice)
-        .assign(&internals.mu.slice_axis(Axis(0), ndarray::Slice::from(..)));
-    se_all
-        .slice_axis_mut(Axis(0), slice)
-        .assign(&internals.se.slice_axis(Axis(0), ndarray::Slice::from(..)));
-    se_epi_all.slice_axis_mut(Axis(0), slice).assign(
-        &internals
-            .se_epi
-            .slice_axis(Axis(0), ndarray::Slice::from(..)),
-    );
-    se_ale_all.slice_axis_mut(Axis(0), slice).assign(
-        &internals
-            .se_ale
-            .slice_axis(Axis(0), ndarray::Slice::from(..)),
-    );
-}
-
+mod batch;
+use batch::{separate_batch, shared_batch};
 /// Data for weighted posterior computation.
 pub struct WeightedPosteriorData<'a> {
     pub dist2s: &'a ArrayView2<'a, f64>,
