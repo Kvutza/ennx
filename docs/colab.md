@@ -106,7 +106,7 @@ distance scoring and acquisition, 0.007 ms for selection, and 0.184 ms to write
 the selected full row. Treat these values as the checked T4 baseline, not as a
 hardware-independent performance claim.
 
-The CUDA-Oxide revision is pinned in `cuda/Cargo.toml`, the Rust nightly in
+The CUDA-Oxide revision is pinned in `Cargo.toml`, the Rust nightly in
 `cuda/rust-toolchain.toml`, and the Colab LLVM major version in
 `ops/cuda_oxide_toolchain.py`. Update those pins deliberately and rerun both
 the Modal release gate and Colab checks before accepting a toolchain change.
@@ -114,14 +114,14 @@ the Modal release gate and Colab checks before accepting a toolchain change.
 Build the pinned CUDA-Oxide Modal image from Rust using:
 
 ```bash
-cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- image
+cargo run --manifest-path Cargo.toml -p ennx-modal -- image
 ```
 
 Run the Buck2 release wheel and parity targets with the real batched MJX
 integration check using:
 
 ```bash
-cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- \
+cargo run --manifest-path Cargo.toml -p ennx-modal -- \
   wheel /tmp/ennx-cuda-wheel.whl --mjx
 ```
 

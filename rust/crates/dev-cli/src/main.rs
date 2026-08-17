@@ -274,7 +274,7 @@ fn cargo_bpann_tests(root: &Path) -> Result<u8, String> {
         [
             "test",
             "--manifest-path",
-            "rust/Cargo.toml",
+            "Cargo.toml",
             "-p",
             "ennx-bpann",
         ],
@@ -288,7 +288,7 @@ fn cargo_enn_no_default_tests(root: &Path) -> Result<u8, String> {
         [
             "test",
             "--manifest-path",
-            "rust/Cargo.toml",
+            "Cargo.toml",
             "-p",
             "ennx",
             "--no-default-features",
@@ -307,7 +307,7 @@ fn cargo_enn_no_default_examples(root: &Path) -> Result<u8, String> {
         [
             "test",
             "--manifest-path",
-            "rust/Cargo.toml",
+            "Cargo.toml",
             "-p",
             "ennx",
             "--no-default-features",
@@ -324,7 +324,7 @@ fn cargo_enn_default_tests(root: &Path) -> Result<u8, String> {
         [
             "test",
             "--manifest-path",
-            "rust/Cargo.toml",
+            "Cargo.toml",
             "-p",
             "ennx",
             "--lib",
@@ -342,7 +342,7 @@ fn cargo_enn_default_examples(root: &Path) -> Result<u8, String> {
         [
             "test",
             "--manifest-path",
-            "rust/Cargo.toml",
+            "Cargo.toml",
             "-p",
             "ennx",
             "--examples",

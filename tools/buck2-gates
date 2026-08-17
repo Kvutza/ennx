@@ -4,18 +4,17 @@ set -eu
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_dir"
 
-hashes_before=$(shasum -a 256 rust/BUCK buck2/accelerators/BUCK pixi.lock)
+hashes_before=$(shasum -a 256 rust/BUCK pixi.lock)
 ./tools/buck2-deps
-hashes_after=$(shasum -a 256 rust/BUCK buck2/accelerators/BUCK pixi.lock)
+hashes_after=$(shasum -a 256 rust/BUCK pixi.lock)
 test "$hashes_before" = "$hashes_after"
-cmp Cargo.Accelerators.lock buck2/accelerators/Cargo.lock
 
 ./buck2w --isolation-dir dev test \
     //buck2/tests:all \
     --local-only \
     --num-threads 4 \
     --console simple
-./buck2w --isolation-dir dev build //buck2/accelerators:opencl3 \
+./buck2w --isolation-dir dev build //rust:opencl3 \
     --local-only \
     --num-threads 4 \
     --console simple

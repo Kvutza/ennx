@@ -107,7 +107,7 @@ crossing:
 Run the pure Rust frontier experiment with:
 
 ```sh
-pixi run -e ennx -- cargo run --manifest-path rust/Cargo.toml \
+pixi run -e ennx -- cargo run --manifest-path Cargo.toml \
   -p ennx --example apple_gpu_frontier --features metal --release
 ```
 

@@ -19,7 +19,7 @@ def test_version():
     config.read(ROOT / ".buckconfig")
     versions = {
         read_version(ROOT / "pyproject.toml", ("project", "version")),
-        read_version(ROOT / "rust/Cargo.toml", ("workspace", "package", "version")),
+        read_version(ROOT / "Cargo.toml", ("workspace", "package", "version")),
         read_version(ROOT / "cuda/Cargo.toml", ("package", "version")),
         read_version(ROOT / "cuda/kernels/Cargo.toml", ("package", "version")),
         config["ennx"]["release_version"],

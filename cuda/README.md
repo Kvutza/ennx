@@ -91,8 +91,8 @@ For the hosted T4 release gate on Modal, build the pinned toolchain image and
 then run the Buck2 CUDA wheel target, parity target, and batched MJX integration:
 
 ```bash
-cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- image
-cargo run --manifest-path rust/Cargo.toml -p ennx-modal -- \
+cargo run --manifest-path Cargo.toml -p ennx-modal -- image
+cargo run --manifest-path Cargo.toml -p ennx-modal -- \
   wheel /tmp/ennx-cuda-wheel.whl --mjx
 ```
 

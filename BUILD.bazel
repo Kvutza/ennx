@@ -5,9 +5,9 @@ load("//:bazel/python_extension.bzl", "copy_extension")
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
-    "Cargo.Accelerators.lock",
-    "Cargo.Accelerators.Bazel.lock",
     "Cargo.Bazel.lock",
+    "Cargo.lock",
+    "Cargo.toml",
     "LICENSE",
     "NOTICE",
 ])

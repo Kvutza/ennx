@@ -56,6 +56,15 @@ filegroup(
 )
 
 filegroup(
+    name = "cargo-workspace",
+    srcs = [
+        "Cargo.lock",
+        "Cargo.toml",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+filegroup(
     name = "cuda-package",
     srcs = glob(["src/ennx/**/*.py"]) + [
         "LICENSE",
@@ -71,7 +80,7 @@ filegroup(
 cuda_oxide(
     name = "cuda",
     package = ":cuda-package",
-    workspace = "//rust:cuda-workspace",
+    workspace = ":cargo-workspace",
     bpann = "//rust/crates/bpann:bpann-source",
     ennx = "//rust/crates/ennx:ennx-source",
     python = "//rust/crates/ennx-py:python-source",

@@ -59,31 +59,12 @@ register_toolchains("@rust_toolchains//:all")
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 crate.from_cargo(
     name = "crates",
-    cargo_lockfile = "//rust:Cargo.lock",
+    cargo_lockfile = "//:Cargo.lock",
     lockfile = "//:Cargo.Bazel.lock",
-    manifests = ["//rust:Cargo.toml"],
+    manifests = ["//:Cargo.toml"],
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-unknown-linux-gnu",
     ],
 )
-crate.spec(
-    package = "metal",
-    repositories = ["accelerator_crates"],
-    version = "0.33.0",
-)
-crate.spec(
-    package = "opencl3",
-    repositories = ["accelerator_crates"],
-    version = "0.12.3",
-)
-crate.from_specs(
-    name = "accelerator_crates",
-    cargo_lockfile = "//:Cargo.Accelerators.lock",
-    lockfile = "//:Cargo.Accelerators.Bazel.lock",
-    supported_platform_triples = [
-        "aarch64-apple-darwin",
-        "x86_64-unknown-linux-gnu",
-    ],
-)
-use_repo(crate, "accelerator_crates", "crates")
+use_repo(crate, "crates")

@@ -5,9 +5,4 @@ repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_dir"
 
 ./tools/reindeerw --cargo-options=--locked buckify
-cp Cargo.Accelerators.lock buck2/accelerators/Cargo.lock
-(
-    cd buck2/accelerators
-    ../../tools/reindeerw --cargo-options=--locked -c reindeer.toml buckify
-)
 pixi lock

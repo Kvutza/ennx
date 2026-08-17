@@ -73,9 +73,9 @@ app_rust_library(
         "//rust:tracy-client",
         "//rust:tracy-client-sys",
     ] + select({
-        "//:linux-arm64": ["//buck2/accelerators:opencl3"],
-        "//:linux-x86_64": ["//buck2/accelerators:opencl3"],
-        "//:macos-arm64": ["//buck2/accelerators:metal"],
+        "//:linux-arm64": ["//rust:opencl3"],
+        "//:linux-x86_64": ["//rust:opencl3"],
+        "//:macos-arm64": ["//rust:metal"],
     }),
 )
 
@@ -107,7 +107,7 @@ app_rust_library(
         "//rust:toml",
         "//rust:tracy-client",
         "//rust:tracy-client-sys",
-        "//buck2/accelerators:metal",
+        "//rust:metal",
     ],
     target_compatible_with = ["prelude//os/constraints:macos"],
 )

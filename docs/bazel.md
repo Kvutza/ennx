@@ -45,9 +45,10 @@ by Bazel rather than discovered through a user package manager.
 
 ## Dependency locking
 
-`Cargo.Bazel.lock` and `Cargo.Accelerators.Bazel.lock` are Crate Universe
-generator lockfiles. They are checked in deliberately: Bzlmod dependency
-modules cannot repin repositories inside a consumer's read-only module cache.
+`Cargo.Bazel.lock` is the Crate Universe generator lockfile for the complete
+Rust dependency graph, including Metal and OpenCL. It is checked in
+deliberately: Bzlmod dependency modules cannot repin repositories inside a
+consumer's read-only module cache.
 
 The lockfiles cover:
 
