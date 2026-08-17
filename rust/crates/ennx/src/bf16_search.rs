@@ -7,7 +7,7 @@ const MAX_HISTORY: usize = 128;
 const MAX_PENDING: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Bf16Block {
+pub struct ParamBlock {
     pub key: u64,
     pub offset: usize,
     pub len: usize,
@@ -15,7 +15,7 @@ pub struct Bf16Block {
     pub weight: f32,
 }
 
-impl Bf16Block {
+impl ParamBlock {
     pub fn new(
         key: u64,
         offset: usize,
@@ -40,7 +40,7 @@ impl Bf16Block {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Bf16Trial {
+pub struct Proposal {
     id: u64,
     slot: usize,
     pub index: usize,
@@ -49,28 +49,40 @@ pub struct Bf16Trial {
     pub length: f32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Proposals {
+    trials: Vec<Proposal>,
+}
+
+impl Proposals {
+    pub fn arms(&self) -> usize {
+        self.trials.len()
+    }
+}
+
 /// Stateful TuRBO search over full-precision BF16 model weights on CUDA.
-pub struct Bf16Search {
+pub struct SearchState {
     engine: ennx_cuda::Bf16SearchEngine,
     dimensions: usize,
     capacity: usize,
     pending_capacity: usize,
     history: VecDeque<usize>,
-    pending: Vec<Bf16Trial>,
+    pending: Vec<Proposal>,
     next_id: u64,
     length: f64,
     best: f32,
     best_variance: f32,
     restarts: usize,
+    queued: Option<usize>,
 }
 
-impl Bf16Search {
+impl SearchState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         base: &[u16],
         base_value: f32,
         base_variance: f32,
-        blocks: Vec<Bf16Block>,
+        blocks: Vec<ParamBlock>,
         capacity: usize,
         pending_capacity: usize,
         length: TRLengthConfig,
@@ -107,7 +119,7 @@ impl Bf16Search {
         len: usize,
         base_value: f32,
         base_variance: f32,
-        blocks: Vec<Bf16Block>,
+        blocks: Vec<ParamBlock>,
         capacity: usize,
         pending_capacity: usize,
         length: TRLengthConfig,
@@ -165,10 +177,11 @@ impl Bf16Search {
             best: base_value,
             best_variance: base_variance,
             restarts: 0,
+            queued: None,
         })
     }
 
-    pub fn ask(&mut self, seeds: &[u64], config: Ask) -> Result<Bf16Trial, String> {
+    pub fn ask(&mut self, seeds: &[u64], config: Ask) -> Result<Proposal, String> {
         Ok(self.ask_batch(seeds, 1, config)?[0])
     }
 
@@ -177,7 +190,8 @@ impl Bf16Search {
         seeds: &[u64],
         arms: usize,
         config: Ask,
-    ) -> Result<Vec<Bf16Trial>, String> {
+    ) -> Result<Vec<Proposal>, String> {
+        self.sync()?;
         if !self.pending.is_empty() {
             return Err("tell must finish outstanding BF16 trials before ask".to_string());
         }
@@ -208,7 +222,7 @@ impl Bf16Search {
         let mut trials = Vec::with_capacity(arms);
         for (&slot, selection) in slots.iter().zip(selections) {
             let index = selection.index as usize;
-            let trial = Bf16Trial {
+            let trial = Proposal {
                 id: self.next_id,
                 slot: slot as usize,
                 index,
@@ -223,13 +237,65 @@ impl Bf16Search {
         Ok(trials)
     }
 
-    pub fn tell(&mut self, trial: Bf16Trial, value: f32, variance: f32) -> Result<bool, String> {
+    pub fn ask_round(
+        &mut self,
+        arms: usize,
+        candidates: usize,
+        seed_root: u64,
+        config: Ask,
+    ) -> Result<Proposals, String> {
+        if !self.pending.is_empty() {
+            return Err("tell must finish the outstanding BF16 round".to_string());
+        }
+        if arms == 0
+            || arms > self.pending_capacity
+            || candidates == 0
+            || arms.checked_mul(candidates).is_none()
+        {
+            return Err("BF16 round shape exceeds pending capacity".to_string());
+        }
+        let slots = self.free_slots(arms)?;
+        self.engine.ask_seeded(
+            0,
+            MAX_HISTORY,
+            &slots,
+            candidates,
+            seed_root,
+            1.0,
+            config.seed,
+            ennx_cuda::Ask {
+                neighbors: config.neighbors,
+                acquisition: crate::weights::acquisition_code(config.acquisition),
+                epistemic_scale: config.epistemic_scale,
+                aleatoric_scale: config.aleatoric_scale,
+                y_scale: config.y_scale,
+                beta: config.beta,
+            },
+        )?;
+        let mut trials = Vec::with_capacity(arms);
+        for &slot in &slots {
+            let trial = Proposal {
+                id: self.next_id,
+                slot: slot as usize,
+                index: 0,
+                seed: 0,
+                score: 0.0,
+                length: 0.0,
+            };
+            self.next_id = self.next_id.wrapping_add(1);
+            self.pending.push(trial);
+            trials.push(trial);
+        }
+        Ok(Proposals { trials })
+    }
+
+    pub fn tell(&mut self, trial: Proposal, value: f32, variance: f32) -> Result<bool, String> {
         Ok(self.tell_batch(&[trial], &[value], &[variance])?[0])
     }
 
     pub fn tell_batch(
         &mut self,
-        trials: &[Bf16Trial],
+        trials: &[Proposal],
         values: &[f32],
         variances: &[f32],
     ) -> Result<Vec<bool>, String> {
@@ -252,7 +318,7 @@ impl Bf16Search {
     /// The pointers must address `trials.len() * 4` readable bytes on CUDA device 0.
     pub unsafe fn tell_device(
         &mut self,
-        trials: &[Bf16Trial],
+        trials: &[Proposal],
         values: u64,
         variances: Option<u64>,
     ) -> Result<Vec<bool>, String> {
@@ -278,16 +344,114 @@ impl Bf16Search {
         Ok(self.finish_tell(trials, output))
     }
 
+    pub fn tell_round(
+        &mut self,
+        round: &Proposals,
+        values: &[f32],
+        variances: &[f32],
+    ) -> Result<Vec<bool>, String> {
+        self.tell_batch(&round.trials, values, variances)
+    }
+
+    pub fn queue_round(
+        &mut self,
+        round: &Proposals,
+        values: &[f32],
+        variances: &[f32],
+    ) -> Result<(), String> {
+        check_tell(&round.trials, values, variances)?;
+        self.check_trials(&round.trials)?;
+        let slots = round
+            .trials
+            .iter()
+            .map(|trial| trial.slot as u32)
+            .collect::<Vec<_>>();
+        let tolerance = failure_tolerance(self.dimensions, round.arms());
+        self.engine
+            .queue_values(&slots, values, variances, self.capacity, tolerance)?;
+        self.pending.clear();
+        self.queued = Some(round.arms());
+        Ok(())
+    }
+
+    /// Consume device rewards for an opaque resident round.
+    ///
+    /// # Safety
+    /// The pointers must address `round.arms() * 4` readable CUDA bytes.
+    pub unsafe fn finish_round(
+        &mut self,
+        round: &Proposals,
+        values: u64,
+        variances: Option<u64>,
+    ) -> Result<(), String> {
+        self.check_trials(&round.trials)?;
+        let slots = round
+            .trials
+            .iter()
+            .map(|trial| trial.slot as u32)
+            .collect::<Vec<_>>();
+        let tolerance = failure_tolerance(self.dimensions, round.arms());
+        unsafe {
+            self.engine.queue_tell(
+                &slots,
+                values,
+                variances,
+                round.arms(),
+                self.capacity,
+                tolerance,
+            )?;
+        }
+        self.pending.clear();
+        self.queued = Some(round.arms());
+        Ok(())
+    }
+
+    pub fn sync(&mut self) -> Result<Vec<bool>, String> {
+        let Some(count) = self.queued else {
+            return Ok(Vec::new());
+        };
+        let output = self.engine.collect_tell(count)?;
+        self.queued = None;
+        let accepted = output.accepted.clone();
+        self.update_state(output);
+        Ok(accepted)
+    }
+
     pub fn device_row(
         &self,
-        trial: Bf16Trial,
+        trial: Proposal,
         stream: Option<i64>,
     ) -> Result<(u64, usize, usize), String> {
         let pending = self.pending_for(trial)?;
         self.engine.device_row(pending.slot, stream)
     }
 
-    pub fn read(&self, trial: Bf16Trial) -> Result<Vec<u16>, String> {
+    pub fn device_batch(
+        &mut self,
+        trials: &[Proposal],
+        stream: Option<i64>,
+    ) -> Result<(u64, usize, usize), String> {
+        if trials.is_empty() {
+            return Err("BF16 device batch cannot be empty".to_string());
+        }
+        self.check_trials(trials)?;
+        let slots = trials
+            .iter()
+            .map(|trial| trial.slot as u32)
+            .collect::<Vec<_>>();
+        self.engine.device_batch(&slots, stream)
+    }
+
+    pub fn device_round(
+        &mut self,
+        round: &Proposals,
+        stream: Option<i64>,
+    ) -> Result<(u64, usize, usize), String> {
+        self.check_trials(&round.trials)?;
+        self.engine.device_round(round.arms(), stream)
+    }
+
+    pub fn read(&self, trial: Proposal) -> Result<Vec<u16>, String> {
         let pending = self.pending_for(trial)?;
         self.engine.read(pending.slot)
     }
@@ -300,24 +464,29 @@ impl Bf16Search {
         self.engine.last_profile()
     }
 
-    pub fn length(&self) -> f64 {
-        self.length
+    pub fn length(&mut self) -> Result<f64, String> {
+        self.sync()?;
+        Ok(self.length)
     }
 
-    pub fn best(&self) -> f32 {
-        self.best
+    pub fn best(&mut self) -> Result<f32, String> {
+        self.sync()?;
+        Ok(self.best)
     }
 
-    pub fn best_variance(&self) -> f32 {
-        self.best_variance
+    pub fn best_variance(&mut self) -> Result<f32, String> {
+        self.sync()?;
+        Ok(self.best_variance)
     }
 
-    pub fn restarts(&self) -> usize {
-        self.restarts
+    pub fn restarts(&mut self) -> Result<usize, String> {
+        self.sync()?;
+        Ok(self.restarts)
     }
 
-    pub fn history_len(&self) -> usize {
-        self.history.len()
+    pub fn history_len(&mut self) -> Result<usize, String> {
+        self.sync()?;
+        Ok(self.history.len())
     }
 
     pub fn len(&self) -> usize {
@@ -328,27 +497,23 @@ impl Bf16Search {
         self.engine.is_empty()
     }
 
-    fn finish_tell(&mut self, trials: &[Bf16Trial], output: ennx_cuda::TellOutput) -> Vec<bool> {
-        for trial in trials {
-            if self.history.len() == self.capacity {
-                self.history.pop_front();
-            }
-            self.history.push_back(trial.slot);
-            self.pending.retain(|candidate| candidate.id != trial.id);
-        }
-        if output.restarted {
-            self.history.clear();
-            self.history.push_back(1);
-        }
-        debug_assert_eq!(self.history.len(), output.history);
+    fn finish_tell(&mut self, trials: &[Proposal], output: ennx_cuda::TellOutput) -> Vec<bool> {
+        self.pending
+            .retain(|candidate| !trials.iter().any(|trial| trial.id == candidate.id));
+        let accepted = output.accepted.clone();
+        self.update_state(output);
+        accepted
+    }
+
+    fn update_state(&mut self, output: ennx_cuda::TellOutput) {
+        self.history = (1..=output.history).collect();
         self.length = output.length;
         self.best = output.best;
         self.best_variance = output.best_variance;
         self.restarts = output.restarts;
-        output.accepted
     }
 
-    fn check_trials(&self, trials: &[Bf16Trial]) -> Result<(), String> {
+    fn check_trials(&self, trials: &[Proposal]) -> Result<(), String> {
         for (index, trial) in trials.iter().enumerate() {
             if trials[..index].contains(trial) {
                 return Err("BF16 tell batch contains a duplicate trial".to_string());
@@ -358,7 +523,7 @@ impl Bf16Search {
         Ok(())
     }
 
-    fn pending_for(&self, trial: Bf16Trial) -> Result<Bf16Trial, String> {
+    fn pending_for(&self, trial: Proposal) -> Result<Proposal, String> {
         self.pending
             .iter()
             .copied()
@@ -367,11 +532,8 @@ impl Bf16Search {
     }
 
     fn free_slots(&self, count: usize) -> Result<Vec<u32>, String> {
-        let slots = (1..slot_count(self.capacity, self.pending_capacity)?)
-            .filter(|slot| {
-                self.history.iter().all(|record| record != slot)
-                    && self.pending.iter().all(|trial| trial.slot != *slot)
-            })
+        let slots = (self.capacity + 1..slot_count(self.capacity, self.pending_capacity)?)
+            .filter(|slot| self.pending.iter().all(|trial| trial.slot != *slot))
             .take(count)
             .map(|slot| slot as u32)
             .collect::<Vec<_>>();
@@ -395,7 +557,7 @@ fn check_search(
     len: usize,
     base_value: f32,
     base_variance: f32,
-    blocks: &[Bf16Block],
+    blocks: &[ParamBlock],
     capacity: usize,
     pending_capacity: usize,
 ) -> Result<usize, String> {
@@ -429,7 +591,7 @@ fn check_search(
     Ok(expected)
 }
 
-fn check_tell(trials: &[Bf16Trial], values: &[f32], variances: &[f32]) -> Result<(), String> {
+fn check_tell(trials: &[Proposal], values: &[f32], variances: &[f32]) -> Result<(), String> {
     if trials.is_empty() || trials.len() != values.len() || trials.len() != variances.len() {
         return Err(
             "BF16 trials, values, and variances must have equal non-zero length".to_string(),
@@ -452,7 +614,7 @@ fn slot_count(capacity: usize, pending: usize) -> Result<usize, String> {
         .ok_or("BF16 resident slot count overflow".to_string())
 }
 
-fn cuda_blocks(blocks: &[Bf16Block]) -> Vec<ennx_cuda::Bf16Leaf> {
+fn cuda_blocks(blocks: &[ParamBlock]) -> Vec<ennx_cuda::Bf16Leaf> {
     blocks
         .iter()
         .map(|block| ennx_cuda::Bf16Leaf {

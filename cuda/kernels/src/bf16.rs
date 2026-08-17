@@ -30,7 +30,7 @@ pub struct Bf16Score {
     pub neighbors: u32,
     pub acquisition: u32,
     pub tiles: u32,
-    pub pad1: u32,
+    pub resident: u32,
 }
 
 // SAFETY: Bf16Score is repr(C) and contains only DeviceCopy scalars.
@@ -53,7 +53,7 @@ pub struct SearchState {
     pub failures: u32,
     pub restarts: u32,
     pub history: u32,
-    pub pad: u32,
+    pub status: u32,
 }
 
 // SAFETY: SearchState is repr(C) and contains only DeviceCopy scalars.
@@ -82,7 +82,7 @@ pub struct TellParams {
     pub trials: u32,
     pub capacity: u32,
     pub failure_tolerance: u32,
-    pub pad: u32,
+    pub status_count: u32,
 }
 
 // SAFETY: TellParams is repr(C) and contains only DeviceCopy scalars.

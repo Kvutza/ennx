@@ -18,7 +18,7 @@ mod cuda;
 mod bf16;
 mod linear;
 
-pub use bf16::Bf16Tree;
+pub use bf16::ParamBuffer;
 pub use linear::{linear, DenseLinear, DenseView};
 
 #[repr(C)]

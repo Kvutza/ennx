@@ -60,3 +60,24 @@ fn frontier_is_experimental() {
         assert!(!LIB.contains(root), "{root} should not be root API");
     }
 }
+
+#[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn resident_api() {
+    use ennx::experimental::{ParamBlock, Proposal, Proposals, SearchState};
+
+    let _ = (
+        std::mem::size_of::<ParamBlock>(),
+        std::mem::size_of::<Proposal>(),
+        std::mem::size_of::<Proposals>(),
+        std::mem::size_of::<SearchState>(),
+    );
+
+    const EXPERIMENTAL: &str = include_str!("../src/experimental.rs");
+    for name in ["ParamBlock", "Proposal", "Proposals", "SearchState"] {
+        assert!(EXPERIMENTAL.contains(name), "{name} must stay exported");
+    }
+    for old in ["Bf16Block", "Bf16Trial", "Bf16Round", "Bf16Search"] {
+        assert!(!EXPERIMENTAL.contains(old), "{old} should not be public");
+    }
+}

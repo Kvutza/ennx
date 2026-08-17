@@ -1,5 +1,5 @@
 use ennx::experimental::{
-    AcquisitionKind, Bf16Tree, ComputeDevice, DenseLeaf, DenseTerm, ForwardProgram,
+    AcquisitionKind, ComputeDevice, DenseLeaf, DenseTerm, ForwardProgram, ParamBuffer,
     KdaControlRequest, KdaForwardRequest, KdaMoeLayerRequest, KdaMoeMetalArena,
     KdaMoeMetalExecutor, KdaMoeMetalKdaVectors, KdaMoeMetalModel, KdaMoeMetalWeights,
     KdaPackedLinear, KdaTensorLayout, ResidentBoState, SearchConfig, PackedLeaf, PackedSearch,
@@ -132,11 +132,11 @@ fn bf16_pytree_matches_cpu() {
         DenseTerm::new(0x1234_5678_9abc_def0, 0.01).unwrap(),
         DenseTerm::new(91, -0.0025).unwrap(),
     ];
-    let mut cpu = Bf16Tree::new(base.to_vec(), leaves.clone(), ComputeDevice::Cpu).unwrap();
+    let mut cpu = ParamBuffer::new(base.to_vec(), leaves.clone(), ComputeDevice::Cpu).unwrap();
     assert_eq!(cpu.candidate().unwrap(), base);
     cpu.materialize(&terms).unwrap();
     for device in [ComputeDevice::Metal, ComputeDevice::Agx] {
-        let mut tree = Bf16Tree::new(base.to_vec(), leaves.clone(), device).unwrap();
+        let mut tree = ParamBuffer::new(base.to_vec(), leaves.clone(), device).unwrap();
         assert_eq!(tree.candidate().unwrap(), base);
         tree.materialize(&terms).unwrap();
         assert_eq!(tree.candidate().unwrap(), cpu.candidate().unwrap());
@@ -148,7 +148,7 @@ fn bf16_pytree_preserves_sub_ulp_directions() {
     let base = [1.0f32, -2.0, 4.0, -8.0].map(|value| (value.to_bits() >> 16) as u16);
     let leaves = vec![DenseLeaf::new(11, 0, base.len(), 1.0e-6).unwrap()];
     let terms = [DenseTerm::new(17, 1.0e-6).unwrap()];
-    let mut cpu = Bf16Tree::new(base.to_vec(), leaves.clone(), ComputeDevice::Cpu).unwrap();
+    let mut cpu = ParamBuffer::new(base.to_vec(), leaves.clone(), ComputeDevice::Cpu).unwrap();
     cpu.materialize(&terms).unwrap();
     assert!(cpu
         .candidate()
@@ -157,7 +157,7 @@ fn bf16_pytree_preserves_sub_ulp_directions() {
         .zip(base)
         .all(|(candidate, base)| *candidate != base));
     for device in [ComputeDevice::Metal, ComputeDevice::Agx] {
-        let mut tree = Bf16Tree::new(base.to_vec(), leaves.clone(), device).unwrap();
+        let mut tree = ParamBuffer::new(base.to_vec(), leaves.clone(), device).unwrap();
         tree.materialize(&terms).unwrap();
         assert_eq!(tree.candidate().unwrap(), cpu.candidate().unwrap());
     }

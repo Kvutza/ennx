@@ -496,46 +496,15 @@ impl Search {
             .iter()
             .map(|record| (record.slot, record.value))
             .collect();
-        match &mut self.engine {
-            #[cfg(all(target_os = "macos", feature = "metal"))]
-            Engine::Metal(engine) => engine.ask_multi_tr(
-                self.base,
-                &history,
-                num_regions,
-                seeds_per_region,
-                seeds,
-                &self.leaves,
-                config,
-            ),
-            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
-            Engine::Cuda(engine) => engine.ask_multi_tr(
-                self.base,
-                &history,
-                num_regions,
-                seeds_per_region,
-                seeds,
-                &self.leaves,
-                config,
-            ),
-            _ => {
-                let mut results = Vec::with_capacity(num_regions);
-                for r in 0..num_regions {
-                    let start = r * seeds_per_region;
-                    let end = start + seeds_per_region;
-                    let (index, score) = self.engine.ask(
-                        self.base,
-                        &history,
-                        0,
-                        &seeds[start..end],
-                        &self.leaves,
-                        config,
-                        false,
-                    )?;
-                    results.push((start + index, score));
-                }
-                Ok(results)
-            }
-        }
+        self.engine.ask_multi(
+            self.base,
+            &history,
+            num_regions,
+            seeds_per_region,
+            seeds,
+            &self.leaves,
+            config,
+        )
     }
 
     /// Evaluate regions represented by compact perturbation chains.
@@ -570,51 +539,16 @@ impl Search {
             .iter()
             .map(|record| (record.slot, record.value))
             .collect();
-        match &mut self.engine {
-            Engine::Cpu(engine) => engine.ask_multi_tr_tree(
-                self.base,
-                &history,
-                seeds_per_region,
-                centers,
-                region_centers,
-                seeds,
-                &self.leaves,
-                config,
-            ),
-            #[cfg(all(target_os = "macos", feature = "metal"))]
-            Engine::Metal(engine) => engine.ask_multi_tr_tree(
-                self.base,
-                &history,
-                seeds_per_region,
-                centers,
-                region_centers,
-                seeds,
-                &self.leaves,
-                config,
-            ),
-            #[cfg(feature = "opencl")]
-            Engine::OpenCl(engine) => engine.ask_multi_tr_tree(
-                self.base,
-                &history,
-                seeds_per_region,
-                centers,
-                region_centers,
-                seeds,
-                &self.leaves,
-                config,
-            ),
-            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
-            Engine::Cuda(engine) => engine.ask_multi_tr_tree(
-                self.base,
-                &history,
-                seeds_per_region,
-                centers,
-                region_centers,
-                seeds,
-                &self.leaves,
-                config,
-            ),
-        }
+        self.engine.ask_tree(
+            self.base,
+            &history,
+            seeds_per_region,
+            centers,
+            region_centers,
+            seeds,
+            &self.leaves,
+            config,
+        )
     }
 
     /// Use BPANN to shortlist compact candidate descriptors, stream-resolve

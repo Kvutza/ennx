@@ -22,28 +22,37 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
-use ennx::experimental::Bf16Tree;
+use ennx::experimental::ParamBuffer;
 
 fn err(error: String) -> PyErr {
     PyValueError::new_err(error)
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
-#[pyclass(name = "Bf16Tree", unsendable)]
-pub struct PyBf16Tree {
-    inner: Bf16Tree,
+#[pyclass(name = "ParamBuffer", unsendable)]
+pub struct PyParamBuffer {
+    inner: ParamBuffer,
     exported: Arc<AtomicBool>,
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
 #[pymethods]
-impl PyBf16Tree {
+impl PyParamBuffer {
     #[new]
-    fn new(base: &Bound<'_, PyAny>, leaves: Vec<(u64, usize, usize, f32)>) -> PyResult<Self> {
+    fn new(
+        base: &Bound<'_, PyAny>,
+        blocks: Vec<PyRef<'_, crate::py_bf16::PyParamBlock>>,
+    ) -> PyResult<Self> {
         let input = crate::dlpack::Input::new(base)?;
-        let leaves = dense_leaves(leaves)?;
+        let leaves = blocks
+            .iter()
+            .map(|block| {
+                let block = block.inner;
+                DenseLeaf::new(block.key, block.offset, block.len, block.scale).map_err(err)
+            })
+            .collect::<PyResult<Vec<_>>>()?;
         Ok(Self {
-            inner: unsafe { Bf16Tree::from_device(input.pointer, input.len, leaves) }
+            inner: unsafe { ParamBuffer::from_device(input.pointer, input.len, leaves) }
                 .map_err(err)?,
             exported: Arc::new(AtomicBool::new(false)),
         })
@@ -72,12 +81,12 @@ impl PyBf16Tree {
     ) -> PyResult<PyObject> {
         if copy == Some(true) {
             return Err(pyo3::exceptions::PyBufferError::new_err(
-                "Bf16Tree does not export copies",
+                "ParamBuffer does not export copies",
             ));
         }
         if dl_device.is_some_and(|device| device != (2, 0)) {
             return Err(pyo3::exceptions::PyBufferError::new_err(
-                "Bf16Tree cannot export to another device",
+                "ParamBuffer cannot export to another device",
             ));
         }
         if stream.is_some_and(|value| value == 0 || value < -1) {

@@ -75,7 +75,9 @@ def _run_fast_test_smoke(notebook_path: str) -> None:
     if existing_pythonpath:
         pythonpath_parts.append(existing_pythonpath)
     os.environ["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
-    exec(compile(smoke.strip(), notebook_path, "exec"), {"__name__": "__main__"})
+    exec(  # noqa: S102 - notebooks are repository-owned test inputs
+        compile(smoke.strip(), notebook_path, "exec"), {"__name__": "__main__"}
+    )
 
 
 def _execute_with_kernel(nb, repo_root: Path, kernel_manager) -> None:
@@ -183,7 +185,7 @@ def test_colab():
 
 def test_mjx_colab():
     repo_root = Path(__file__).resolve().parent.parent
-    path = repo_root / "examples/colab_mjx_humanoid_ennx.ipynb"
+    path = repo_root / "examples/humanoid.ipynb"
     notebook = json.loads(path.read_text(encoding="utf-8"))
 
     assert notebook["nbformat"] == 4
@@ -215,16 +217,17 @@ def test_mjx_colab():
         "mjx.step",
         "PARAMETER_COUNT",
         "900_000 <= PARAMETER_COUNT <= 1_000_000",
-        "Bf16Search",
+        "ParamBlock",
+        "turbo_enn",
         "repetitions = 10",
         'os.environ.get("ENNX_REPETITIONS"',
         'os.environ.get("ENNX_ROUNDS"',
         "history_capacity = 8",
         "batch_arms = 4",
         "candidates = 8",
-        "search.ask_batch(",
-        "search.rows(",
-        "search.tell_batch(trials, reward, variances)",
+        "search.ask(",
+        "jax.dlpack.from_dlpack(proposals)",
+        "search.tell(proposals, reward, variances)",
         "jax.dlpack.from_dlpack",
         "jax.vmap(score_policy)",
         "mujoco.Renderer",
@@ -281,9 +284,10 @@ def test_bf16():
         "jj",
         "//:cuda-parity",
         "//:cuda-wheel",
-        "Bf16Tree",
+        "ParamBlock",
+        "ParamBuffer",
         "jnp.bfloat16",
-        "jax.dlpack.from_dlpack(tree)",
+        "jax.dlpack.from_dlpack(buffer)",
         "PARAMETERS = 1_000_000",
     ):
         assert required in source

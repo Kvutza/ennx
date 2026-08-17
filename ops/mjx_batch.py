@@ -10,16 +10,7 @@ import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
 
-from ennx.experimental import Bf16Search
-
-
-def device_batch(search, trials):
-    rows = [jax.dlpack.from_dlpack(view) for view in search.rows(trials)]
-    batch = jnp.stack(rows)
-    batch.block_until_ready()
-    del rows
-    gc.collect()
-    return batch
+from ennx.experimental import ParamBlock, turbo_enn
 
 
 def main() -> None:
@@ -40,17 +31,17 @@ def main() -> None:
     gpu_data = mjx.make_data(model, impl="jax")
     dimensions = 1_030
     base = jax.device_put(jnp.zeros(dimensions, dtype=jnp.bfloat16))
-    blocks = [(17, 0, dimensions, 0.125, 1.0 / dimensions)]
-    search = Bf16Search(
+    blocks = [ParamBlock(17, 0, dimensions, 0.125, 1.0 / dimensions)]
+    search = turbo_enn(
         base,
         0.0,
         blocks,
         8,
         max_pending=4,
     )
-    seeds = [[arm * 8 + candidate + 1 for candidate in range(8)] for arm in range(4)]
-    trials = search.ask_batch(seeds, 1, acquisition="thompson")
-    rows = device_batch(search, trials)
+    proposals = search.ask(4, 8, 1, 1, acquisition="thompson")
+    rows = jax.dlpack.from_dlpack(proposals)
+    rows.block_until_ready()
     controls = jnp.mean(rows.astype(jnp.float32), axis=1, keepdims=True)
 
     @jax.jit
@@ -66,7 +57,8 @@ def main() -> None:
     rewards = -jnp.square(output.qpos[:, 0]).astype(jnp.float32)
     del rows
     gc.collect()
-    accepted = search.tell_batch(trials, rewards)
+    search.tell(proposals, rewards)
+    accepted = search.sync()
     assert len(accepted) == 4
     reward_log = [float(value) for value in jax.device_get(rewards)]
     assert all(math.isfinite(value) for value in reward_log)

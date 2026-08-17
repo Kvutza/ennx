@@ -100,6 +100,21 @@ class TestPublicAPIExports:
         assert callable(experimental.create_optimizer_enn)
         assert callable(experimental.quantize_int4)
         assert callable(experimental.quantize_fp4_e2m1)
+        for name in [
+            "ParamBlock",
+            "ParamBuffer",
+            "Proposals",
+            "SearchState",
+            "turbo_enn",
+        ]:
+            assert name in experimental.__all__
+            assert hasattr(experimental, name)
+        if experimental.SearchState is not None:
+            assert inspect.isclass(experimental.ParamBlock)
+            assert inspect.isclass(experimental.ParamBuffer)
+            assert inspect.isclass(experimental.Proposals)
+            assert inspect.isclass(experimental.SearchState)
+            assert callable(experimental.turbo_enn)
 
     def test_enum_types(self):
         """Enum types are available."""

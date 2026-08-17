@@ -8,31 +8,17 @@ import time
 import jax
 import jax.numpy as jnp
 
-from ennx.experimental import Bf16Search
-
-
-MASK64 = (1 << 64) - 1
-
-
-def mix64(value: int) -> int:
-    value = (value + 0x9E3779B97F4A7C15) & MASK64
-    value = ((value ^ (value >> 30)) * 0xBF58476D1CE4E5B9) & MASK64
-    value = ((value ^ (value >> 27)) * 0x94D049BB133111EB) & MASK64
-    return (value ^ (value >> 31)) & MASK64
-
-
-def seed_rows(round_index: int) -> list[list[int]]:
-    return [[mix64((round_index << 8) | candidate) for candidate in range(8)]]
+from ennx.experimental import ParamBlock, turbo_enn
 
 
 def main() -> None:
     dimensions = 1_000_000
     base = jax.device_put(jnp.zeros(dimensions, dtype=jnp.bfloat16))
     base.block_until_ready()
-    search = Bf16Search(
+    search = turbo_enn(
         base,
         0.0,
-        [(71, 0, dimensions, 0.01, 1.0 / dimensions)],
+        [ParamBlock(71, 0, dimensions, 0.01, 1.0 / dimensions)],
         8,
     )
     search.profile(True)
@@ -40,15 +26,21 @@ def main() -> None:
     profiles = []
     for round_index in range(18):
         started = time.perf_counter()
-        trials = search.ask_batch(
-            seed_rows(round_index),
-            min(8, search.history_len),
+        proposals = search.ask(
+            1,
+            8,
+            8,
+            round_index,
             acquisition="thompson",
-            seed=round_index,
+            draw_seed=round_index,
         )
         elapsed.append((time.perf_counter() - started) * 1_000)
         profiles.append(search.last_profile)
-        search.tell_batch(trials, [float(round_index + 1)])
+        search.tell(proposals, [float(round_index + 1)])
+
+    accepted = search.sync()
+    if accepted != [True] or search.best != 18.0 or search.history_len != 8:
+        raise RuntimeError("resident rounds did not preserve CUDA search state")
 
     measured = elapsed[8:]
     kernel = profiles[8:]
@@ -57,9 +49,9 @@ def main() -> None:
     pick = statistics.median(profile[1] for profile in kernel)
     write = statistics.median(profile[2] for profile in kernel)
     total = statistics.median(profile[3] for profile in kernel)
-    p95 = sorted(measured)[-1]
+    p95 = max(measured)
     print(
-        "CUDA_BF16 "
+        "CUDA_BF16 resident=true "
         f"dimensions={dimensions} candidates=8 history=8 "
         f"median_ms={median:.3f} p95_ms={p95:.3f} "
         f"score_ms={score:.3f} pick_ms={pick:.3f} "

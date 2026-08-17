@@ -21,30 +21,27 @@ selected packed-row transfer as the remaining host boundary. It does not clone
 the repository, replace Colab's JAX stack, or install Rust, LLVM, and CUDA
 compiler tooling.
 
-For the high-dimensional control experiment, open
-[`examples/colab_mjx_humanoid_ennx.ipynb`](https://colab.research.google.com/github/Kvutza/ennx/blob/main/examples/colab_mjx_humanoid_ennx.ipynb).
-It runs a roughly 972,000-parameter JAX policy in a pure MJX Humanoid simulation,
-optimizes dense BF16 whole-policy perturbations with the ENNx CUDA device, and renders the
-incumbent policy to an MP4. The notebook installs the released ENNx wheel and
-`mujoco-mjx`; it does not require a source checkout or Rust toolchain.
-Its TOML parameter cell defaults to ten sequential repetitions and 32 BO rounds.
-MJX reset keys vary by repetition and round but remain reproducible. The notebook
-records Yubo-style proposal, evaluation, tell, total-round, environment-step, and
-incumbent fields to `trace.jsonl`, then writes `y_best` mean plus or minus SEM,
-timing curves, a CUDA proposal breakdown, and the runtime fingerprint under
-`/content/ennx_mjx_runs`.
+For the Humanoid experiment, open
+[`examples/humanoid.ipynb`](https://colab.research.google.com/github/Kvutza/ennx/blob/main/examples/humanoid.ipynb).
+It searches a roughly 972,000-parameter BF16 JAX policy against batched MJX
+rewards. Its TOML cell defaults to ten sequential repetitions and 32 BO rounds.
+The notebook writes per-round measurements to `trace.jsonl`, plots `y_best` with
+SEM and timing, saves `summary.json`, and renders the best policy to
+`humanoid.mp4` under `/content/humanoid`.
 For a first T4 validation pass, set `ENNX_REPETITIONS=1` and `ENNX_ROUNDS=2`
 before running the experiment cell; the TOML defaults remain the benchmark
 settings.
-`ennx.experimental.Bf16Search` keeps acceptance, bounded history, TuRBO
+`ennx.experimental.turbo_enn` creates a `SearchState` that keeps acceptance,
+bounded history, TuRBO
 trust-region updates, hierarchical distance scoring, acquisition, selection,
 and selected rows CUDA-resident. The Python API leases a
 synchronized batch of pending rows directly to JAX through DLPack without
 CuPy or NumPy policy staging. No candidate-by-history distance matrix is
 materialized; tile blocks emit small FP32 partials that a second kernel reduces
 before acquisition. Contiguous JAX FP32 rewards and estimated variances return
-through `tell_batch` via DLPack; only the accepted flags and scalar public state
-cross back for experiment control and logging.
+through `tell` via DLPack. `tell` queues trust-region adaptation without a host
+readback; `sync` explicitly retrieves accepted flags and scalar public state
+when experiment logging needs them.
 The wheel is installed without dependency resolution so Colab's compatible
 NumPy, SciPy, and CUDA-enabled JAX stack remains unchanged. The MJX dependency
 install is also constrained to the numerical package versions supplied by the
