@@ -22,7 +22,11 @@ mod sparse;
 
 pub use bpann_history::{BpannHistory, IndexedObservation, ObservationId};
 pub(crate) use layout::{check_layout, make_steps, LeafStep};
-#[cfg(any(feature = "cuda", feature = "metal", feature = "opencl"))]
+#[cfg(any(
+    all(feature = "cuda", target_os = "linux", target_arch = "x86_64"),
+    all(feature = "metal", target_os = "macos"),
+    feature = "opencl"
+))]
 pub(crate) use layout::{make_tiles, Tile};
 pub use tree::Center;
 

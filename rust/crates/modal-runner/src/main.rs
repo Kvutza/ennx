@@ -7,7 +7,6 @@ use tempfile::NamedTempFile;
 const CUDA_IMAGE: &str = "im-tZRy6QPZXIJyPrv4zZqPOM";
 const CUDA_REV: &str = "1f4d813719012d384f2db12b88efc9314c8bf50c";
 const RUST_NIGHTLY: &str = "nightly-2026-04-03";
-const WHEEL_PATH: &str = "/tmp/ennx-wheel/ennx-0.1.6+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl";
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -164,6 +163,7 @@ fn source_tar() -> Result<NamedTempFile> {
 }
 
 fn wheel_cmd(mjx: bool) -> String {
+    let wheel = wheel_path();
     let mut command = format!(
         "set -euo pipefail; cd /opt/ennx; \
          rm -rf /tmp/ennx-wheel /tmp/ennx-wheel-env; \
@@ -179,8 +179,8 @@ fn wheel_cmd(mjx: bool) -> String {
          cat \"$PARITY\"; \
          ./buck2w --isolation-dir cuda build //:cuda-wheel \
          --target-platforms //:linux-x86_64-platform --local-only --num-threads 4 \
-         --out {WHEEL_PATH}; \
-         /tmp/ennx-wheel-env/bin/python -m pip install --quiet {WHEEL_PATH}; \
+         --out {wheel}; \
+         /tmp/ennx-wheel-env/bin/python -m pip install --quiet {wheel}; \
          /tmp/ennx-wheel-env/bin/python ops/cuda_sparse_bench.py; \
          /tmp/ennx-wheel-env/bin/python ops/bf16_bench.py",
     );
@@ -192,6 +192,13 @@ fn wheel_cmd(mjx: bool) -> String {
         );
     }
     command
+}
+
+fn wheel_path() -> String {
+    format!(
+        "/tmp/ennx-wheel/ennx-{}+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 async fn wheel_run(
@@ -248,7 +255,7 @@ async fn wheel_run(
         let artifact = sandbox
             .exec(
                 client,
-                SandboxExecOptions::new(vec!["cat", WHEEL_PATH]).with_timeout(120),
+                SandboxExecOptions::new(vec!["cat", &wheel_path()]).with_timeout(120),
             )
             .await?;
         if !artifact.exit_status.is_success() {

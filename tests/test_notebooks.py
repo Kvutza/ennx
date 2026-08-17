@@ -161,8 +161,8 @@ def test_colab():
 
     source = "\n".join(code)
     for required in (
-        "cuda-v0.1.0",
-        "ennx-0.1.0%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
+        "v0.1.1",
+        "ennx-0.1.1%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
         "@jax.jit",
         "PackedSearch",
         'device="cuda"',
@@ -206,8 +206,8 @@ def test_mjx_colab():
 
     source = "\n".join(code)
     for required in (
-        "cuda-v0.1.6",
-        "ennx-0.1.6%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
+        "v0.1.1",
+        "ennx-0.1.1%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
         "mujoco==3.6.0",
         "mujoco-mjx==3.6.0",
         "from mujoco import mjx",

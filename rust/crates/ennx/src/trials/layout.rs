@@ -1,6 +1,10 @@
 use super::Leaf;
 
-#[cfg(any(feature = "cuda", feature = "metal", feature = "opencl"))]
+#[cfg(any(
+    all(feature = "cuda", target_os = "linux", target_arch = "x86_64"),
+    all(feature = "metal", target_os = "macos"),
+    feature = "opencl"
+))]
 const TILE_ELEMENTS: usize = 65_536;
 
 pub(crate) fn check_layout(leaves: &[Leaf]) -> Result<usize, String> {
@@ -73,7 +77,11 @@ pub(crate) fn make_steps(leaves: &[Leaf], length: f32) -> Vec<LeafStep> {
         .collect()
 }
 
-#[cfg(any(feature = "cuda", feature = "metal", feature = "opencl"))]
+#[cfg(any(
+    all(feature = "cuda", target_os = "linux", target_arch = "x86_64"),
+    all(feature = "metal", target_os = "macos"),
+    feature = "opencl"
+))]
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Tile {
@@ -83,7 +91,11 @@ pub(crate) struct Tile {
     pub pad: u32,
 }
 
-#[cfg(any(feature = "cuda", feature = "metal", feature = "opencl"))]
+#[cfg(any(
+    all(feature = "cuda", target_os = "linux", target_arch = "x86_64"),
+    all(feature = "metal", target_os = "macos"),
+    feature = "opencl"
+))]
 pub(crate) fn make_tiles(leaves: &[Leaf]) -> Vec<Tile> {
     let mut tiles = Vec::new();
     for (leaf_index, leaf) in leaves.iter().enumerate() {

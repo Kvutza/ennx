@@ -51,8 +51,8 @@ def main() -> None:
         ]
         row_bytes = (257 + 1) // 2 + 259
         base = [(index * 37 + 11) & 0xFF for index in range(row_bytes)]
-        cpu = ResidentBoSession(base, -0.75, leaves, 4, backend="cpu")
-        cuda = ResidentBoSession(base, -0.75, leaves, 4, backend="cuda")
+        cpu = ResidentBoSession(base, -0.75, leaves, 4, device="cpu")
+        cuda = ResidentBoSession(base, -0.75, leaves, 4, device="cuda")
 
         rounds = [
             ([3, 17, 0xDEADBEEFCAFEBABE, (1 << 64) - 10], 1, 1.25, True),

@@ -4,7 +4,7 @@ def cuda_oxide(name, package, workspace, bpann, ennx, python, modal, cuda, parit
     native.genrule(
         name = wheel,
         srcs = [package, workspace, bpann, ennx, python, modal, cuda],
-        out = "ennx-0.1.6+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
+        out = "ennx-{}+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl".format(read_config("ennx", "release_version", "0.1.1")),
         cmd = " ".join([
             "set -euo pipefail;",
             "python3 --version | grep -q '^Python 3\\.12\\.';",
@@ -29,7 +29,7 @@ def cuda_oxide(name, package, workspace, bpann, ennx, python, modal, cuda, parit
             "$TMP/target/release/libennx_rust.so",
             "$TMP/wheel --root $ROOT;",
             "mkdir -p ${OUT_FILE%/*};",
-            "cp $TMP/wheel/ennx-0.1.6+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl $OUT_FILE",
+            "cp $TMP/wheel/ennx-{}+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl $OUT_FILE".format(read_config("ennx", "release_version", "0.1.1")),
         ]),
         target_compatible_with = [
             "prelude//cpu/constraints:x86_64",
