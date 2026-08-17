@@ -58,7 +58,8 @@ fn faiss_spec(driver: IndexDriver) -> &'static str {
         | IndexDriver::USearch
         | IndexDriver::BpAnnDisk
         | IndexDriver::Metal
-        | IndexDriver::OpenCl => {
+        | IndexDriver::OpenCl
+        | IndexDriver::Cuda => {
             panic!("non-Faiss driver must not be routed to FaissBackend")
         }
     }

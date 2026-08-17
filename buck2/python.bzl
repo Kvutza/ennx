@@ -11,16 +11,21 @@ _PYTHON_CONFIGS = {
         environment = "ennx",
         extension_infix = "313",
     ),
+    "3.14": struct(
+        abi = "cp314",
+        environment = "ennx-py314",
+        extension_infix = "314",
+    ),
 }
 
 if PYTHON_VERSION not in _PYTHON_CONFIGS:
-    fail("ennx.python_version must be 3.12 or 3.13, got {}".format(PYTHON_VERSION))
+    fail("ennx.python_version must be 3.12 through 3.14, got {}".format(PYTHON_VERSION))
 
 _PYTHON = _PYTHON_CONFIGS[PYTHON_VERSION]
 
 PYTHON_ABI = _PYTHON.abi
 PYTHON_ENVIRONMENT = _PYTHON.environment
-PYTHON_REQUIRES = ">=3.12,<3.14"
+PYTHON_REQUIRES = ">=3.12,<3.15"
 
 def python_extension_suffix(platform):
     if platform == "linux-aarch64":

@@ -34,6 +34,8 @@ Optimizer = _ext.optimizer.Optimizer
 Telemetry = _ext.optimizer.Telemetry
 MultiTrustRegion = _ext.optimizer.MultiTrustRegion
 WeightSearch = _ext.optimizer.WeightSearch
+TurboSearch = _ext.optimizer.TurboSearch
+TurboTrial = _ext.optimizer.TurboTrial
 BpannHistory = _ext.optimizer.BpannHistory
 create_optimizer = _ext.optimizer.create_optimizer
 create_optimizer_enn = _ext.optimizer.create_optimizer_enn
@@ -44,6 +46,10 @@ dense_apply = _ext.optimizer.dense_apply
 dense_dist2 = _ext.optimizer.dense_dist2
 dense_linear = _ext.optimizer.dense_linear
 DenseLinear = _ext.optimizer.DenseLinear
+Bf16Tree = getattr(_ext.optimizer, "Bf16Tree", None)
+Bf16Search = getattr(_ext.optimizer, "Bf16Search", None)
+Bf16Trial = getattr(_ext.optimizer, "Bf16Trial", None)
+Bf16View = getattr(_ext.optimizer, "Bf16View", None)
 weight_int4_select_ucb = _ext.optimizer.weight_int4_select_ucb
 weight_select_ucb = _ext.optimizer.weight_select_ucb
 ModelPackage = _ext.experimental.ModelPackage
@@ -53,6 +59,10 @@ ResidentBoSession = _ext.experimental.ResidentBoSession
 
 __all__ = [
     "BpannHistory",
+    "Bf16Tree",
+    "Bf16Search",
+    "Bf16Trial",
+    "Bf16View",
     "DenseLinear",
     "ENNParams",
     "ENNStatefulFitter",
@@ -63,6 +73,8 @@ __all__ = [
     "Optimizer",
     "ResidentBoSession",
     "Telemetry",
+    "TurboSearch",
+    "TurboTrial",
     "WeightSearch",
     "arms_from_pareto_fronts",
     "calculate_sobol_indices",

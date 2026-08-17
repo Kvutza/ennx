@@ -364,7 +364,7 @@ fn kiss_posterior_batch_units_are_linked() {
     let mut se_all = Array3::zeros((2, 1, 1));
     let mut se_epi_all = Array3::zeros((2, 1, 1));
     let mut se_ale_all = Array3::zeros((2, 1, 1));
-    compute_batch_with_shared_neighbors(
+    super::batch::shared_batch(
         &model,
         &query.view(),
         &paramss,
@@ -382,7 +382,7 @@ fn kiss_posterior_batch_units_are_linked() {
     let mut se2 = Array3::zeros((2, 1, 1));
     let mut se_epi2 = Array3::zeros((2, 1, 1));
     let mut se_ale2 = Array3::zeros((2, 1, 1));
-    compute_batch_separate_neighbors(
+    super::batch::separate_batch(
         &model,
         &query.view(),
         &mixed,
@@ -394,8 +394,8 @@ fn kiss_posterior_batch_units_are_linked() {
     )
     .unwrap();
     let _ = (
-        compute_batch_with_shared_neighbors,
-        compute_batch_separate_neighbors,
+        super::batch::shared_batch,
+        super::batch::separate_batch,
         EpistemicNearestNeighbors::conditional_posterior_function_draw,
     );
 }

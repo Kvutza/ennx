@@ -5,6 +5,8 @@
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub use crate::apple_gpu::{device_info as apple_gpu_info, DeviceInfo as AppleGpuInfo};
+#[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+pub use crate::bf16_search::{Bf16Block, Bf16Search, Bf16Trial};
 pub use crate::dense::{
     apply as apply_dense, dist2 as dense_dist2, linear as dense_linear,
     tensor_key as dense_tensor_key, Bf16Tree, DenseLeaf, DenseLinear, DenseResult, DenseTerm,
@@ -32,6 +34,7 @@ pub use crate::trials::{
     Ask as WeightAsk, BpannHistory, Center as WeightCenter, EncodingType, IndexedObservation,
     Leaf as WeightLeaf, ObservationId, Search as WeightSearch, Trial as WeightTrial,
 };
+pub use crate::turbo_search::{TurboSearch, TurboTrial};
 pub use crate::weights::{
     apply_sparse, blocks_for_words, draw_sparse, merge_values, missing_words, select_weights,
     sparse_union, sparse_xor, take_words, AcquisitionKind, ComputeBackend, WeightBlock,

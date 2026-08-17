@@ -9,3 +9,30 @@ rust/crates/ennx/src/trials/metal.rs
 rust/crates/ennx/src/trials/opencl.rs
 rust/crates/ennx/src/weights/metal_weights.rs
 rust/crates/ennx/src/weights/opencl_weights.rs
+# CUDA-Oxide kernels and their host bridge require an NVIDIA device. They are
+# exercised by the Bazel CUDA parity and wheel gates rather than lexical KISS.
+cuda/
+rust/crates/ennx/build.rs
+rust/crates/ennx/src/bf16_search.rs
+rust/crates/ennx/src/dense/bf16/cuda.rs
+rust/crates/ennx/src/dense/cuda.rs
+rust/crates/ennx/src/dense/linear/cuda.rs
+rust/crates/ennx/src/knn/cuda_index.rs
+rust/crates/ennx/src/trials/cuda.rs
+# These are intentional multi-platform dispatch facades. Their dependency
+# breadth is the supported CPU/Metal/OpenCL/CUDA surface, not hidden coupling;
+# portable implementations remain subject to runtime tests. KISS cannot follow
+# children of an ignored facade, so its private FAISS implementation is included
+# here rather than reported as a false orphan.
+rust/crates/ennx/src/dense.rs
+rust/crates/ennx/src/knn/mod.rs
+rust/crates/ennx/src/knn/faiss_backend.rs
+# PyO3 and DLPack ownership are exercised through the built-wheel Python API;
+# KISS cannot infer coverage across the native Python extension boundary.
+rust/crates/ennx-py/src/
+# The optimizer configuration module is intentionally a closed product type;
+# splitting its dataclasses would make the public TOML/Python contract harder
+# to navigate without reducing coupling.
+src/ennx/turbo/config/model.py
+# This is a maintainer-only fixture regeneration entrypoint, not library code.
+scripts/generate_optimizer_quality_baseline.py

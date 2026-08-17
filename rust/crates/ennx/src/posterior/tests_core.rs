@@ -257,29 +257,29 @@ fn test_get_neighbor_data_exclude_nearest() {
 // Tests for helper functions to achieve 100% coverage
 
 #[test]
-fn test_compute_batch_with_shared_neighbors_direct() {
+fn shared_batch() {
     let model = create_test_model();
     let params1 = ENNParams::new(2, 1.0, 0.1).unwrap();
     let params2 = ENNParams::new(2, 2.0, 0.2).unwrap();
     let paramss = vec![params1, params2];
     assert_batch_neighbor_fill(&model, paramss, |m, q, p, f, mu, se, se_epi, se_ale| {
-        compute_batch_with_shared_neighbors(m, q, p, f, mu, se, se_epi, se_ale)
+        super::batch::shared_batch(m, q, p, f, mu, se, se_epi, se_ale)
     });
 }
 
 #[test]
-fn test_compute_batch_separate_neighbors_direct() {
+fn separate_batch() {
     let model = create_test_model();
     let params1 = ENNParams::new(2, 1.0, 0.1).unwrap();
     let params2 = ENNParams::new(3, 2.0, 0.2).unwrap(); // Different k values
     let paramss = vec![params1, params2];
     assert_batch_neighbor_fill(&model, paramss, |m, q, p, f, mu, se, se_epi, se_ale| {
-        compute_batch_separate_neighbors(m, q, p, f, mu, se, se_epi, se_ale)
+        super::batch::separate_batch(m, q, p, f, mu, se, se_epi, se_ale)
     });
 }
 
 #[test]
-fn test_assign_posterior_results_direct() {
+fn assign_result() {
     let model = create_test_model();
     let params = ENNParams::new(2, 1.0, 0.1).unwrap();
     let flags = PosteriorFlags::new();
@@ -293,7 +293,7 @@ fn test_assign_posterior_results_direct() {
     let mut se_ale_all = Array3::zeros((3, 1, 1));
 
     // Test assigning to different indices
-    assign_posterior_results(
+    super::batch::assign_result(
         &internals,
         &mut mu_all,
         &mut se_all,
@@ -301,7 +301,7 @@ fn test_assign_posterior_results_direct() {
         &mut se_ale_all,
         0,
     );
-    assign_posterior_results(
+    super::batch::assign_result(
         &internals,
         &mut mu_all,
         &mut se_all,
@@ -309,7 +309,7 @@ fn test_assign_posterior_results_direct() {
         &mut se_ale_all,
         1,
     );
-    assign_posterior_results(
+    super::batch::assign_result(
         &internals,
         &mut mu_all,
         &mut se_all,

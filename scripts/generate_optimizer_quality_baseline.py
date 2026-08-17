@@ -10,14 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
-from ennx import create_optimizer
-from ennx.turbo.config import (
+from ennx import create_optimizer  # noqa: E402
+from ennx.turbo.config import (  # noqa: E402
     AcqType,
     ENNFitConfig,
     ENNSurrogateConfig,
     turbo_enn_config,
 )
-from scripts.optimizer_quality_common import run_best_y
+from scripts.optimizer_quality_common import run_best_y  # noqa: E402
 
 CI_DIMS = (2, 8)
 CI_SEEDS = tuple(range(5))

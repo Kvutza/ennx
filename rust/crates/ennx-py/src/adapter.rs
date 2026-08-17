@@ -63,23 +63,23 @@ impl PythonSurrogateAdapter {
         y: &Array2<f64>,
         yvar: Option<&Array2<f64>>,
     ) -> Result<(), ENNError> {
-        let lengthscales = Python::with_gil(|py| -> PyResult<Option<Array1<f64>>> {
-            let x_py = x.to_owned().into_pyarray_bound(py);
-            let y_py = y.to_owned().into_pyarray_bound(py);
+        let lengthscales = Python::attach(|py| -> PyResult<Option<Array1<f64>>> {
+            let x_py = x.to_owned().into_pyarray(py);
+            let y_py = y.to_owned().into_pyarray(py);
             let yvar_py = match yvar {
-                Some(values) => values.to_owned().into_pyarray_bound(py).into_any().unbind(),
+                Some(values) => values.to_owned().into_pyarray(py).into_any().unbind(),
                 None => py.None(),
             };
-            let kwargs = PyDict::new_bound(py);
+            let kwargs = PyDict::new(py);
             kwargs.set_item("steps", self.num_steps)?;
             let result =
                 self.provider
                     .bind(py)
                     .call_method("fit", (x_py, y_py, yvar_py), Some(&kwargs))?;
-            result
+            Ok(result
                 .getattr("lengthscales")?
                 .extract::<Option<PyReadonlyArray1<'_, f64>>>()
-                .map(|array| array.map(|values| values.as_array().to_owned()))
+                .map(|array| array.map(|values| values.as_array().to_owned()))?)
         })
         .map_err(surrogate_error)?;
         if let Some(values) = lengthscales.as_ref() {
@@ -182,8 +182,8 @@ impl Surrogate for PythonSurrogateAdapter {
     }
 
     fn predict(&self, x: &ArrayView2<f64>) -> Result<SurrogatePrediction, ENNError> {
-        let pred = Python::with_gil(|py| -> PyResult<SurrogatePrediction> {
-            let x_py = x.to_owned().into_pyarray_bound(py);
+        let pred = Python::attach(|py| -> PyResult<SurrogatePrediction> {
+            let x_py = x.to_owned().into_pyarray(py);
             let result = self.provider.bind(py).call_method1("predict", (x_py,))?;
             let mu = result
                 .getattr("mu")?
@@ -224,13 +224,14 @@ impl Surrogate for PythonSurrogateAdapter {
         rng: &mut dyn RngCore,
     ) -> Result<Array3<f64>, ENNError> {
         let seed = rng.next_u64() & ((1_u64 << 63) - 1);
-        let samples = Python::with_gil(|py| -> PyResult<Array3<f64>> {
-            let x_py = x.to_owned().into_pyarray_bound(py);
-            self.provider
+        let samples = Python::attach(|py| -> PyResult<Array3<f64>> {
+            let x_py = x.to_owned().into_pyarray(py);
+            Ok(self
+                .provider
                 .bind(py)
                 .call_method1("draw", (x_py, num_samples, seed))?
                 .extract::<numpy::PyReadonlyArray3<'_, f64>>()
-                .map(|samples| samples.as_array().to_owned())
+                .map(|samples| samples.as_array().to_owned())?)
         })
         .map_err(surrogate_error)?;
         let shape = [num_samples, x.nrows(), self.y_obs.ncols()];

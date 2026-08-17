@@ -28,7 +28,7 @@ pub(crate) fn idx_nested_to_array2(idx: &[Vec<usize>]) -> Array2<i64> {
     out
 }
 
-fn neighbor_search_k(
+pub(super) fn search_k(
     model: &EpistemicNearestNeighbors,
     params: &ENNParams,
     exclude_nearest: bool,
@@ -170,7 +170,7 @@ pub(crate) fn compute_posterior_light(
         ));
     }
 
-    let search_k = neighbor_search_k(model, params, flags.exclude_nearest)?;
+    let search_k = search_k(model, params, flags.exclude_nearest)?;
     if search_k == 0 {
         let internals = empty_posterior_internals(model, batch_size);
         return Ok((
@@ -181,17 +181,6 @@ pub(crate) fn compute_posterior_light(
             idx_nested_to_array2(&internals.idx),
         ));
     }
-
-    let (dist2s_full, idx_full) = {
-        let _span = crate::tracy::zone(tracy_client::span_location!("posterior.neighbors"));
-        index_search(
-            model,
-            x,
-            search_k as i32,
-            flags.exclude_nearest,
-            flags.tie_break_neighbors,
-        )?
-    };
 
     let available_k = if flags.exclude_nearest {
         search_k.saturating_sub(1)
@@ -209,6 +198,38 @@ pub(crate) fn compute_posterior_light(
             idx_nested_to_array2(&internals.idx),
         ));
     }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    if model.backend_driver() == crate::index::IndexDriver::Cuda && !x.is_empty() {
+        model.ensure_index_sync()?;
+        if let (Some(index), Some(train_y)) =
+            (model.backend.in_memory_index(), model.train_y_view_opt())
+        {
+            return index
+                .cuda_posterior(
+                    x,
+                    &train_y,
+                    &model.y_scale().view(),
+                    search_k,
+                    k,
+                    usize::from(flags.exclude_nearest),
+                    params.epistemic_variance_scale,
+                    params.aleatoric_variance_scale,
+                )
+                .map_err(|error| ENNError::InvalidParameter(error.to_string()));
+        }
+    }
+
+    let (dist2s_full, idx_full) = {
+        let _span = crate::tracy::zone(tracy_client::span_location!("posterior.neighbors"));
+        index_search(
+            model,
+            x,
+            search_k as i32,
+            flags.exclude_nearest,
+            flags.tie_break_neighbors,
+        )?
+    };
 
     let dist2s = dist2s_full.slice_axis(Axis(1), ndarray::Slice::from(..k));
     let idx = idx_full.slice_axis(Axis(1), ndarray::Slice::from(..k));
@@ -273,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn test_neighbor_search_k_exclude_nearest_requires_two_observations() {
+    fn search_rules() {
         let model = EpistemicNearestNeighbors::new(
             array![[0.0, 0.0]],
             array![[1.0]],
@@ -283,8 +304,8 @@ mod tests {
         )
         .unwrap();
         let params = ENNParams::new(1, 1.0, 0.1).unwrap();
-        assert!(neighbor_search_k(&model, &params, true).is_err());
-        assert_eq!(neighbor_search_k(&model, &params, false).unwrap(), 1);
+        assert!(search_k(&model, &params, true).is_err());
+        assert_eq!(search_k(&model, &params, false).unwrap(), 1);
     }
 
     #[test]

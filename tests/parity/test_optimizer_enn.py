@@ -44,9 +44,7 @@ def test_optimizer_enn_ask_tell_state():
 
     bounds = np.array([[0.0, 1.0], [0.0, 1.0]], dtype=float)
     config = _enn_config(num_init=4)
-    assert_tr_cycles(
-        bounds, config, opt_seed=11, cycle_rng_seed=11, obj_fn=_obj
-    )
+    assert_tr_cycles(bounds, config, opt_seed=11, cycle_rng_seed=11, obj_fn=_obj)
 
 
 def test_optimizer_enn_convergence_tolerance():

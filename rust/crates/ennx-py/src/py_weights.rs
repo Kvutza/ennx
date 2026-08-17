@@ -2,15 +2,120 @@ use ennx::experimental::{
     apply_dense, apply_sparse, blocks_for_words, dense_dist2, dense_linear, draw_sparse,
     merge_values, missing_words, select_weights, sparse_union, sparse_xor, take_words,
     AcquisitionKind, BpannHistory, ComputeBackend, DenseLeaf, DenseLinear, DenseTerm, DenseView,
-    WeightAsk, WeightBlock, WeightLeaf, WeightSearch, WeightSelectConfig, WeightTrial,
+    TurboSearch, TurboTrial as CoreTrial, WeightAsk, WeightBlock, WeightLeaf, WeightSearch,
+    WeightSelectConfig, WeightTrial,
 };
-use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1, PyReadonlyArray2};
+use ennx::TRLengthConfig;
+use numpy::{
+    Element, IntoPyArray, PyArray1, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods,
+};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+type PyObject = Py<PyAny>;
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use std::sync::Arc;
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use ennx::experimental::Bf16Tree;
+
 fn err(error: String) -> PyErr {
     PyValueError::new_err(error)
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+#[pyclass(name = "Bf16Tree", unsendable)]
+pub struct PyBf16Tree {
+    inner: Bf16Tree,
+    exported: Arc<AtomicBool>,
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+#[pymethods]
+impl PyBf16Tree {
+    #[new]
+    fn new(base: &Bound<'_, PyAny>, leaves: Vec<(u64, usize, usize, f32)>) -> PyResult<Self> {
+        let input = crate::dlpack::Input::new(base)?;
+        let leaves = dense_leaves(leaves)?;
+        Ok(Self {
+            inner: unsafe { Bf16Tree::from_device(input.pointer, input.len, leaves) }
+                .map_err(err)?,
+            exported: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    fn materialize(&mut self, terms: Vec<(u64, f32)>) -> PyResult<()> {
+        if self.exported.load(Ordering::Acquire) {
+            return Err(PyValueError::new_err(
+                "cannot materialize while a JAX candidate is alive",
+            ));
+        }
+        self.inner.materialize(&dense_terms(terms)?).map_err(err)
+    }
+
+    fn __dlpack_device__(&self) -> (i32, i32) {
+        (2, 0)
+    }
+
+    #[pyo3(signature=(stream=None,max_version=None,dl_device=None,copy=None))]
+    fn __dlpack__(
+        slf: PyRef<'_, Self>,
+        stream: Option<i64>,
+        max_version: Option<(u32, u32)>,
+        dl_device: Option<(i32, i32)>,
+        copy: Option<bool>,
+    ) -> PyResult<PyObject> {
+        if copy == Some(true) {
+            return Err(pyo3::exceptions::PyBufferError::new_err(
+                "Bf16Tree does not export copies",
+            ));
+        }
+        if dl_device.is_some_and(|device| device != (2, 0)) {
+            return Err(pyo3::exceptions::PyBufferError::new_err(
+                "Bf16Tree cannot export to another device",
+            ));
+        }
+        if stream.is_some_and(|value| value == 0 || value < -1) {
+            return Err(PyValueError::new_err("invalid DLPack CUDA stream"));
+        }
+        if slf
+            .exported
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(PyValueError::new_err(
+                "the current BF16 candidate is already exported",
+            ));
+        }
+        let py = slf.py();
+        let (pointer, _, _) = match slf.inner.device_ptr(stream) {
+            Ok(value) => value,
+            Err(error) => {
+                slf.exported.store(false, Ordering::Release);
+                return Err(err(error));
+            }
+        };
+        let len = slf.inner.len();
+        let lease = Arc::clone(&slf.exported);
+        let owner = slf.into_py(py);
+        match crate::dlpack::export(py, owner, Arc::clone(&lease), pointer, len, max_version) {
+            Ok(capsule) => Ok(capsule),
+            Err(error) => {
+                lease.store(false, Ordering::Release);
+                Err(error)
+            }
+        }
+    }
+
+    #[getter]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
 }
 
 fn array1_vec<T: Copy + Element>(array: PyReadonlyArray1<'_, T>) -> Vec<T> {
@@ -103,7 +208,7 @@ pub fn dense_apply_py<'py>(
         ComputeBackend::parse(backend).map_err(err)?,
     )
     .map_err(err)?;
-    Ok((result.values.into_pyarray_bound(py), result.changed))
+    Ok((result.values.into_pyarray(py), result.changed))
 }
 
 #[pyfunction(name = "dense_dist2")]
@@ -146,7 +251,7 @@ pub fn dense_linear_py<'py>(
         &dense_terms(terms)?,
         ComputeBackend::parse(backend).map_err(err)?,
     )
-    .map(|values| values.into_pyarray_bound(py))
+    .map(|values| values.into_pyarray(py))
     .map_err(err)
 }
 
@@ -189,7 +294,7 @@ impl PyDenseLinear {
     ) -> PyResult<Bound<'py, PyArray1<f32>>> {
         self.inner
             .eval(&array1_vec(input), &dense_terms(terms)?)
-            .map(|values| values.into_pyarray_bound(py))
+            .map(|values| values.into_pyarray(py))
             .map_err(err)
     }
 
@@ -308,7 +413,15 @@ impl PyWeightSearch {
         let trial = self
             .pending
             .ok_or_else(|| PyValueError::new_err("there is no pending trial"))?;
-        Ok(self.inner.row(trial).map_err(err)?.into_pyarray_bound(py))
+        Ok(self.inner.row(trial).map_err(err)?.into_pyarray(py))
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    fn device_row(&self) -> PyResult<(u64, usize, usize)> {
+        let trial = self
+            .pending
+            .ok_or_else(|| PyValueError::new_err("there is no pending trial"))?;
+        self.inner.device_row(trial).map_err(err)
     }
 
     #[cfg(all(target_os = "macos", feature = "metal"))]
@@ -359,6 +472,256 @@ impl PyWeightSearch {
     #[getter]
     fn row_bytes(&self) -> usize {
         self.inner.row_bytes()
+    }
+}
+
+#[pyclass(name = "TurboSearch", unsendable)]
+pub struct PyTurboSearch {
+    inner: TurboSearch,
+    pending: Vec<CoreTrial>,
+}
+
+#[pyclass(name = "TurboTrial", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct PyTurboTrial {
+    inner: CoreTrial,
+}
+
+#[pymethods]
+impl PyTurboTrial {
+    #[getter]
+    fn index(&self) -> usize {
+        self.inner.index
+    }
+
+    #[getter]
+    fn seed(&self) -> u64 {
+        self.inner.seed
+    }
+
+    #[getter]
+    fn score(&self) -> f32 {
+        self.inner.score
+    }
+
+    #[getter]
+    fn length(&self) -> f32 {
+        self.inner.length
+    }
+
+    #[getter]
+    fn probability(&self) -> f32 {
+        self.inner.probability
+    }
+}
+
+#[pymethods]
+impl PyTurboSearch {
+    #[new]
+    #[pyo3(signature=(base,base_value,leaves,capacity,backend="auto",num_pert=20,length_init=0.8,length_min=0.0078125,length_max=1.6,max_pending=1))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        base: PyReadonlyArray1<'_, u8>,
+        base_value: f32,
+        leaves: Vec<(usize, usize, u8, f32, f32, f32)>,
+        capacity: usize,
+        backend: &str,
+        num_pert: usize,
+        length_init: f64,
+        length_min: f64,
+        length_max: f64,
+        max_pending: usize,
+    ) -> PyResult<Self> {
+        let backend = ComputeBackend::parse(backend).map_err(err)?;
+        Ok(Self {
+            inner: TurboSearch::new_batch(
+                &array1_vec(base),
+                base_value,
+                trial_leaves(leaves)?,
+                capacity,
+                backend,
+                num_pert,
+                TRLengthConfig::new(length_init, length_min, length_max),
+                max_pending,
+            )
+            .map_err(err)?,
+            pending: Vec::with_capacity(max_pending),
+        })
+    }
+
+    #[pyo3(signature=(seeds,neighbors,epistemic_scale=0.7,aleatoric_scale=0.05,y_scale=1.0,beta=1.0,acquisition="ucb",seed=0))]
+    #[allow(clippy::too_many_arguments)]
+    fn ask(
+        &mut self,
+        seeds: PyReadonlyArray1<'_, u64>,
+        neighbors: usize,
+        epistemic_scale: f32,
+        aleatoric_scale: f32,
+        y_scale: f32,
+        beta: f32,
+        acquisition: &str,
+        seed: u64,
+    ) -> PyResult<(usize, u64, f32, f32, f32)> {
+        let trial = self
+            .inner
+            .ask(
+                &array1_vec(seeds),
+                WeightAsk {
+                    length: 0.0,
+                    neighbors,
+                    epistemic_scale,
+                    aleatoric_scale,
+                    y_scale,
+                    beta,
+                    acquisition: AcquisitionKind::parse(acquisition).map_err(err)?,
+                    seed,
+                },
+            )
+            .map_err(err)?;
+        self.pending.push(trial);
+        Ok((
+            trial.index,
+            trial.seed,
+            trial.score,
+            trial.length,
+            trial.probability,
+        ))
+    }
+
+    #[pyo3(signature=(seeds,neighbors,epistemic_scale=0.7,aleatoric_scale=0.05,y_scale=1.0,beta=1.0,acquisition="ucb",seed=0))]
+    #[allow(clippy::too_many_arguments)]
+    fn ask_batch(
+        &mut self,
+        seeds: PyReadonlyArray2<'_, u64>,
+        neighbors: usize,
+        epistemic_scale: f32,
+        aleatoric_scale: f32,
+        y_scale: f32,
+        beta: f32,
+        acquisition: &str,
+        seed: u64,
+    ) -> PyResult<Vec<PyTurboTrial>> {
+        let shape = seeds.shape();
+        let arms = shape[0];
+        let trials = self
+            .inner
+            .ask_batch(
+                &array2_vec(&seeds),
+                arms,
+                WeightAsk {
+                    length: 0.0,
+                    neighbors,
+                    epistemic_scale,
+                    aleatoric_scale,
+                    y_scale,
+                    beta,
+                    acquisition: AcquisitionKind::parse(acquisition).map_err(err)?,
+                    seed,
+                },
+            )
+            .map_err(err)?;
+        self.pending.extend(trials.iter().copied());
+        Ok(trials
+            .into_iter()
+            .map(|inner| PyTurboTrial { inner })
+            .collect())
+    }
+
+    fn row<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<u8>>> {
+        let trial = self.only_pending()?;
+        Ok(self.inner.row(trial).map_err(err)?.into_pyarray(py))
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    fn device_row(&self) -> PyResult<(u64, usize, usize)> {
+        let trial = self.only_pending()?;
+        self.inner.device_row(trial).map_err(err)
+    }
+
+    fn row_trial<'py>(
+        &self,
+        py: Python<'py>,
+        trial: PyRef<'_, PyTurboTrial>,
+    ) -> PyResult<Bound<'py, PyArray1<u8>>> {
+        Ok(self.inner.row(trial.inner).map_err(err)?.into_pyarray(py))
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    fn device_trial(&self, trial: PyRef<'_, PyTurboTrial>) -> PyResult<(u64, usize, usize)> {
+        self.inner.device_row(trial.inner).map_err(err)
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    fn device_batch(
+        &self,
+        trials: Vec<PyRef<'_, PyTurboTrial>>,
+    ) -> PyResult<Vec<(u64, usize, usize)>> {
+        let inner = trials.iter().map(|trial| trial.inner).collect::<Vec<_>>();
+        self.inner.device_batch(&inner).map_err(err)
+    }
+
+    fn tell(&mut self, value: f32) -> PyResult<bool> {
+        let trial = self.only_pending()?;
+        let accepted = self.inner.tell(trial, value).map_err(err)?;
+        self.pending.clear();
+        Ok(accepted)
+    }
+
+    fn tell_trial(&mut self, trial: PyRef<'_, PyTurboTrial>, value: f32) -> PyResult<bool> {
+        let accepted = self.inner.tell(trial.inner, value).map_err(err)?;
+        self.pending.retain(|candidate| *candidate != trial.inner);
+        Ok(accepted)
+    }
+
+    fn tell_batch(
+        &mut self,
+        trials: Vec<PyRef<'_, PyTurboTrial>>,
+        values: PyReadonlyArray1<'_, f32>,
+    ) -> PyResult<Vec<bool>> {
+        let inner = trials.iter().map(|trial| trial.inner).collect::<Vec<_>>();
+        let accepted = self
+            .inner
+            .tell_batch(&inner, &array1_vec(values))
+            .map_err(err)?;
+        self.pending.retain(|candidate| !inner.contains(candidate));
+        Ok(accepted)
+    }
+
+    #[getter]
+    fn length(&self) -> f64 {
+        self.inner.length()
+    }
+
+    #[getter]
+    fn probability(&self) -> f64 {
+        self.inner.probability()
+    }
+
+    #[getter]
+    fn best(&self) -> f32 {
+        self.inner.best()
+    }
+
+    #[getter]
+    fn restarts(&self) -> usize {
+        self.inner.restarts()
+    }
+
+    #[getter]
+    fn history_len(&self) -> usize {
+        self.inner.history_len()
+    }
+}
+
+impl PyTurboSearch {
+    fn only_pending(&self) -> PyResult<CoreTrial> {
+        match self.pending.as_slice() {
+            [trial] => Ok(*trial),
+            [] => Err(PyValueError::new_err("there is no pending trial")),
+            _ => Err(PyValueError::new_err(
+                "multiple trials are outstanding; use the trial-specific method",
+            )),
+        }
     }
 }
 
@@ -478,7 +841,7 @@ fn weight_ucb<'py>(
     let row_bytes = candidates.as_array().ncols();
     let start = result.index * row_bytes;
     let selected = candidate_bytes[start..start + row_bytes].to_vec();
-    Ok((selected.into_pyarray_bound(py), result.index, result.score))
+    Ok((selected.into_pyarray(py), result.index, result.score))
 }
 
 #[pyfunction(name = "weight_int4_select_ucb")]
@@ -548,7 +911,7 @@ pub fn sparse_union_py<'py>(
 ) -> PyResult<Bound<'py, PyArray1<u32>>> {
     let owned: Vec<Vec<u32>> = rows.into_iter().map(array1_vec).collect();
     let refs: Vec<&[u32]> = owned.iter().map(Vec::as_slice).collect();
-    Ok(sparse_union(&refs).into_pyarray_bound(py))
+    Ok(sparse_union(&refs).into_pyarray(py))
 }
 
 #[pyfunction(name = "sparse_xor")]
@@ -566,7 +929,7 @@ pub fn sparse_xor_py<'py>(
         &array1_vec(right_masks),
     )
     .map_err(err)?;
-    Ok((words.into_pyarray_bound(py), masks.into_pyarray_bound(py)))
+    Ok((words.into_pyarray(py), masks.into_pyarray(py)))
 }
 
 #[pyfunction(name = "sparse_missing")]
@@ -575,7 +938,7 @@ pub fn sparse_missing_py<'py>(
     cached: PyReadonlyArray1<'_, u32>,
     query: PyReadonlyArray1<'_, u32>,
 ) -> PyResult<Bound<'py, PyArray1<u32>>> {
-    Ok(missing_words(&array1_vec(cached), &array1_vec(query)).into_pyarray_bound(py))
+    Ok(missing_words(&array1_vec(cached), &array1_vec(query)).into_pyarray(py))
 }
 
 #[pyfunction(name = "sparse_merge")]
@@ -593,7 +956,7 @@ pub fn sparse_merge_py<'py>(
         &array1_vec(extra_values),
     )
     .map_err(err)?;
-    Ok((words.into_pyarray_bound(py), values.into_pyarray_bound(py)))
+    Ok((words.into_pyarray(py), values.into_pyarray(py)))
 }
 
 #[pyfunction(name = "sparse_take")]
@@ -606,7 +969,7 @@ pub fn sparse_take_py<'py>(
     Ok(
         take_words(&array1_vec(words), &array1_vec(values), &array1_vec(query))
             .map_err(err)?
-            .into_pyarray_bound(py),
+            .into_pyarray(py),
     )
 }
 
@@ -625,7 +988,7 @@ pub fn sparse_apply_py<'py>(
         &array1_vec(move_masks),
     )
     .map_err(err)?
-    .into_pyarray_bound(py))
+    .into_pyarray(py))
 }
 
 #[pyfunction(name = "sparse_blocks")]
@@ -666,11 +1029,11 @@ pub fn sparse_draw_py<'py>(
         seed,
     )
     .map_err(err)?;
-    let word_rows = PyList::empty_bound(py);
-    let mask_rows = PyList::empty_bound(py);
+    let word_rows = PyList::empty(py);
+    let mask_rows = PyList::empty(py);
     for (words, masks) in rows {
-        word_rows.append(words.into_pyarray_bound(py))?;
-        mask_rows.append(masks.into_pyarray_bound(py))?;
+        word_rows.append(words.into_pyarray(py))?;
+        mask_rows.append(masks.into_pyarray(py))?;
     }
     Ok((word_rows, mask_rows))
 }

@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.benchmark_dt_sel import run_benchmark
+from scripts.benchmark_dt_sel import run_benchmark  # noqa: E402
 
 
 def assert_ci_speed_gate() -> None:

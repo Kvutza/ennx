@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.optimizer_quality_common import run_best_y
+from scripts.optimizer_quality_common import run_best_y  # noqa: E402
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 

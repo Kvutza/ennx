@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::knn::KnnBackend;
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use crate::knn::{CudaParam, KnnBatch, KnnPosterior};
 
 #[derive(Error, Debug, Clone, PartialEq)]
 pub enum IndexError {
@@ -32,6 +34,9 @@ pub enum IndexDriver {
     /// OpenCL backend for native quantized-weight paths.
     #[serde(rename = "opencl")]
     OpenCl,
+    /// NVIDIA CUDA exact index implemented with CUDA-Oxide.
+    #[serde(rename = "cuda")]
+    Cuda,
 }
 
 pub fn is_disk_index_driver(driver: IndexDriver) -> bool {
@@ -152,6 +157,258 @@ impl ENNIndex {
         }
 
         Ok((dist2s, indices))
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cuda_posterior(
+        &self,
+        x: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        scales: &ndarray::ArrayView1<f64>,
+        input_k: usize,
+        used_k: usize,
+        skip: usize,
+        epistemic_scale: f64,
+        aleatoric_scale: f64,
+    ) -> Result<KnnPosterior, IndexError> {
+        if x.ncols() != self.num_dim {
+            return Err(IndexError::InvalidShape {
+                expected: self.num_dim,
+                got: x.ncols(),
+            });
+        }
+        let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
+        let x_scaled: Array2<f64> = if self.scale_x {
+            x / &x_scale.view().insert_axis(Axis(0))
+        } else {
+            x.to_owned()
+        };
+        self.inner.cuda_posterior(
+            &x_scaled.view(),
+            outcomes,
+            scales,
+            input_k,
+            used_k,
+            skip,
+            epistemic_scale,
+            aleatoric_scale,
+        )
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cuda_weighted(
+        &self,
+        x: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        variances: Option<&ArrayView2<f64>>,
+        scales: &ndarray::ArrayView1<f64>,
+        input_k: usize,
+        used_k: usize,
+        skip: usize,
+        epistemic_scale: f64,
+        aleatoric_scale: f64,
+        observation_noise: bool,
+    ) -> Result<crate::draw::DrawInternals, IndexError> {
+        if x.ncols() != self.num_dim {
+            return Err(IndexError::InvalidShape {
+                expected: self.num_dim,
+                got: x.ncols(),
+            });
+        }
+        let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
+        let x_scaled: Array2<f64> = if self.scale_x {
+            x / &x_scale.view().insert_axis(Axis(0))
+        } else {
+            x.to_owned()
+        };
+        self.inner.cuda_weighted(
+            &x_scaled.view(),
+            outcomes,
+            variances,
+            scales,
+            input_k,
+            used_k,
+            skip,
+            epistemic_scale,
+            aleatoric_scale,
+            observation_noise,
+        )
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cuda_batch(
+        &self,
+        x: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        variances: Option<&ArrayView2<f64>>,
+        scales: &ndarray::ArrayView1<f64>,
+        input_k: usize,
+        skip: usize,
+        values: &[CudaParam],
+        observation_noise: bool,
+    ) -> Result<KnnBatch, IndexError> {
+        if x.ncols() != self.num_dim {
+            return Err(IndexError::InvalidShape {
+                expected: self.num_dim,
+                got: x.ncols(),
+            });
+        }
+        let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
+        let x_scaled: Array2<f64> = if self.scale_x {
+            x / &x_scale.view().insert_axis(Axis(0))
+        } else {
+            x.to_owned()
+        };
+        self.inner.cuda_batch(
+            &x_scaled.view(),
+            outcomes,
+            variances,
+            scales,
+            input_k,
+            skip,
+            values,
+            observation_noise,
+        )
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cuda_draws(
+        &self,
+        x: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        variances: Option<&ArrayView2<f64>>,
+        scales: &ndarray::ArrayView1<f64>,
+        input_k: usize,
+        used_k: usize,
+        skip: usize,
+        epistemic_scale: f64,
+        aleatoric_scale: f64,
+        observation_noise: bool,
+        seeds: &[i64],
+    ) -> Result<(ndarray::Array3<f64>, Vec<Vec<usize>>), IndexError> {
+        if x.ncols() != self.num_dim {
+            return Err(IndexError::InvalidShape {
+                expected: self.num_dim,
+                got: x.ncols(),
+            });
+        }
+        let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
+        let x_scaled: Array2<f64> = if self.scale_x {
+            x / &x_scale.view().insert_axis(Axis(0))
+        } else {
+            x.to_owned()
+        };
+        self.inner.cuda_draws(
+            &x_scaled.view(),
+            outcomes,
+            variances,
+            scales,
+            input_k,
+            used_k,
+            skip,
+            epistemic_scale,
+            aleatoric_scale,
+            observation_noise,
+            seeds,
+        )
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cuda_conditional(
+        &self,
+        x: &ArrayView2<f64>,
+        x_whatif: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        variances: Option<&ArrayView2<f64>>,
+        scales: &ndarray::ArrayView1<f64>,
+        input_k: usize,
+        used_k: usize,
+        skip: usize,
+        epistemic_scale: f64,
+        aleatoric_scale: f64,
+        observation_noise: bool,
+    ) -> Result<crate::draw::DrawInternals, IndexError> {
+        if x.ncols() != self.num_dim || x_whatif.ncols() != self.num_dim {
+            return Err(IndexError::InvalidShape {
+                expected: self.num_dim,
+                got: x.ncols().max(x_whatif.ncols()),
+            });
+        }
+        let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
+        let (x_scaled, whatif_scaled): (Array2<f64>, Array2<f64>) = if self.scale_x {
+            (
+                x / &x_scale.view().insert_axis(Axis(0)),
+                x_whatif / &x_scale.view().insert_axis(Axis(0)),
+            )
+        } else {
+            (x.to_owned(), x_whatif.to_owned())
+        };
+        self.inner.cuda_conditional(
+            &x_scaled.view(),
+            &whatif_scaled.view(),
+            outcomes,
+            variances,
+            scales,
+            input_k,
+            used_k,
+            skip,
+            epistemic_scale,
+            aleatoric_scale,
+            observation_noise,
+        )
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn condition_draws(
+        &self,
+        x: &ArrayView2<f64>,
+        x_whatif: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        variances: Option<&ArrayView2<f64>>,
+        scales: &ndarray::ArrayView1<f64>,
+        input_k: usize,
+        used_k: usize,
+        skip: usize,
+        epistemic_scale: f64,
+        aleatoric_scale: f64,
+        observation_noise: bool,
+        seeds: &[i64],
+    ) -> Result<(ndarray::Array3<f64>, Vec<Vec<usize>>), IndexError> {
+        if x.ncols() != self.num_dim || x_whatif.ncols() != self.num_dim {
+            return Err(IndexError::InvalidShape {
+                expected: self.num_dim,
+                got: x.ncols().max(x_whatif.ncols()),
+            });
+        }
+        let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
+        let (x_scaled, whatif_scaled): (Array2<f64>, Array2<f64>) = if self.scale_x {
+            (
+                x / &x_scale.view().insert_axis(Axis(0)),
+                x_whatif / &x_scale.view().insert_axis(Axis(0)),
+            )
+        } else {
+            (x.to_owned(), x_whatif.to_owned())
+        };
+        self.inner.condition_draws(
+            &x_scaled.view(),
+            &whatif_scaled.view(),
+            outcomes,
+            variances,
+            scales,
+            input_k,
+            used_k,
+            skip,
+            epistemic_scale,
+            aleatoric_scale,
+            observation_noise,
+            seeds,
+        )
     }
 
     pub fn len(&self) -> usize {

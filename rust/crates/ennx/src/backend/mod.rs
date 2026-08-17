@@ -313,6 +313,13 @@ impl EnnBackend {
             Self::Disk(_) => None,
         }
     }
+
+    pub fn memory_yvar(&self) -> Option<ndarray::ArrayView2<'_, f64>> {
+        match self {
+            Self::InMemory(b) => b.yvar_view(),
+            Self::Disk(_) => None,
+        }
+    }
 }
 
 /// Drop faulted observation mmap pages from process RSS (disk backend only).

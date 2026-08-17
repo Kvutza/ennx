@@ -15,7 +15,7 @@ pub fn standardize_y_py<'py>(py: Python<'py>, y: PyReadonlyArray1<f64>) -> PyRes
     let y_arr = y.as_array();
 
     // Release GIL for computation
-    let (center, scale) = py.allow_threads(|| ennx::standardize_y(&y_arr));
+    let (center, scale) = py.detach(|| ennx::standardize_y(&y_arr));
 
     Ok((center, scale))
 }
@@ -66,15 +66,14 @@ pub fn pareto_front_2d_maximize_py<'py>(
         }
     }
 
-    let result =
-        py.allow_threads(|| ennx::pareto_front_2d_maximize(&a_arr, &b_arr, idx_vec.as_deref()));
+    let result = py.detach(|| ennx::pareto_front_2d_maximize(&a_arr, &b_arr, idx_vec.as_deref()));
 
     let front = match result {
         Ok(v) => v,
         Err(e) => return Err(PyValueError::new_err(e.to_string())),
     };
     let front = ndarray::Array1::from_vec(front);
-    Ok(front.into_pyarray_bound(py))
+    Ok(front.into_pyarray(py))
 }
 
 /// Python wrapper for calculate_sobol_indices
@@ -87,8 +86,8 @@ pub fn calculate_sobol_indices_py<'py>(
     let x_arr = x.as_array();
     let y_arr = y.as_array();
 
-    let sobol = py.allow_threads(|| ennx::calculate_sobol_indices(&x_arr, &y_arr));
-    Ok(Array1::from_vec(sobol.to_vec()).into_pyarray_bound(py))
+    let sobol = py.detach(|| ennx::calculate_sobol_indices(&x_arr, &y_arr));
+    Ok(Array1::from_vec(sobol.to_vec()).into_pyarray(py))
 }
 
 /// Python helper for deterministic Sobol sequence generation.
@@ -114,7 +113,7 @@ pub fn sobol_sequence_py<'py>(
             out[[i, j]] = row[j];
         }
     }
-    Ok(out.into_dyn().into_pyarray_bound(py))
+    Ok(out.into_dyn().into_pyarray(py))
 }
 
 #[cfg(test)]
@@ -150,7 +149,7 @@ pub fn arms_from_pareto_fronts_py<'py>(
         )));
     }
 
-    let indices = py.allow_threads(|| {
+    let indices = py.detach(|| {
         ennx::util::arms_from_pareto_fronts(
             &x_arr.view(),
             &mu_arr.view(),
@@ -161,7 +160,7 @@ pub fn arms_from_pareto_fronts_py<'py>(
     });
     if indices.is_empty() {
         let empty = ndarray::Array2::<f64>::zeros((0, x_arr.ncols()));
-        return Ok(empty.into_pyarray_bound(py));
+        return Ok(empty.into_pyarray(py));
     }
     let ncols = x_arr.ncols();
     let mut out = ndarray::Array2::<f64>::zeros((indices.len(), ncols));
@@ -170,7 +169,7 @@ pub fn arms_from_pareto_fronts_py<'py>(
             out[[row_idx, col_idx]] = *val;
         }
     }
-    Ok(out.into_pyarray_bound(py))
+    Ok(out.into_pyarray(py))
 }
 
 #[pyfunction(name = "quantize_int4")]
@@ -181,9 +180,8 @@ pub fn q_int4_py<'py>(
     scale: f32,
 ) -> PyResult<Bound<'py, PyArray1<u8>>> {
     let values = arr.as_array();
-    let packed =
-        py.allow_threads(|| ennx::experimental::quantize_int4(values.iter().copied(), scale));
-    Ok(Array1::from_vec(packed).into_pyarray_bound(py))
+    let packed = py.detach(|| ennx::experimental::quantize_int4(values.iter().copied(), scale));
+    Ok(Array1::from_vec(packed).into_pyarray(py))
 }
 
 #[pyfunction(name = "quantize_fp4_e2m1")]
@@ -194,9 +192,8 @@ pub fn q_fp4_py<'py>(
     scale: f32,
 ) -> PyResult<Bound<'py, PyArray1<u8>>> {
     let values = arr.as_array();
-    let packed =
-        py.allow_threads(|| ennx::experimental::quantize_fp4_e2m1(values.iter().copied(), scale));
-    Ok(Array1::from_vec(packed).into_pyarray_bound(py))
+    let packed = py.detach(|| ennx::experimental::quantize_fp4_e2m1(values.iter().copied(), scale));
+    Ok(Array1::from_vec(packed).into_pyarray(py))
 }
 
 /// Override ennx config path (`None` restores `~/.ennx/config.toml`).

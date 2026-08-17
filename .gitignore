@@ -13,3 +13,4 @@ results/
 /zig-out/
 /tests/bazel_consumer/MODULE.bazel.lock
 /tests/bazel_consumer/bazel-*
+/docs/references/**/*.pdf

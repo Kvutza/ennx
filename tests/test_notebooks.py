@@ -1,4 +1,6 @@
+import ast
 import importlib.util
+import json
 import os
 from pathlib import Path
 
@@ -132,3 +134,159 @@ def test_demo_turbo_enn_notebook():
 
 def test_demo_morbo_enn_notebook():
     run_notebook("examples/demo_morbo_enn.ipynb")
+
+
+def test_colab():
+    repo_root = Path(__file__).resolve().parent.parent
+    path = repo_root / "examples/colab_jax_cuda_ennx.ipynb"
+    notebook = json.loads(path.read_text(encoding="utf-8"))
+
+    assert notebook["nbformat"] == 4
+    assert notebook["metadata"]["accelerator"] == "GPU"
+    assert notebook["metadata"]["colab"]["gpuType"] == "T4"
+
+    code = []
+    for cell in notebook["cells"]:
+        if cell["cell_type"] != "code":
+            continue
+        assert cell["execution_count"] is None
+        assert cell["outputs"] == []
+        source = "".join(cell["source"])
+        compile(source, f"{path.name}:{cell['id']}", "exec")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                assert len(node.name.split("_")) <= 2
+        code.append(source)
+
+    source = "\n".join(code)
+    for required in (
+        "cuda-v0.1.0",
+        "ennx-0.1.0%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
+        "@jax.jit",
+        "WeightSearch",
+        'backend="cuda"',
+        "search.ask(",
+        "search.row()",
+        "search.tell(",
+    ):
+        assert required in source
+
+    for removed in (
+        '"jax[cuda12]"',
+        "colab_cuda.py",
+        "cargo oxide",
+        "git clone",
+    ):
+        assert removed not in source
+
+
+def test_mjx_colab():
+    repo_root = Path(__file__).resolve().parent.parent
+    path = repo_root / "examples/colab_mjx_humanoid_ennx.ipynb"
+    notebook = json.loads(path.read_text(encoding="utf-8"))
+
+    assert notebook["nbformat"] == 4
+    assert notebook["metadata"]["accelerator"] == "GPU"
+    assert notebook["metadata"]["colab"]["gpuType"] == "T4"
+
+    code = []
+    for cell in notebook["cells"]:
+        if cell["cell_type"] != "code":
+            continue
+        assert cell["execution_count"] is None
+        assert cell["outputs"] == []
+        source = "".join(cell["source"])
+        compile(source, f"{path.name}:{cell['id']}", "exec")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                assert len(node.name.split("_")) <= 2
+        code.append(source)
+
+    source = "\n".join(code)
+    for required in (
+        "cuda-v0.1.6",
+        "ennx-0.1.6%2Bcuda75-cp312-cp312-manylinux_2_28_x86_64.whl",
+        "mujoco==3.6.0",
+        "mujoco-mjx==3.6.0",
+        "from mujoco import mjx",
+        "mjx.put_model",
+        "mjx.step",
+        "PARAMETER_COUNT",
+        "900_000 <= PARAMETER_COUNT <= 1_000_000",
+        "Bf16Search",
+        "repetitions = 10",
+        'os.environ.get("ENNX_REPETITIONS"',
+        'os.environ.get("ENNX_ROUNDS"',
+        "history_capacity = 8",
+        "batch_arms = 4",
+        "candidates = 8",
+        "search.ask_batch(",
+        "search.rows(",
+        "search.tell_batch(trials, reward, variances)",
+        "jax.dlpack.from_dlpack",
+        "jax.vmap(score_policy)",
+        "mujoco.Renderer",
+        "media.show_video",
+        '"--no-deps"',
+        '"--constraint"',
+        'metadata.version("numpy")',
+        "CONFIG_TOML",
+        "env_steps_total",
+        "proposal_dt",
+        "tell_dt",
+        "mean_sem",
+        "fill_between",
+        'RESULT_ROOT / "trace.jsonl"',
+        "handle.flush()",
+        'RESULT_ROOT / "summary.json"',
+        '"round_ms_mean"',
+        '"control_transitions"',
+    ):
+        assert required in source
+
+    for removed in (
+        "TurboSearch",
+        "cp.cuda.UnownedMemory",
+        "import numpy as",
+        "reward.tolist()",
+        "EVAL_KEYS =",
+        "keys.reshape(arms, EVAL_ENVS, 2)",
+    ):
+        assert removed not in source
+
+
+def test_bf16():
+    repo_root = Path(__file__).resolve().parent.parent
+    path = repo_root / "examples/colab_cuda_oxide_dev.ipynb"
+    notebook = json.loads(path.read_text(encoding="utf-8"))
+
+    assert notebook["nbformat"] == 4
+    assert notebook["metadata"]["accelerator"] == "GPU"
+    assert notebook["metadata"]["colab"]["gpuType"] == "T4"
+
+    code = []
+    for cell in notebook["cells"]:
+        if cell["cell_type"] != "code":
+            continue
+        assert cell["execution_count"] is None
+        assert cell["outputs"] == []
+        source = "".join(cell["source"])
+        compile(source, path.name, "exec")
+        code.append(source)
+
+    source = "\n".join(code)
+    for required in (
+        "jj",
+        "//:cuda-parity",
+        "//:cuda-wheel",
+        "Bf16Tree",
+        "jnp.bfloat16",
+        "jax.dlpack.from_dlpack(tree)",
+        "PARAMETERS = 1_000_000",
+    ):
+        assert required in source
+
+    for removed in ("import numpy", "import cupy", '["git"'):
+        assert removed not in source

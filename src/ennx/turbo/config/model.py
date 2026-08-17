@@ -248,7 +248,9 @@ def _validate(cfg: OptimizerConfig) -> None:
     if isinstance(cfg.init.init_strategy, LHDOnlyInit) and not isinstance(
         cfg.surrogate, NoSurrogateConfig
     ):
-        raise ValueError("init_strategy='lhd_only' requires NoSurrogateConfig surrogate")
+        raise ValueError(
+            "init_strategy='lhd_only' requires NoSurrogateConfig surrogate"
+        )
     if isinstance(cfg.surrogate, NoSurrogateConfig):
         if isinstance(cfg.acquisition, DrawAcquisitionConfig):
             raise ValueError(

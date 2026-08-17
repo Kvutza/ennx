@@ -82,6 +82,7 @@ fn parse_index_driver(s: &str) -> PyResult<ennx::index::IndexDriver> {
         "bpann_disk" => Ok(IndexDriver::BpAnnDisk),
         "metal" => Ok(IndexDriver::Metal),
         "opencl" | "ocl" => Ok(IndexDriver::OpenCl),
+        "cuda" => Ok(IndexDriver::Cuda),
         _ => Err(PyValueError::new_err(format!("Unknown index_driver: {s}"))),
     }
 }
@@ -223,7 +224,7 @@ impl PyOptimizer {
         }
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let result = ennx::from_unit(&result_unit.view(), &self.inner.bounds().view());
-        Ok(result.into_dyn().into_pyarray_bound(py))
+        Ok(result.into_dyn().into_pyarray(py))
     }
 
     /// Tell observations
@@ -312,23 +313,19 @@ impl PyOptimizer {
 
     /// Get observations x in unit space (if any).
     fn x_obs<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArrayDyn<f64>>> {
-        self.inner
-            .x_obs()
-            .map(|x| x.into_dyn().into_pyarray_bound(py))
+        self.inner.x_obs().map(|x| x.into_dyn().into_pyarray(py))
     }
 
     /// Get observation values y (if any).
     fn y_obs<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArrayDyn<f64>>> {
-        self.inner
-            .y_obs()
-            .map(|y| y.into_dyn().into_pyarray_bound(py))
+        self.inner.y_obs().map(|y| y.into_dyn().into_pyarray(py))
     }
 
     /// Get incumbent x in unit space (if any).
     fn incumbent_x_unit<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArrayDyn<f64>>> {
         self.inner
             .incumbent_x_unit()
-            .map(|x| x.view().to_owned().into_dyn().into_pyarray_bound(py))
+            .map(|x| x.view().to_owned().into_dyn().into_pyarray(py))
     }
 
     /// Get optimizer bounds.
@@ -338,7 +335,7 @@ impl PyOptimizer {
             .view()
             .to_owned()
             .into_dyn()
-            .into_pyarray_bound(py)
+            .into_pyarray(py)
     }
 }
 
@@ -457,7 +454,7 @@ pub fn create_optimizer_py(
 }
 
 /// Telemetry data structure for Python
-#[pyclass(name = "Telemetry")]
+#[pyclass(name = "Telemetry", from_py_object)]
 #[derive(Clone, Copy)]
 pub struct PyTelemetry {
     #[pyo3(get)]
@@ -615,19 +612,15 @@ impl PyMultiTrustRegion {
     }
 
     pub fn get_centers<'py>(&self, py: Python<'py>) -> Bound<'py, PyArrayDyn<f64>> {
-        self.inner.centers.clone().into_dyn().into_pyarray_bound(py)
+        self.inner.centers.clone().into_dyn().into_pyarray(py)
     }
 
     pub fn get_lengths<'py>(&self, py: Python<'py>) -> Bound<'py, PyArrayDyn<f64>> {
-        self.inner.lengths.clone().into_dyn().into_pyarray_bound(py)
+        self.inner.lengths.clone().into_dyn().into_pyarray(py)
     }
 
     pub fn get_incumbents<'py>(&self, py: Python<'py>) -> Bound<'py, PyArrayDyn<f64>> {
-        self.inner
-            .incumbents_y
-            .clone()
-            .into_dyn()
-            .into_pyarray_bound(py)
+        self.inner.incumbents_y.clone().into_dyn().into_pyarray(py)
     }
 
     pub fn tell(

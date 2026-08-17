@@ -33,6 +33,8 @@ fn run() -> Result<u8, String> {
         "bazel" => bazel(&root, &args[1..]),
         "rust" => rust(&root, &args[1..]),
         "python" => python(&root, &args[1..]),
+        "cuda" => cuda(&root, &args[1..]),
+        "release" => release(&root, &args[1..]),
         "tune" => tune::run(&root, &args[1..]),
         "version" | "--version" | "-V" => {
             println!("ennx dev-cli 0.1.0");
@@ -93,6 +95,45 @@ fn python(root: &Path, args: &[String]) -> Result<u8, String> {
         Some(command) => Err(format!("unknown ennx python command {command:?}")),
         None => Err("missing ennx python command".to_string()),
     }
+}
+
+fn cuda(root: &Path, args: &[String]) -> Result<u8, String> {
+    match args.first().map(String::as_str) {
+        Some("wheel") => cuda_wheel(root),
+        Some("parity") => cuda_parity(root),
+        Some(command) => Err(format!("unknown ennx cuda command {command:?}")),
+        None => Err("missing ennx cuda command".to_string()),
+    }
+}
+
+fn release(root: &Path, args: &[String]) -> Result<u8, String> {
+    match args.first().map(String::as_str) {
+        Some("upload") => release_upload(root, &args[1..]),
+        Some(command) => Err(format!("unknown ennx release command {command:?}")),
+        None => Err("missing ennx release command".to_string()),
+    }
+}
+
+fn release_upload(root: &Path, args: &[String]) -> Result<u8, String> {
+    let (tag, wheels) = args
+        .split_first()
+        .ok_or_else(|| "usage: ennx release upload vX.Y.Z WHEEL...".to_string())?;
+    if !tag.starts_with('v') {
+        return Err("release tag must start with v".to_string());
+    }
+    if wheels.is_empty() {
+        return Err("provide at least one wheel".to_string());
+    }
+
+    command(
+        root,
+        "gh",
+        std::iter::once("release")
+            .chain(std::iter::once("upload"))
+            .chain(std::iter::once(tag.as_str()))
+            .chain(wheels.iter().map(String::as_str))
+            .chain(std::iter::once("--clobber")),
+    )
 }
 
 fn ci(root: &Path) -> Result<u8, String> {
@@ -178,6 +219,42 @@ fn buck_wheel(root: &Path) -> Result<u8, String> {
             "//:wheel",
             "--config",
             "ennx.profile=release",
+            "--local-only",
+            "--num-threads",
+            "4",
+            "--show-output",
+        ],
+    )
+}
+
+fn cuda_wheel(root: &Path) -> Result<u8, String> {
+    buck2(
+        root,
+        [
+            "--isolation-dir",
+            "cuda",
+            "build",
+            "//:cuda-wheel",
+            "--target-platforms",
+            "//:linux-x86_64-platform",
+            "--local-only",
+            "--num-threads",
+            "4",
+            "--show-output",
+        ],
+    )
+}
+
+fn cuda_parity(root: &Path) -> Result<u8, String> {
+    buck2(
+        root,
+        [
+            "--isolation-dir",
+            "cuda",
+            "build",
+            "//:cuda-parity",
+            "--target-platforms",
+            "//:linux-x86_64-platform",
             "--local-only",
             "--num-threads",
             "4",
@@ -334,6 +411,8 @@ fn help_text() -> &'static str {
   ennx ci
   ennx rust fast|full
   ennx python fast|verify|wheel
+  ennx cuda wheel|parity
+  ennx release upload vX.Y.Z WHEEL...
   ennx tune CONFIG.toml
   ennx buck build|test|wheel|ci
   ennx bazel build|test"
@@ -348,5 +427,7 @@ mod tests {
         let help = help_text();
         assert!(help.contains("ennx rust fast|full"));
         assert!(help.contains("ennx python fast|verify|wheel"));
+        assert!(help.contains("ennx cuda wheel|parity"));
+        assert!(help.contains("ennx release upload vX.Y.Z WHEEL..."));
     }
 }

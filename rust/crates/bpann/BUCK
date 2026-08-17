@@ -1,5 +1,11 @@
 load("//buck2:reindeer_rules.bzl", "app_rust_library")
 
+filegroup(
+    name = "bpann-source",
+    srcs = glob(["src/**/*.rs"]) + ["Cargo.toml"],
+    visibility = ["PUBLIC"],
+)
+
 app_rust_library(
     name = "bpann",
     srcs = glob(["src/**/*.rs"]),

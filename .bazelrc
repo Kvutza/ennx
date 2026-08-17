@@ -16,4 +16,3 @@ build:release --compilation_mode=opt
 # macOS deployment target pin (hermeticity fix)
 build:macos --macos_minimum_os=11.0
 build --macos_minimum_os=11.0
-

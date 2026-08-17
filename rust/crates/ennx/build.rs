@@ -49,9 +49,17 @@ fn include_candidates() -> Vec<PathBuf> {
 fn main() {
     println!("cargo:rerun-if-env-changed=FAISS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=FAISS_INCLUDE_DIR");
+    println!("cargo:rerun-if-env-changed=ENNX_FAISS_UNAVAILABLE");
     println!("cargo:rerun-if-env-changed=CONDA_PREFIX");
     println!("cargo:rerun-if-changed=src/faiss_bridge.cpp");
-    if std::env::var_os("DOCS_RS").is_some() {
+    if std::env::var_os("DOCS_RS").is_some() || std::env::var_os("ENNX_FAISS_UNAVAILABLE").is_some()
+    {
+        cc::Build::new()
+            .cpp(true)
+            .file("src/faiss_bridge.cpp")
+            .define("ENNX_FAISS_UNAVAILABLE", None)
+            .warnings(false)
+            .compile("ennx_faiss_bridge");
         return;
     }
     let lib = candidates()

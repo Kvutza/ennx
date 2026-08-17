@@ -3,6 +3,7 @@ members = [
     "crates/bpann",
     "crates/ennx",
     "crates/ennx-py",
+    "crates/modal-runner",
 ]
 resolver = "2"
 
@@ -20,8 +21,8 @@ categories = ["science", "simulation"]
 bpann = { package = "ennx-bpann", path = "crates/bpann", version = "=0.1.0" }
 ennx = { path = "crates/ennx", version = "=0.1.0", default-features = false }
 ndarray = "0.16"
-numpy = "0.22"
-pyo3 = { version = "0.22", features = ["extension-module"] }
+numpy = "0.29"
+pyo3 = { version = "0.29", features = ["extension-module"] }
 rand = "0.8"
 thiserror = "1.0"
 tracy-client = "=0.18.4"

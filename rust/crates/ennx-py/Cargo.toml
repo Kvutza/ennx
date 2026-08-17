@@ -28,6 +28,7 @@ rand = { workspace = true }
 
 [features]
 default = []
+cuda = ["ennx/cuda"]
 metal = ["ennx/metal"]
 opencl = ["ennx/opencl"]
 usearch = ["ennx/usearch"]

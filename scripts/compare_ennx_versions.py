@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.compare_ennx_versions_common import (
+from scripts.compare_ennx_versions_common import (  # noqa: E402
     OPTIMIZER_NAMES,
     PROBLEMS,
     BenchmarkResult,

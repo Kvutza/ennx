@@ -8,14 +8,18 @@ mod neighbor;
 pub mod neighbor_dist;
 mod tie_break;
 
-use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, Axis};
+use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2};
 
 use self::draw_compute::draw_from_internals;
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use self::light::search_k;
 use self::light::{compute_posterior_light, idx_nested_to_array2};
 use self::neighbor::{get_conditional_neighbor_data, get_neighbor_data};
 use crate::draw::DrawInternals;
 use crate::error::{ENNError, EPS_VAR};
 use crate::index::IndexDriver;
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use crate::knn::CudaParam;
 use crate::model::EpistemicNearestNeighbors;
 use crate::params::{ENNNormal, ENNParams, PosteriorFlags};
 use crate::stats::WeightedStats;
@@ -99,6 +103,66 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
         let batch_size = x.nrows();
         let num_params = paramss.len();
 
+        #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+        if self.backend_driver() == IndexDriver::Cuda && self.num_obs() > 0 && !x.is_empty() {
+            let skip = usize::from(flags.exclude_nearest);
+            if flags.exclude_nearest && self.num_obs() <= 1 {
+                return Err(ENNError::InvalidParameter(format!(
+                    "exclude_nearest=True requires at least 2 observations, got {}",
+                    self.num_obs()
+                )));
+            }
+            let input_k = paramss
+                .iter()
+                .map(|params| params.k_num_neighbors as usize + skip)
+                .max()
+                .unwrap_or(0)
+                .min(self.num_obs());
+            let capacity = self.num_obs().saturating_sub(skip);
+            let values: Vec<CudaParam> = paramss
+                .iter()
+                .map(|params| CudaParam {
+                    used_k: (params.k_num_neighbors as usize).min(capacity),
+                    epistemic_scale: params.epistemic_variance_scale,
+                    aleatoric_scale: params.aleatoric_variance_scale,
+                })
+                .collect();
+            self.ensure_index_sync()?;
+            if let (Some(index), Some(train_y)) =
+                (self.backend.in_memory_index(), self.train_y_view_opt())
+            {
+                let train_yvar = self.backend.memory_yvar();
+                let (mut mu, mut se, mut se_epi, mut se_ale) = index
+                    .cuda_batch(
+                        x,
+                        &train_y,
+                        train_yvar.as_ref(),
+                        &self.y_scale().view(),
+                        input_k,
+                        skip,
+                        &values,
+                        flags.observation_noise,
+                    )
+                    .map_err(|error| ENNError::InvalidParameter(error.to_string()))?;
+                if self.has_bounded_outputs() {
+                    crate::y_bounds::naturalize_batch(
+                        &mut mu,
+                        &mut se,
+                        &mut se_epi,
+                        &mut se_ale,
+                        self.y_bounds(),
+                    );
+                }
+                return Ok(ENNNormal::new(
+                    mu.into_dyn(),
+                    se.into_dyn(),
+                    se_epi.into_dyn(),
+                    se_ale.into_dyn(),
+                    None,
+                ));
+            }
+        }
+
         let mut mu_all = Array3::zeros((num_params, batch_size, self.num_metrics()));
         let mut se_all = Array3::zeros((num_params, batch_size, self.num_metrics()));
         let mut se_epi_all = Array3::zeros((num_params, batch_size, self.num_metrics()));
@@ -108,7 +172,7 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
             paramss.iter().map(|p| p.k_num_neighbors).collect();
 
         if k_values.len() == 1 && self.num_obs() > 0 {
-            compute_batch_with_shared_neighbors(
+            shared_batch(
                 self,
                 x,
                 paramss,
@@ -119,7 +183,7 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
                 &mut se_ale_all,
             )?;
         } else {
-            compute_batch_separate_neighbors(
+            separate_batch(
                 self,
                 x,
                 paramss,
@@ -158,6 +222,39 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
     ) -> Result<(Array3<f64>, Vec<Vec<usize>>), ENNError> {
         let span = crate::tracy::zone(tracy_client::span_location!("posterior.draw"));
         span.emit_value(x.nrows() as u64);
+        #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+        if self.backend_driver() == IndexDriver::Cuda
+            && self.num_obs() > 0
+            && !x.is_empty()
+            && !function_seeds.is_empty()
+        {
+            let (input_k, used_k, skip) = cuda_shape(self, params, flags.exclude_nearest)?;
+            self.ensure_index_sync()?;
+            if let (Some(index), Some(train_y)) =
+                (self.backend.in_memory_index(), self.train_y_view_opt())
+            {
+                let train_yvar = self.backend.memory_yvar();
+                let (mut draws, indices) = index
+                    .cuda_draws(
+                        x,
+                        &train_y,
+                        train_yvar.as_ref(),
+                        &self.y_scale().view(),
+                        input_k,
+                        used_k,
+                        skip,
+                        params.epistemic_variance_scale,
+                        params.aleatoric_variance_scale,
+                        flags.observation_noise,
+                        function_seeds,
+                    )
+                    .map_err(|error| ENNError::InvalidParameter(error.to_string()))?;
+                if self.has_bounded_outputs() {
+                    crate::y_bounds::inverse_draws(&mut draws, self.y_bounds());
+                }
+                return Ok((draws, indices));
+            }
+        }
         let internals = compute_posterior_internals(self, x, params, flags)?;
         let mut draws = draw_from_internals(self, &internals, function_seeds)?;
         if self.has_bounded_outputs() {
@@ -223,6 +320,41 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
         } else {
             y_whatif.to_owned()
         };
+        if x_whatif.nrows() == 0 {
+            return self.posterior_function_draw(x, params, function_seeds, flags);
+        }
+        check_conditional(self, x, x_whatif, &y_whatif.view())?;
+        #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+        if self.backend_driver() == IndexDriver::Cuda && !x.is_empty() && !function_seeds.is_empty()
+        {
+            let (input_k, used_k, skip) =
+                condition_shape(self, x_whatif.nrows(), params, flags.exclude_nearest)?;
+            self.ensure_index_sync()?;
+            if let Some(index) = self.backend.in_memory_index() {
+                let (outcomes, variances, scales) = cuda_rows(self, &y_whatif.view())?;
+                let variance_view = variances.as_ref().map(Array2::view);
+                let (mut draws, indices) = index
+                    .condition_draws(
+                        x,
+                        x_whatif,
+                        &outcomes.view(),
+                        variance_view.as_ref(),
+                        &scales.view(),
+                        input_k,
+                        used_k,
+                        skip,
+                        params.epistemic_variance_scale,
+                        params.aleatoric_variance_scale,
+                        flags.observation_noise,
+                        function_seeds,
+                    )
+                    .map_err(|error| ENNError::InvalidParameter(error.to_string()))?;
+                if self.has_bounded_outputs() {
+                    crate::y_bounds::inverse_draws(&mut draws, self.y_bounds());
+                }
+                return Ok((draws, indices));
+            }
+        }
         let internals = compute_conditional_posterior_internals(
             self,
             x,
@@ -258,95 +390,8 @@ pub(crate) fn index_search(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn compute_batch_with_shared_neighbors(
-    model: &EpistemicNearestNeighbors,
-    x: &ArrayView2<f64>,
-    paramss: &[ENNParams],
-    flags: &PosteriorFlags,
-    mu_all: &mut Array3<f64>,
-    se_all: &mut Array3<f64>,
-    se_epi_all: &mut Array3<f64>,
-    se_ale_all: &mut Array3<f64>,
-) -> Result<(), ENNError> {
-    let neighbor_data = get_neighbor_data(
-        model,
-        x,
-        &paramss[0],
-        flags.exclude_nearest,
-        flags.tie_break_neighbors,
-    )?;
-
-    if let Some(data) = neighbor_data {
-        let wp_data = WeightedPosteriorData {
-            dist2s: &data.dist2s.view(),
-            idx: &data.idx,
-            y_neighbors: &data.y_neighbors.view(),
-            params: &paramss[0],
-            observation_noise: flags.observation_noise,
-            yvar_neighbors_override: None,
-        };
-
-        for (i, params) in paramss.iter().enumerate() {
-            let data_with_params = WeightedPosteriorData { params, ..wp_data };
-            let internals = compute_weighted_posterior(model, data_with_params, None)?;
-            assign_posterior_results(&internals, mu_all, se_all, se_epi_all, se_ale_all, i);
-        }
-    } else {
-        let batch_size = x.nrows();
-        let internals = empty_posterior_internals(model, batch_size);
-        for i in 0..paramss.len() {
-            assign_posterior_results(&internals, mu_all, se_all, se_epi_all, se_ale_all, i);
-        }
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn compute_batch_separate_neighbors(
-    model: &EpistemicNearestNeighbors,
-    x: &ArrayView2<f64>,
-    paramss: &[ENNParams],
-    flags: &PosteriorFlags,
-    mu_all: &mut Array3<f64>,
-    se_all: &mut Array3<f64>,
-    se_epi_all: &mut Array3<f64>,
-    se_ale_all: &mut Array3<f64>,
-) -> Result<(), ENNError> {
-    for (i, params) in paramss.iter().enumerate() {
-        let internals = compute_posterior_internals(model, x, params, flags)?;
-        assign_posterior_results(&internals, mu_all, se_all, se_epi_all, se_ale_all, i);
-    }
-    Ok(())
-}
-
-fn assign_posterior_results(
-    internals: &DrawInternals,
-    mu_all: &mut Array3<f64>,
-    se_all: &mut Array3<f64>,
-    se_epi_all: &mut Array3<f64>,
-    se_ale_all: &mut Array3<f64>,
-    index: usize,
-) {
-    let slice = ndarray::Slice::from(index..index + 1);
-    mu_all
-        .slice_axis_mut(Axis(0), slice)
-        .assign(&internals.mu.slice_axis(Axis(0), ndarray::Slice::from(..)));
-    se_all
-        .slice_axis_mut(Axis(0), slice)
-        .assign(&internals.se.slice_axis(Axis(0), ndarray::Slice::from(..)));
-    se_epi_all.slice_axis_mut(Axis(0), slice).assign(
-        &internals
-            .se_epi
-            .slice_axis(Axis(0), ndarray::Slice::from(..)),
-    );
-    se_ale_all.slice_axis_mut(Axis(0), slice).assign(
-        &internals
-            .se_ale
-            .slice_axis(Axis(0), ndarray::Slice::from(..)),
-    );
-}
-
+mod batch;
+use batch::{separate_batch, shared_batch};
 /// Data for weighted posterior computation.
 pub struct WeightedPosteriorData<'a> {
     pub dist2s: &'a ArrayView2<'a, f64>,
@@ -577,6 +622,33 @@ pub fn compute_posterior_internals(
         return Ok(empty_posterior_internals(model, batch_size));
     }
 
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    if model.backend_driver() == IndexDriver::Cuda && !x.is_empty() {
+        let (input_k, used_k, skip) = cuda_shape(model, params, flags.exclude_nearest)?;
+        if used_k > 0 {
+            model.ensure_index_sync()?;
+            if let (Some(index), Some(train_y)) =
+                (model.backend.in_memory_index(), model.train_y_view_opt())
+            {
+                let train_yvar = model.backend.memory_yvar();
+                return index
+                    .cuda_weighted(
+                        x,
+                        &train_y,
+                        train_yvar.as_ref(),
+                        &model.y_scale().view(),
+                        input_k,
+                        used_k,
+                        skip,
+                        params.epistemic_variance_scale,
+                        params.aleatoric_variance_scale,
+                        flags.observation_noise,
+                    )
+                    .map_err(|error| ENNError::InvalidParameter(error.to_string()));
+            }
+        }
+    }
+
     let neighbor_data = get_neighbor_data(
         model,
         x,
@@ -598,6 +670,18 @@ pub fn compute_posterior_internals(
     } else {
         Ok(empty_posterior_internals(model, batch_size))
     }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+fn cuda_shape(
+    model: &EpistemicNearestNeighbors,
+    params: &ENNParams,
+    exclude_nearest: bool,
+) -> Result<(usize, usize, usize), ENNError> {
+    let input_k = search_k(model, params, exclude_nearest)?;
+    let skip = usize::from(exclude_nearest);
+    let used_k = (params.k_num_neighbors as usize).min(input_k.saturating_sub(skip));
+    Ok((input_k, used_k, skip))
 }
 
 fn compute_scale_for_conditional(
@@ -640,40 +724,34 @@ pub fn compute_conditional_posterior_internals(
         return compute_posterior_internals(model, x, params, flags);
     }
 
-    let validation_err: Option<ENNError> = if x.iter().any(|v| !v.is_finite())
-        || x_whatif.iter().any(|v| !v.is_finite())
-        || y_whatif.iter().any(|v| !v.is_finite())
-    {
-        Some(ENNError::InvalidParameter(
-            "NaN or Inf not allowed in x, x_whatif, or y_whatif".to_string(),
-        ))
-    } else if x.ncols() != model.num_dim() {
-        Some(ENNError::InvalidShape {
-            expected: vec![x.nrows(), model.num_dim()],
-            got: x.shape().to_vec(),
-        })
-    } else if x_whatif.ncols() != model.num_dim() {
-        Some(ENNError::InvalidShape {
-            expected: vec![x_whatif.nrows(), model.num_dim()],
-            got: x_whatif.shape().to_vec(),
-        })
-    } else if y_whatif.ncols() != model.num_metrics() {
-        Some(ENNError::InvalidShape {
-            expected: vec![y_whatif.nrows(), model.num_metrics()],
-            got: y_whatif.shape().to_vec(),
-        })
-    } else if x_whatif.nrows() != y_whatif.nrows() {
-        Some(ENNError::InvalidParameter(
-            "x_whatif and y_whatif must have same number of rows".to_string(),
-        ))
-    } else {
-        None
-    };
-    if let Some(e) = validation_err {
-        return Err(e);
-    }
+    check_conditional(model, x, x_whatif, y_whatif)?;
 
     let batch_size = x.nrows();
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    if model.backend_driver() == IndexDriver::Cuda && !x.is_empty() {
+        let (input_k, used_k, skip) =
+            condition_shape(model, x_whatif.nrows(), params, flags.exclude_nearest)?;
+        model.ensure_index_sync()?;
+        if let Some(index) = model.backend.in_memory_index() {
+            let (outcomes, variances, scales) = cuda_rows(model, y_whatif)?;
+            let variance_view = variances.as_ref().map(Array2::view);
+            return index
+                .cuda_conditional(
+                    x,
+                    x_whatif,
+                    &outcomes.view(),
+                    variance_view.as_ref(),
+                    &scales.view(),
+                    input_k,
+                    used_k,
+                    skip,
+                    params.epistemic_variance_scale,
+                    params.aleatoric_variance_scale,
+                    flags.observation_noise,
+                )
+                .map_err(|error| ENNError::InvalidParameter(error.to_string()));
+        }
+    }
     let neighbor_data = get_conditional_neighbor_data(model, x, x_whatif, y_whatif, params, flags)?;
 
     if let Some(data) = neighbor_data {
@@ -692,6 +770,98 @@ pub fn compute_conditional_posterior_internals(
     } else {
         Ok(empty_posterior_internals(model, batch_size))
     }
+}
+
+fn check_conditional(
+    model: &EpistemicNearestNeighbors,
+    x: &ArrayView2<f64>,
+    x_whatif: &ArrayView2<f64>,
+    y_whatif: &ArrayView2<f64>,
+) -> Result<(), ENNError> {
+    if x.iter().any(|value| !value.is_finite())
+        || x_whatif.iter().any(|value| !value.is_finite())
+        || y_whatif.iter().any(|value| !value.is_finite())
+    {
+        return Err(ENNError::InvalidParameter(
+            "NaN or Inf not allowed in x, x_whatif, or y_whatif".to_string(),
+        ));
+    }
+    if x.ncols() != model.num_dim() {
+        return Err(ENNError::InvalidShape {
+            expected: vec![x.nrows(), model.num_dim()],
+            got: x.shape().to_vec(),
+        });
+    }
+    if x_whatif.ncols() != model.num_dim() {
+        return Err(ENNError::InvalidShape {
+            expected: vec![x_whatif.nrows(), model.num_dim()],
+            got: x_whatif.shape().to_vec(),
+        });
+    }
+    if y_whatif.ncols() != model.num_metrics() {
+        return Err(ENNError::InvalidShape {
+            expected: vec![y_whatif.nrows(), model.num_metrics()],
+            got: y_whatif.shape().to_vec(),
+        });
+    }
+    if x_whatif.nrows() != y_whatif.nrows() {
+        return Err(ENNError::InvalidParameter(
+            "x_whatif and y_whatif must have same number of rows".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+fn condition_shape(
+    model: &EpistemicNearestNeighbors,
+    whatif_rows: usize,
+    params: &ENNParams,
+    exclude_nearest: bool,
+) -> Result<(usize, usize, usize), ENNError> {
+    let total = model
+        .num_obs()
+        .checked_add(whatif_rows)
+        .ok_or_else(|| ENNError::InvalidParameter("conditional row count overflow".to_string()))?;
+    if exclude_nearest && total <= 1 {
+        return Err(ENNError::InvalidParameter(format!(
+            "exclude_nearest=True requires at least 2 observations, got {total}"
+        )));
+    }
+    let skip = usize::from(exclude_nearest);
+    let input_k = (params.k_num_neighbors as usize + skip).min(total);
+    let used_k = (params.k_num_neighbors as usize).min(input_k.saturating_sub(skip));
+    Ok((input_k, used_k, skip))
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+fn cuda_rows(
+    model: &EpistemicNearestNeighbors,
+    y_whatif: &ArrayView2<f64>,
+) -> Result<(Array2<f64>, Option<Array2<f64>>, Array1<f64>), ENNError> {
+    let train_y = model.train_y_view_opt().ok_or_else(|| {
+        ENNError::InvalidParameter("CUDA conditional rows require in-memory storage".to_string())
+    })?;
+    let train_rows = train_y.nrows();
+    let total_rows = train_rows
+        .checked_add(y_whatif.nrows())
+        .ok_or_else(|| ENNError::InvalidParameter("conditional row count overflow".to_string()))?;
+    let mut outcomes = Array2::zeros((total_rows, model.num_metrics()));
+    outcomes
+        .slice_mut(ndarray::s![..train_rows, ..])
+        .assign(&train_y);
+    outcomes
+        .slice_mut(ndarray::s![train_rows.., ..])
+        .assign(y_whatif);
+    let variances = model.backend.memory_yvar().map(|train_yvar| {
+        let mut values = Array2::zeros((total_rows, model.num_metrics()));
+        values
+            .slice_mut(ndarray::s![..train_rows, ..])
+            .assign(&train_yvar);
+        values
+    });
+    let scales = compute_scale_for_conditional(&train_y, y_whatif);
+    Ok((outcomes, variances, scales))
 }
 
 pub fn empty_posterior_internals(

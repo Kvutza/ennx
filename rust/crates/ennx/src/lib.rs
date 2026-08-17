@@ -9,6 +9,8 @@ pub mod acquisition;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub mod apple_gpu;
 pub mod backend;
+#[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
+mod bf16_search;
 pub mod candidates;
 pub mod config;
 mod dense;
@@ -46,6 +48,7 @@ pub mod traits;
 mod trials;
 pub mod trust_region;
 pub mod trust_region_config;
+mod turbo_search;
 pub mod util;
 mod weights;
 pub mod y_bounds;

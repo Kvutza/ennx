@@ -1,4 +1,4 @@
-//! Index backends behind [`crate::index::ENNIndex`].
+//! Index implementations behind [`crate::index::ENNIndex`].
 
 pub(crate) mod faiss_backend;
 pub use faiss_backend::MmapColumnStore;
@@ -6,6 +6,8 @@ pub use faiss_backend::MmapColumnStore;
 #[cfg(any(feature = "usearch", feature = "usearch-native"))]
 mod usearch_backend;
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+mod cuda_index;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 mod metal_index;
 #[cfg(all(target_os = "macos", feature = "metal"))]
@@ -14,6 +16,8 @@ mod metal_plan;
 mod opencl_index;
 
 use ndarray::{Array2, ArrayView2};
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use ndarray::{Array3, ArrayView1};
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -25,7 +29,7 @@ use crate::index::{IndexDriver, IndexError};
 
 pub(crate) use faiss_backend::FaissBackend;
 
-/// Metal KNN execution diagram used by the experimental parity surface.
+/// KNN execution diagram used by the experimental parity surface.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KnnPlan {
     /// Validate equivalent diagrams and retain the fastest Tracy-measured plan.
@@ -46,7 +50,7 @@ pub enum KnnPlan {
     Wide,
 }
 
-/// Tracy timestamp summary for the latest Metal KNN search.
+/// Device-stage timing summary for the latest accelerated KNN search.
 #[derive(Clone, Debug)]
 pub struct KnnProfile {
     pub rows: usize,
@@ -60,7 +64,27 @@ pub struct KnnProfile {
     pub reduce: Duration,
 }
 
-/// Unstable low-level KNN surface for backend parity and performance work.
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+pub(crate) type KnnPosterior = (
+    Array2<f64>,
+    Array2<f64>,
+    Array2<f64>,
+    Array2<f64>,
+    Array2<i64>,
+);
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+pub(crate) type KnnBatch = (Array3<f64>, Array3<f64>, Array3<f64>, Array3<f64>);
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CudaParam {
+    pub used_k: usize,
+    pub epistemic_scale: f64,
+    pub aleatoric_scale: f64,
+}
+
+/// Unstable low-level KNN surface for accelerator parity and performance work.
 pub struct KnnIndex(KnnBackend);
 
 impl KnnIndex {
@@ -102,7 +126,7 @@ impl KnnIndex {
         self.0.plan()
     }
 
-    /// Returns Tracy GPU-stage timings from the latest Metal search.
+    /// Returns device-stage timings from the latest accelerated search.
     pub fn profile(&self) -> Option<KnnProfile> {
         self.0.profile()
     }
@@ -111,6 +135,8 @@ impl KnnIndex {
 #[cfg(any(feature = "usearch", feature = "usearch-native"))]
 use usearch_backend::USearchBackend;
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use cuda_index::CudaIndex;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use metal_index::MetalIndex;
 #[cfg(feature = "opencl")]
@@ -127,6 +153,8 @@ pub(crate) enum KnnBackend {
     Metal(Mutex<MetalIndex>),
     #[cfg(feature = "opencl")]
     OpenCl(Mutex<OpenClIndex>),
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    Cuda(Mutex<CudaIndex>),
 }
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
@@ -292,6 +320,22 @@ impl KnnBackend {
                     ))
                 }
             }
+            IndexDriver::Cuda => {
+                #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+                {
+                    return Ok(Self::Cuda(Mutex::new(CudaIndex::new(
+                        num_dim,
+                        train_scaled,
+                    )?)));
+                }
+                #[cfg(not(all(target_os = "linux", target_arch = "x86_64", feature = "cuda")))]
+                {
+                    Err(IndexError::InvalidParameter(
+                        "CUDA index is unavailable; build on Linux x86_64 with the cuda feature"
+                            .to_string(),
+                    ))
+                }
+            }
             IndexDriver::BpAnnDisk => Err(IndexError::InvalidParameter(
                 "IndexDriver::BpAnnDisk is disk-only; use DiskBpannEnnBackend".to_string(),
             )),
@@ -309,6 +353,8 @@ impl KnnBackend {
             Self::Metal(inner) => inner.lock().expect("knn mutex poisoned").len(),
             #[cfg(feature = "opencl")]
             Self::OpenCl(inner) => inner.lock().expect("knn mutex poisoned").len(),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(inner) => inner.lock().expect("knn mutex poisoned").len(),
         }
     }
 
@@ -323,6 +369,12 @@ impl KnnBackend {
             Self::Metal(inner) => inner.lock().expect("knn mutex poisoned").plan(),
             #[cfg(feature = "opencl")]
             Self::OpenCl(_) => "opencl",
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(inner) => inner
+                .lock()
+                .expect("knn mutex poisoned")
+                .profile()
+                .map_or("cuda", |profile| profile.plan),
         }
     }
 
@@ -332,6 +384,8 @@ impl KnnBackend {
             Self::Auto(inner) => inner.lock().expect("knn mutex poisoned").gpu.profile(),
             #[cfg(all(target_os = "macos", feature = "metal"))]
             Self::Metal(inner) => inner.lock().expect("knn mutex poisoned").profile(),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(inner) => inner.lock().expect("knn mutex poisoned").profile(),
             _ => None,
         }
     }
@@ -362,6 +416,8 @@ impl KnnBackend {
                 .lock()
                 .expect("knn mutex poisoned")
                 .memory_usage_bytes(),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(inner) => inner.lock().expect("knn mutex poisoned").memory_bytes(),
         }
     }
 
@@ -391,6 +447,11 @@ impl KnnBackend {
                 .rebuild(train_scaled),
             #[cfg(feature = "opencl")]
             Self::OpenCl(inner) => inner
+                .lock()
+                .expect("knn mutex poisoned")
+                .rebuild(train_scaled),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(inner) => inner
                 .lock()
                 .expect("knn mutex poisoned")
                 .rebuild(train_scaled),
@@ -426,6 +487,11 @@ impl KnnBackend {
                 .add(rows_scaled, start_key),
             #[cfg(feature = "opencl")]
             Self::OpenCl(inner) => inner
+                .lock()
+                .expect("knn mutex poisoned")
+                .add(rows_scaled, start_key),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(inner) => inner
                 .lock()
                 .expect("knn mutex poisoned")
                 .add(rows_scaled, start_key),
@@ -475,7 +541,218 @@ impl KnnBackend {
                     .expect("knn mutex poisoned")
                     .search(queries_scaled, k_eff, search_k)
             }
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(inner) => {
+                inner
+                    .lock()
+                    .expect("knn mutex poisoned")
+                    .search(queries_scaled, k_eff, search_k)
+            }
         }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cuda_posterior(
+        &self,
+        queries: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        scales: &ArrayView1<f64>,
+        input_k: usize,
+        used_k: usize,
+        skip: usize,
+        epistemic_scale: f64,
+        aleatoric_scale: f64,
+    ) -> Result<KnnPosterior, IndexError> {
+        let Self::Cuda(inner) = self else {
+            return Err(IndexError::InvalidParameter(
+                "CUDA posterior requires IndexDriver::Cuda".to_string(),
+            ));
+        };
+        inner.lock().expect("knn mutex poisoned").posterior(
+            queries,
+            outcomes,
+            scales,
+            input_k,
+            used_k,
+            skip,
+            epistemic_scale,
+            aleatoric_scale,
+        )
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cuda_weighted(
+        &self,
+        queries: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        variances: Option<&ArrayView2<f64>>,
+        scales: &ArrayView1<f64>,
+        input_k: usize,
+        used_k: usize,
+        skip: usize,
+        epistemic_scale: f64,
+        aleatoric_scale: f64,
+        observation_noise: bool,
+    ) -> Result<crate::draw::DrawInternals, IndexError> {
+        let Self::Cuda(inner) = self else {
+            return Err(IndexError::InvalidParameter(
+                "CUDA weighted posterior requires IndexDriver::Cuda".to_string(),
+            ));
+        };
+        inner.lock().expect("knn mutex poisoned").weighted(
+            queries,
+            outcomes,
+            variances,
+            scales,
+            input_k,
+            used_k,
+            skip,
+            epistemic_scale,
+            aleatoric_scale,
+            observation_noise,
+        )
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cuda_batch(
+        &self,
+        queries: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        variances: Option<&ArrayView2<f64>>,
+        scales: &ArrayView1<f64>,
+        input_k: usize,
+        skip: usize,
+        values: &[CudaParam],
+        observation_noise: bool,
+    ) -> Result<KnnBatch, IndexError> {
+        let Self::Cuda(inner) = self else {
+            return Err(IndexError::InvalidParameter(
+                "CUDA batch posterior requires IndexDriver::Cuda".to_string(),
+            ));
+        };
+        inner.lock().expect("knn mutex poisoned").batch(
+            queries,
+            outcomes,
+            variances,
+            scales,
+            input_k,
+            skip,
+            values,
+            observation_noise,
+        )
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cuda_draws(
+        &self,
+        queries: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        variances: Option<&ArrayView2<f64>>,
+        scales: &ArrayView1<f64>,
+        input_k: usize,
+        used_k: usize,
+        skip: usize,
+        epistemic_scale: f64,
+        aleatoric_scale: f64,
+        observation_noise: bool,
+        seeds: &[i64],
+    ) -> Result<(Array3<f64>, Vec<Vec<usize>>), IndexError> {
+        let Self::Cuda(inner) = self else {
+            return Err(IndexError::InvalidParameter(
+                "CUDA draws require IndexDriver::Cuda".to_string(),
+            ));
+        };
+        inner.lock().expect("knn mutex poisoned").draws(
+            queries,
+            outcomes,
+            variances,
+            scales,
+            input_k,
+            used_k,
+            skip,
+            epistemic_scale,
+            aleatoric_scale,
+            observation_noise,
+            seeds,
+        )
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cuda_conditional(
+        &self,
+        queries: &ArrayView2<f64>,
+        extra_rows: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        variances: Option<&ArrayView2<f64>>,
+        scales: &ArrayView1<f64>,
+        input_k: usize,
+        used_k: usize,
+        skip: usize,
+        epistemic_scale: f64,
+        aleatoric_scale: f64,
+        observation_noise: bool,
+    ) -> Result<crate::draw::DrawInternals, IndexError> {
+        let Self::Cuda(inner) = self else {
+            return Err(IndexError::InvalidParameter(
+                "CUDA conditional posterior requires IndexDriver::Cuda".to_string(),
+            ));
+        };
+        inner.lock().expect("knn mutex poisoned").conditional(
+            queries,
+            extra_rows,
+            outcomes,
+            variances,
+            scales,
+            input_k,
+            used_k,
+            skip,
+            epistemic_scale,
+            aleatoric_scale,
+            observation_noise,
+        )
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn condition_draws(
+        &self,
+        queries: &ArrayView2<f64>,
+        extra_rows: &ArrayView2<f64>,
+        outcomes: &ArrayView2<f64>,
+        variances: Option<&ArrayView2<f64>>,
+        scales: &ArrayView1<f64>,
+        input_k: usize,
+        used_k: usize,
+        skip: usize,
+        epistemic_scale: f64,
+        aleatoric_scale: f64,
+        observation_noise: bool,
+        seeds: &[i64],
+    ) -> Result<(Array3<f64>, Vec<Vec<usize>>), IndexError> {
+        let Self::Cuda(inner) = self else {
+            return Err(IndexError::InvalidParameter(
+                "CUDA conditional draws require IndexDriver::Cuda".to_string(),
+            ));
+        };
+        inner.lock().expect("knn mutex poisoned").conditional_draws(
+            queries,
+            extra_rows,
+            outcomes,
+            variances,
+            scales,
+            input_k,
+            used_k,
+            skip,
+            epistemic_scale,
+            aleatoric_scale,
+            observation_noise,
+            seeds,
+        )
     }
 }
 

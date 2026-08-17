@@ -15,6 +15,7 @@ fn main() -> Result<(), String> {
         "agx" => ComputeBackend::Agx,
         "auto" => ComputeBackend::Auto,
         "opencl" => ComputeBackend::OpenCl,
+        "cuda" => ComputeBackend::Cuda,
         value => return Err(format!("unknown backend {value:?}")),
     };
     let row_bytes = elements.div_ceil(2);
