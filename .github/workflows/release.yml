@@ -30,6 +30,9 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.88.0 --profile minimal
+
       - name: Install Pixi
         uses: prefix-dev/setup-pixi@v0.9.0
         with:

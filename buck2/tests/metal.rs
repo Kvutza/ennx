@@ -133,13 +133,13 @@ fn bf16_pytree_matches_cpu() {
         DenseTerm::new(91, -0.0025).unwrap(),
     ];
     let mut cpu = Bf16Tree::new(base.to_vec(), leaves.clone(), ComputeDevice::Cpu).unwrap();
-    assert_eq!(cpu.candidate(), base);
+    assert_eq!(cpu.candidate().unwrap(), base);
     cpu.materialize(&terms).unwrap();
     for device in [ComputeDevice::Metal, ComputeDevice::Agx] {
         let mut tree = Bf16Tree::new(base.to_vec(), leaves.clone(), device).unwrap();
-        assert_eq!(tree.candidate(), base);
+        assert_eq!(tree.candidate().unwrap(), base);
         tree.materialize(&terms).unwrap();
-        assert_eq!(tree.candidate(), cpu.candidate());
+        assert_eq!(tree.candidate().unwrap(), cpu.candidate().unwrap());
     }
 }
 
@@ -152,13 +152,14 @@ fn bf16_pytree_preserves_sub_ulp_directions() {
     cpu.materialize(&terms).unwrap();
     assert!(cpu
         .candidate()
+        .unwrap()
         .iter()
         .zip(base)
         .all(|(candidate, base)| *candidate != base));
     for device in [ComputeDevice::Metal, ComputeDevice::Agx] {
         let mut tree = Bf16Tree::new(base.to_vec(), leaves.clone(), device).unwrap();
         tree.materialize(&terms).unwrap();
-        assert_eq!(tree.candidate(), cpu.candidate());
+        assert_eq!(tree.candidate().unwrap(), cpu.candidate().unwrap());
     }
 }
 
