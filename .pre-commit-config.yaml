@@ -29,8 +29,7 @@ repos:
         name: Find forgotten Python files via git status
         entry: admin/find_forgotten_py.sh
         language: system
-        pass_filenames: false
-        always_run: true
+        pass_filenames: true
 
       - id: kiss-check
         name: kiss check

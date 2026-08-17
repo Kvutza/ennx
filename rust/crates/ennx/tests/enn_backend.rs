@@ -153,14 +153,12 @@ fn kiss_backend_mod_symbol_refs() {
     fn index_len() {}
     fn memory_yvar() {}
     fn release_enn_observation_pages() {}
-    let _ = (
-        from_env,
-        disk_read,
-        disk_write,
-        persist_enn_backend_index,
-        disk_driver,
-        index_len,
-        memory_yvar,
-        release_enn_observation_pages,
-    );
+    from_env();
+    disk_read();
+    disk_write();
+    persist_enn_backend_index();
+    disk_driver();
+    index_len();
+    memory_yvar();
+    release_enn_observation_pages();
 }

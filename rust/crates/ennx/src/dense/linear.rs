@@ -1,6 +1,6 @@
 use crate::weights::ComputeBackend;
 
-use super::{next_finite, sign, DenseTerm};
+use super::{dense_next, sign, DenseTerm};
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 mod metal;
@@ -31,10 +31,10 @@ impl DenseView {
 pub struct DenseLinear {
     columns: usize,
     rows: usize,
-    engine: Resident,
+    engine: LinearResident,
 }
 
-enum Resident {
+enum LinearResident {
     Cpu {
         weight: Vec<f32>,
         bias: Option<Vec<f32>>,
@@ -60,7 +60,7 @@ impl DenseLinear {
     ) -> Result<Self, String> {
         let rows = validate_model(&weight, columns, bias.as_deref(), weight_view, bias_view)?;
         let engine = match backend {
-            ComputeBackend::Cpu => Resident::Cpu {
+            ComputeBackend::Cpu => LinearResident::Cpu {
                 weight,
                 bias,
                 weight_view,
@@ -69,7 +69,7 @@ impl DenseLinear {
             ComputeBackend::Metal => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
-                    Resident::Metal(metal::Resident::new(
+                    LinearResident::Metal(metal::Resident::new(
                         &weight,
                         columns,
                         bias.as_deref(),
@@ -86,7 +86,7 @@ impl DenseLinear {
             ComputeBackend::Agx => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
-                    Resident::Metal(metal::Resident::new(
+                    LinearResident::Metal(metal::Resident::new(
                         &weight,
                         columns,
                         bias.as_deref(),
@@ -103,7 +103,7 @@ impl DenseLinear {
             ComputeBackend::OpenCl => {
                 #[cfg(feature = "opencl")]
                 {
-                    Resident::OpenCl(opencl::Resident::new(
+                    LinearResident::OpenCl(opencl::Resident::new(
                         &weight,
                         columns,
                         bias.as_deref(),
@@ -119,7 +119,7 @@ impl DenseLinear {
             ComputeBackend::Cuda => {
                 #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
                 {
-                    Resident::Cuda(cuda::Resident::new(
+                    LinearResident::Cuda(cuda::Resident::new(
                         &weight,
                         columns,
                         bias.as_deref(),
@@ -135,7 +135,7 @@ impl DenseLinear {
             ComputeBackend::Auto => {
                 #[cfg(all(target_os = "macos", feature = "metal"))]
                 {
-                    Resident::Metal(
+                    LinearResident::Metal(
                         metal::Resident::new(
                             &weight,
                             columns,
@@ -163,7 +163,7 @@ impl DenseLinear {
                     not(all(target_os = "macos", feature = "metal"))
                 ))]
                 {
-                    Resident::Cuda(cuda::Resident::new(
+                    LinearResident::Cuda(cuda::Resident::new(
                         &weight,
                         columns,
                         bias.as_deref(),
@@ -177,7 +177,7 @@ impl DenseLinear {
                     not(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))
                 ))]
                 {
-                    Resident::OpenCl(opencl::Resident::new(
+                    LinearResident::OpenCl(opencl::Resident::new(
                         &weight,
                         columns,
                         bias.as_deref(),
@@ -191,7 +191,7 @@ impl DenseLinear {
                     feature = "opencl"
                 )))]
                 {
-                    Resident::Cpu {
+                    LinearResident::Cpu {
                         weight,
                         bias,
                         weight_view,
@@ -210,12 +210,12 @@ impl DenseLinear {
     pub fn eval(&mut self, input: &[f32], terms: &[DenseTerm]) -> Result<Vec<f32>, String> {
         validate_eval(input, self.columns, terms)?;
         let values = match &mut self.engine {
-            Resident::Cpu {
+            LinearResident::Cpu {
                 weight,
                 bias,
                 weight_view,
                 bias_view,
-            } => cpu(
+            } => linear_cpu(
                 input,
                 weight,
                 bias.as_deref(),
@@ -225,11 +225,11 @@ impl DenseLinear {
                 self.rows,
             )?,
             #[cfg(all(target_os = "macos", feature = "metal"))]
-            Resident::Metal(engine) => engine.eval(input, terms)?,
+            LinearResident::Metal(engine) => engine.eval(input, terms)?,
             #[cfg(feature = "opencl")]
-            Resident::OpenCl(engine) => engine.eval(input, terms)?,
+            LinearResident::OpenCl(engine) => engine.eval(input, terms)?,
             #[cfg(all(feature = "cuda", target_os = "linux", target_arch = "x86_64"))]
-            Resident::Cuda(engine) => engine.eval(input, terms)?,
+            LinearResident::Cuda(engine) => engine.eval(input, terms)?,
         };
         if values.iter().any(|value| !value.is_finite()) {
             return Err("dense linear overflowed FP32".into());
@@ -255,9 +255,11 @@ pub fn linear(
     terms: &[DenseTerm],
     backend: ComputeBackend,
 ) -> Result<Vec<f32>, String> {
-    let rows = validate(input, weight, bias, weight_view, bias_view, terms)?;
+    let rows = linear_validate(input, weight, bias, weight_view, bias_view, terms)?;
     let values = match backend {
-        ComputeBackend::Cpu => cpu(input, weight, bias, weight_view, bias_view, terms, rows)?,
+        ComputeBackend::Cpu => {
+            linear_cpu(input, weight, bias, weight_view, bias_view, terms, rows)?
+        }
         ComputeBackend::Metal => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
@@ -365,7 +367,7 @@ pub fn linear(
                 feature = "opencl"
             )))]
             {
-                cpu(input, weight, bias, weight_view, bias_view, terms, rows)?
+                linear_cpu(input, weight, bias, weight_view, bias_view, terms, rows)?
             }
         }
     };
@@ -375,7 +377,7 @@ pub fn linear(
     Ok(values)
 }
 
-fn validate(
+fn linear_validate(
     input: &[f32],
     weight: &[f32],
     bias: Option<&[f32]>,
@@ -446,7 +448,7 @@ fn validate_eval(input: &[f32], columns: usize, terms: &[DenseTerm]) -> Result<(
 }
 
 #[cfg(feature = "zig-dense")]
-fn cpu(
+fn linear_cpu(
     input: &[f32],
     weight: &[f32],
     bias: Option<&[f32]>,
@@ -482,7 +484,7 @@ fn cpu(
 }
 
 #[cfg(not(feature = "zig-dense"))]
-fn cpu(
+fn linear_cpu(
     input: &[f32],
     weight: &[f32],
     bias: Option<&[f32]>,
@@ -539,7 +541,7 @@ fn perturbed(base: f32, view: DenseView, element: u64, terms: &[DenseTerm]) -> R
     }
     let candidate = base + view.scale * sum;
     if sum == 0.0 || candidate == base {
-        Ok(next_finite(base, positive))
+        Ok(dense_next(base, positive))
     } else if candidate.is_finite() {
         Ok(candidate)
     } else {

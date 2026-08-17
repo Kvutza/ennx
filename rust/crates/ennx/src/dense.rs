@@ -94,10 +94,10 @@ pub fn apply(
     terms: &[DenseTerm],
     backend: ComputeBackend,
 ) -> Result<DenseResult, String> {
-    validate(base, leaves, terms)?;
+    dense_validate(base, leaves, terms)?;
 
     let values = match backend {
-        ComputeBackend::Cpu => cpu(base, leaves, terms)?,
+        ComputeBackend::Cpu => dense_cpu(base, leaves, terms)?,
         ComputeBackend::Metal => {
             #[cfg(all(target_os = "macos", feature = "metal"))]
             {
@@ -167,7 +167,7 @@ pub fn apply(
                 feature = "opencl"
             )))]
             {
-                cpu(base, leaves, terms)?
+                dense_cpu(base, leaves, terms)?
             }
         }
     };
@@ -195,7 +195,7 @@ pub fn dist2(leaves: &[DenseLeaf], left: &[DenseTerm], right: &[DenseTerm]) -> R
     zig_dist2(leaves, left, right)
 }
 
-fn validate(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<(), String> {
+fn dense_validate(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<(), String> {
     if base.is_empty() {
         return Err("dense base cannot be empty".into());
     }
@@ -284,7 +284,7 @@ fn coefficient(terms: &[DenseTerm], seed: u64) -> f64 {
 }
 
 #[cfg(feature = "zig-dense")]
-fn cpu(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<Vec<f32>, String> {
+fn dense_cpu(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<Vec<f32>, String> {
     let mut values = vec![0.0; base.len()];
     let mut changed = 0usize;
     let status = unsafe {
@@ -312,7 +312,7 @@ fn cpu(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<Vec<f3
 }
 
 #[cfg(not(feature = "zig-dense"))]
-fn cpu(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<Vec<f32>, String> {
+fn dense_cpu(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<Vec<f32>, String> {
     let mut values = vec![0.0; base.len()];
     reference(base, leaves, terms, &mut values)?;
     Ok(values)
@@ -383,7 +383,7 @@ fn reference(
             }
             let candidate = base[index] + leaf.scale * sum;
             out[index] = if sum == 0.0 || candidate == base[index] {
-                next_finite(base[index], positive)
+                dense_next(base[index], positive)
             } else if candidate.is_finite() {
                 candidate
             } else {
@@ -404,7 +404,7 @@ pub(crate) fn sign(seed: u64, leaf: u64, element: u64) -> f32 {
     }
 }
 
-fn next_finite(value: f32, positive: bool) -> f32 {
+pub(super) fn dense_next(value: f32, positive: bool) -> f32 {
     let mut bits = value.to_bits();
     if value == 0.0 {
         return f32::from_bits(if positive { 1 } else { 0x8000_0001 });

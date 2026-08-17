@@ -12,8 +12,13 @@ rust/crates/ennx/src/weights/opencl_weights.rs
 # CUDA-Oxide kernels and their host bridge require an NVIDIA device. They are
 # exercised by the Bazel CUDA parity and wheel gates rather than lexical KISS.
 cuda/
+rust/crates/ennx/build.rs
 rust/crates/ennx/src/bf16_search.rs
+rust/crates/ennx/src/dense/bf16/cuda.rs
+rust/crates/ennx/src/dense/cuda.rs
+rust/crates/ennx/src/dense/linear/cuda.rs
 rust/crates/ennx/src/knn/cuda_index.rs
+rust/crates/ennx/src/trials/cuda.rs
 # PyO3 and DLPack ownership are exercised through the built-wheel Python API;
 # KISS cannot infer coverage across the native Python extension boundary.
 rust/crates/ennx-py/src/
