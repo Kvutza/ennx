@@ -11,10 +11,10 @@ import shutil
 import sys
 import sysconfig
 import tempfile
+import tomllib
 import zipfile
 from pathlib import Path
 
-VERSION = "0.1.6+cuda75"
 TAG = "cp312-cp312-manylinux_2_28_x86_64"
 
 
@@ -26,6 +26,11 @@ def _digest(path: Path) -> str:
 def _write(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(value, encoding="utf-8", newline="\n")
+
+
+def package_version(root: Path) -> str:
+    with (root / "pyproject.toml").open("rb") as file:
+        return tomllib.load(file)["project"]["version"]
 
 
 def build_wheel(root: Path, extension: Path, output: Path) -> Path:
@@ -40,8 +45,9 @@ def build_wheel(root: Path, extension: Path, output: Path) -> Path:
     if not suffix or "cpython-312" not in suffix:
         raise RuntimeError(f"unexpected extension suffix: {suffix!r}")
 
+    version = package_version(root) + "+cuda75"
     output.mkdir(parents=True, exist_ok=True)
-    wheel = output / f"ennx-{VERSION}-{TAG}.whl"
+    wheel = output / f"ennx-{version}-{TAG}.whl"
     with tempfile.TemporaryDirectory(prefix="ennx-cuda-wheel-") as directory:
         stage = Path(directory)
         package = stage / "ennx"
@@ -52,14 +58,14 @@ def build_wheel(root: Path, extension: Path, output: Path) -> Path:
         )
         shutil.copy2(extension, package / f"ennx_rust{suffix}")
 
-        dist = stage / f"ennx-{VERSION}.dist-info"
+        dist = stage / f"ennx-{version}.dist-info"
         _write(
             dist / "METADATA",
             "\n".join(
                 [
                     "Metadata-Version: 2.3",
                     "Name: ennx",
-                    f"Version: {VERSION}",
+                    f"Version: {version}",
                     "Summary: Epistemic Nearest Neighbors with CUDA-Oxide sm_75 support",
                     "Requires-Python: >=3.12,<3.13",
                     "Requires-Dist: numpy>=2.1",

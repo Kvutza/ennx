@@ -95,7 +95,7 @@ python_wheel(
         "prelude//cpu/constraints:arm64",
         "prelude//os/constraints:linux",
     ],
-    version = "0.1.0",
+    version = read_config("ennx", "release_version", "0.1.1"),
 )
 
 python_wheel(
@@ -114,7 +114,7 @@ python_wheel(
         "prelude//cpu/constraints:x86_64",
         "prelude//os/constraints:linux",
     ],
-    version = "0.1.0",
+    version = read_config("ennx", "release_version", "0.1.1"),
 )
 
 python_wheel(
@@ -133,7 +133,7 @@ python_wheel(
         "prelude//cpu/constraints:arm64",
         "prelude//os/constraints:macos",
     ],
-    version = "0.1.0",
+    version = read_config("ennx", "release_version", "0.1.1"),
 )
 
 alias(

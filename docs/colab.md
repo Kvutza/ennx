@@ -10,7 +10,7 @@ and run the cells in order. The notebook fingerprints the assigned runtime,
 clones ENNx, installs the pinned CUDA-Oxide toolchain, runs `cargo oxide doctor`,
 executes CUDA-Oxide's `vecadd`, and verifies ENNx's trial materialization kernel.
 It then imports the Cargo-built extension in Python 3.12 and checks the public
-resident-session API against the CPU backend.
+resident-session API against the CPU device.
 
 For an applied walkthrough, open `examples/colab_jax_cuda_ennx.ipynb`. It uses
 Colab's preinstalled CUDA-enabled JAX to evaluate a quantized CNN on the T4 and the public
@@ -97,7 +97,7 @@ wheels continue to bundle the real Faiss runtime.
 
 The CUDA crate remains a separate nightly workspace and is enabled in ENNx only
 for Linux x86_64 builds with the `cuda` feature. The existing experimental
-Python resident session selects it with `backend="cuda"`.
+Python resident session selects it with `device="cuda"`.
 
 The BF16 T4 release gate also measures the full resident proposal path. With
 one million weights, eight candidates, and eight history rows, the current
