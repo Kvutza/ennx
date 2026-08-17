@@ -85,13 +85,13 @@ pub fn batched_sq_l2_f64_rows(
 }
 
 #[cfg(test)]
-mod kiss_coverage_tests {
+mod tests {
     use crate::mmap_store::MmapColumnStore;
     use ndarray::array;
     use tempfile::TempDir;
 
     #[test]
-    fn distance_units_are_linked() {
+    fn distance_agrees() {
         let mut buf = Vec::new();
         crate::distance::bpann_row_to_f32(&[1.0, 2.0], false, &[1.0, 1.0], &mut buf);
         assert_eq!(buf, vec![1.0, 2.0]);

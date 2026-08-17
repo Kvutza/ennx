@@ -88,13 +88,13 @@ pub fn pymodule_optimizer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::py_weights::PyTurboTrial>()?;
     m.add_class::<crate::py_weights::PyDenseLinear>()?;
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
-    m.add_class::<crate::py_weights::PyBf16Tree>()?;
+    m.add_class::<crate::py_weights::PyParamBuffer>()?;
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
-    m.add_class::<crate::py_bf16::PyBf16Search>()?;
+    m.add_class::<crate::py_bf16::PyParamBlock>()?;
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
-    m.add_class::<crate::py_bf16::PyBf16Trial>()?;
+    m.add_class::<crate::py_bf16::PySearchState>()?;
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
-    m.add_class::<crate::py_bf16::PyBf16View>()?;
+    m.add_class::<crate::py_bf16::PyProposals>()?;
     m.add_class::<crate::py_weights::PyBpannHistory>()?;
     m.add_function(wrap_pyfunction!(
         crate::py_optimizer::create_optimizer_py,
@@ -141,60 +141,4 @@ pub fn pymodule_optimizer(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     Ok(())
-}
-
-#[doc(hidden)]
-pub fn pymodule_hypervolume_kiss_hook() {
-    std::hint::black_box(pymodule_hypervolume);
-}
-
-#[doc(hidden)]
-pub fn pymodule_hash_kiss_hook() {
-    std::hint::black_box(pymodule_hash);
-}
-
-#[doc(hidden)]
-pub fn pymodule_util_kiss_hook() {
-    std::hint::black_box(pymodule_util);
-}
-
-#[doc(hidden)]
-pub fn pymodule_model_kiss_hook() {
-    std::hint::black_box(pymodule_model);
-}
-
-#[doc(hidden)]
-pub fn pymodule_fit_kiss_hook() {
-    std::hint::black_box(pymodule_fit);
-}
-
-#[doc(hidden)]
-pub fn pymodule_experimental_kiss_hook() {
-    std::hint::black_box(pymodule_experimental);
-}
-
-#[doc(hidden)]
-pub fn pymodule_optimizer_kiss_hook() {
-    std::hint::black_box(pymodule_optimizer);
-}
-
-#[doc(hidden)]
-pub fn kiss_link_child_pymodule_exports() {
-    pymodule_hypervolume_kiss_hook();
-    pymodule_hash_kiss_hook();
-    pymodule_util_kiss_hook();
-    pymodule_model_kiss_hook();
-    pymodule_fit_kiss_hook();
-    pymodule_experimental_kiss_hook();
-    pymodule_optimizer_kiss_hook();
-}
-
-#[cfg(test)]
-mod kiss_child_pymodule_coverage {
-    use super::*;
-
-    #[test]
-    fn kiss_link_calls_all_child_pymodule_hooks() {
-        kiss_link_child_pymodule_exports();
-    }
 }

@@ -149,7 +149,7 @@ pub(crate) fn build_vector_leaf_forest_index(
 }
 
 #[cfg(test)]
-mod kiss_coverage_tests {
+mod tests {
     use super::*;
     use crate::mmap_store::MmapColumnStore;
     use tempfile::TempDir;

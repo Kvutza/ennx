@@ -3,7 +3,7 @@ use ndarray::{Array1, Array2};
 use super::Optimizer;
 use crate::error::ENNError;
 
-/// Public accessor for optimizer observation row reads (kiss external-test surface).
+/// Public accessor for optimizer observation row reads.
 pub struct ObsAccess<'a> {
     opt: &'a Optimizer,
 }

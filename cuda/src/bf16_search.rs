@@ -22,6 +22,7 @@ struct Bf16Scratch {
     partials: DeviceBuffer<f32>,
     selection: DeviceBuffer<Selection>,
     trial_slots: DeviceBuffer<u32>,
+    destinations: DeviceBuffer<u32>,
     status: DeviceBuffer<u32>,
 }
 
@@ -30,6 +31,7 @@ struct AskInput<'a> {
     history: usize,
     trial_slots: &'a [u32],
     seeds: &'a [u64],
+    seed_root: Option<u64>,
     candidates_per_region: usize,
     coefficient: f32,
     draw_seed: u64,
@@ -73,6 +75,7 @@ impl Bf16Scratch {
             partials: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
             selection: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
             trial_slots: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
+            destinations: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
             status: DeviceBuffer::zeroed(stream, 1).map_err(cuda_error)?,
         })
     }
@@ -111,6 +114,8 @@ impl Bf16Scratch {
         if region_capacity > self.region_capacity {
             self.selection = DeviceBuffer::zeroed(stream, region_capacity).map_err(cuda_error)?;
             self.trial_slots = DeviceBuffer::zeroed(stream, region_capacity).map_err(cuda_error)?;
+            self.destinations =
+                DeviceBuffer::zeroed(stream, region_capacity).map_err(cuda_error)?;
             self.region_capacity = region_capacity;
         }
         if status_capacity > self.status_capacity {
@@ -125,6 +130,7 @@ impl Bf16Scratch {
 pub struct Bf16SearchEngine {
     runtime: Runtime,
     rows: DeviceBuffer<u16>,
+    batch: DeviceBuffer<u16>,
     leaves: DeviceBuffer<Bf16Leaf>,
     tiles: DeviceBuffer<DenseTile>,
     row_len: usize,
@@ -195,6 +201,7 @@ impl Bf16SearchEngine {
             .checked_mul(row_stride)
             .ok_or("CUDA BF16 resident row count overflow")?;
         let rows = DeviceBuffer::zeroed(&runtime.stream, row_count).map_err(cuda_error)?;
+        let batch = DeviceBuffer::zeroed(&runtime.stream, 1).map_err(cuda_error)?;
         let leaves = DeviceBuffer::from_host(&runtime.stream, leaves).map_err(cuda_error)?;
         let tile_count = tiles.len();
         let tiles = DeviceBuffer::from_host(&runtime.stream, &tiles).map_err(cuda_error)?;
@@ -210,6 +217,7 @@ impl Bf16SearchEngine {
         Ok(Self {
             runtime,
             rows,
+            batch,
             leaves,
             tiles,
             row_len: len,
@@ -279,7 +287,7 @@ impl Bf16SearchEngine {
             failures: 0,
             restarts: 0,
             history: 1,
-            pad: 0,
+            status: 0,
         };
         copy_prefix(&self.state, &[state], &self.runtime.stream)
     }
@@ -292,6 +300,21 @@ impl Bf16SearchEngine {
         capacity: usize,
         failure_tolerance: usize,
     ) -> CudaResult<TellOutput> {
+        self.check_tell(trial_slots, values.len(), variances.len(), capacity)?;
+        copy_prefix(&self.tell_values, values, &self.runtime.stream)?;
+        copy_prefix(&self.tell_variances, variances, &self.runtime.stream)?;
+        self.launch_tell(trial_slots, values.len(), capacity, failure_tolerance)?;
+        self.collect_tell(values.len())
+    }
+
+    pub fn queue_values(
+        &mut self,
+        trial_slots: &[u32],
+        values: &[f32],
+        variances: &[f32],
+        capacity: usize,
+        failure_tolerance: usize,
+    ) -> CudaResult<()> {
         self.check_tell(trial_slots, values.len(), variances.len(), capacity)?;
         copy_prefix(&self.tell_values, values, &self.runtime.stream)?;
         copy_prefix(&self.tell_variances, variances, &self.runtime.stream)?;
@@ -311,6 +334,56 @@ impl Bf16SearchEngine {
         capacity: usize,
         failure_tolerance: usize,
     ) -> CudaResult<TellOutput> {
+        self.check_tell(trial_slots, count, count, capacity)?;
+        if values == 0 || variances == Some(0) {
+            return Err("CUDA BF16 tell requires valid device rewards".to_string());
+        }
+        let bytes = count
+            .checked_mul(size_of::<f32>())
+            .ok_or("CUDA BF16 tell byte count overflow")?;
+        unsafe {
+            cuda_core::memory::memcpy_dtod_async(
+                self.tell_values.cu_deviceptr(),
+                values,
+                bytes,
+                self.runtime.stream.cu_stream(),
+            )
+            .map_err(cuda_error)?;
+            if let Some(pointer) = variances {
+                cuda_core::memory::memcpy_dtod_async(
+                    self.tell_variances.cu_deviceptr(),
+                    pointer,
+                    bytes,
+                    self.runtime.stream.cu_stream(),
+                )
+                .map_err(cuda_error)?;
+            } else {
+                cuda_core::memory::memset_d8_async(
+                    self.tell_variances.cu_deviceptr(),
+                    0,
+                    bytes,
+                    self.runtime.stream.cu_stream(),
+                )
+                .map_err(cuda_error)?;
+            }
+        }
+        self.launch_tell(trial_slots, count, capacity, failure_tolerance)?;
+        self.collect_tell(count)
+    }
+
+    /// Queue resident rewards and trust-region adaptation without a host readback.
+    ///
+    /// # Safety
+    /// The pointers must each address `count * 4` readable bytes on CUDA device 0.
+    pub unsafe fn queue_tell(
+        &mut self,
+        trial_slots: &[u32],
+        values: u64,
+        variances: Option<u64>,
+        count: usize,
+        capacity: usize,
+        failure_tolerance: usize,
+    ) -> CudaResult<()> {
         self.check_tell(trial_slots, count, count, capacity)?;
         if values == 0 || variances == Some(0) {
             return Err("CUDA BF16 tell requires valid device rewards".to_string());
@@ -375,7 +448,7 @@ impl Bf16SearchEngine {
         count: usize,
         capacity: usize,
         failure_tolerance: usize,
-    ) -> CudaResult<TellOutput> {
+    ) -> CudaResult<()> {
         copy_prefix(&self.scratch.trial_slots, trial_slots, &self.runtime.stream)?;
         let launch = self
             .runtime
@@ -388,7 +461,12 @@ impl Bf16SearchEngine {
             trials: to_u32(count, "BF16 tell count")?,
             capacity: to_u32(capacity, "BF16 history capacity")?,
             failure_tolerance: to_u32(failure_tolerance.max(1), "BF16 failure tolerance")?,
-            pad: 0,
+            status_count: to_u32(
+                count
+                    .checked_mul(self.tile_count)
+                    .ok_or("BF16 proposal status count overflow")?,
+                "BF16 proposal status count",
+            )?,
         };
         self.runtime
             .module
@@ -400,18 +478,26 @@ impl Bf16SearchEngine {
                 &mut self.scratch.outcomes,
                 &mut self.scratch.variances,
                 &self.scratch.trial_slots,
+                &mut self.scratch.destinations,
                 &self.tell_values,
                 &self.tell_variances,
+                &self.scratch.status,
                 &mut self.accepted,
                 &mut self.state,
                 &mut self.summary,
                 params,
             )
             .map_err(cuda_error)?;
-        self.runtime.context.check_err().map_err(cuda_error)?;
+        self.runtime.context.check_err().map_err(cuda_error)
+    }
+
+    pub fn collect_tell(&self, count: usize) -> CudaResult<TellOutput> {
+        if count == 0 || count > BF16_MAX_PENDING {
+            return Err("CUDA BF16 summary count is invalid".to_string());
+        }
         let summary = read_prefix(&self.summary, &self.runtime.stream, 1)?[0];
         if summary.status != 0 {
-            return Err("CUDA BF16 values and variances must be finite".to_string());
+            return Err("CUDA BF16 proposal or rewards are invalid".to_string());
         }
         let accepted = read_prefix(&self.accepted, &self.runtime.stream, count)?
             .into_iter()
@@ -450,6 +536,7 @@ impl Bf16SearchEngine {
             history,
             trial_slots,
             seeds,
+            seed_root: None,
             candidates_per_region,
             coefficient,
             draw_seed,
@@ -467,6 +554,45 @@ impl Bf16SearchEngine {
         Ok(selections)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn ask_seeded(
+        &mut self,
+        base_slot: usize,
+        history: usize,
+        trial_slots: &[u32],
+        candidates_per_region: usize,
+        seed_root: u64,
+        coefficient: f32,
+        draw_seed: u64,
+        config: Ask,
+    ) -> CudaResult<()> {
+        self.last_profile = None;
+        let client = TRACY.get_or_init(tracy_client::Client::start);
+        let _zone = client
+            .clone()
+            .span(tracy_client::span_location!("ennx.cuda.bf16.round"), 0);
+        let input = AskInput {
+            base_slot,
+            history,
+            trial_slots,
+            seeds: &[],
+            seed_root: Some(seed_root),
+            candidates_per_region,
+            coefficient,
+            draw_seed,
+            config,
+        };
+        let shape = self.check_ask(&input)?;
+        self.upload(&input, shape)?;
+        let events = self.launch(&input, shape)?;
+        if let Some(events) = events {
+            let profile = events.profile()?;
+            publish_profile(client, profile);
+            self.last_profile = Some(profile);
+        }
+        Ok(())
+    }
+
     fn check_ask(&self, input: &AskInput<'_>) -> CudaResult<SearchShape> {
         self.check_slot(input.base_slot)?;
         let history = input.history;
@@ -482,7 +608,7 @@ impl Bf16SearchEngine {
         let candidates = regions
             .checked_mul(input.candidates_per_region)
             .ok_or("CUDA BF16 candidate count overflow")?;
-        if input.seeds.len() != candidates {
+        if input.seed_root.is_none() && input.seeds.len() != candidates {
             return Err("CUDA BF16 seeds do not match the search shape".to_string());
         }
         if input.config.neighbors == 0 || input.config.neighbors > history {
@@ -526,15 +652,48 @@ impl Bf16SearchEngine {
             shape.partials,
             shape.status,
         )?;
-        let seeds = input
-            .seeds
-            .iter()
-            .map(|seed| Seed {
-                low: *seed as u32,
-                high: (*seed >> 32) as u32,
-            })
-            .collect::<Vec<_>>();
-        copy_prefix(&self.scratch.seeds, &seeds, &self.runtime.stream)?;
+        let batch_len = shape
+            .regions
+            .checked_mul(self.row_len)
+            .ok_or("CUDA BF16 batch size overflow")?;
+        if batch_len > self.batch.len() {
+            self.batch =
+                DeviceBuffer::zeroed(&self.runtime.stream, batch_len).map_err(cuda_error)?;
+        }
+        if let Some(root) = input.seed_root {
+            let launch = self
+                .runtime
+                .module
+                .prepare_seed_bf16(LaunchConfig1D::new(
+                    to_u32(
+                        shape.candidates.div_ceil(THREADS as usize),
+                        "BF16 seed blocks",
+                    )?,
+                    THREADS,
+                    0,
+                ))
+                .map_err(cuda_error)?;
+            self.runtime
+                .module
+                .seed_bf16(
+                    &self.runtime.stream,
+                    &launch,
+                    &mut self.scratch.seeds,
+                    root,
+                    to_u32(shape.candidates, "BF16 seed count")?,
+                )
+                .map_err(cuda_error)?;
+        } else {
+            let seeds = input
+                .seeds
+                .iter()
+                .map(|seed| Seed {
+                    low: *seed as u32,
+                    high: (*seed >> 32) as u32,
+                })
+                .collect::<Vec<_>>();
+            copy_prefix(&self.scratch.seeds, &seeds, &self.runtime.stream)?;
+        }
         copy_prefix(
             &self.scratch.trial_slots,
             input.trial_slots,
@@ -609,7 +768,7 @@ impl Bf16SearchEngine {
             neighbors: to_u32(input.config.neighbors, "BF16 neighbors")?,
             acquisition: input.config.acquisition,
             tiles: to_u32(self.tile_count, "BF16 distance tile count")?,
-            pad1: 0,
+            resident: u32::from(input.seed_root.is_some()),
         };
         self.runtime
             .module
@@ -618,6 +777,7 @@ impl Bf16SearchEngine {
                 &distance_launch,
                 &self.rows,
                 &self.scratch.history_slots,
+                &self.state,
                 &self.scratch.seeds,
                 &self.leaves,
                 &self.tiles,
@@ -643,6 +803,7 @@ impl Bf16SearchEngine {
                 &self.scratch.partials,
                 &self.scratch.outcomes,
                 &self.scratch.variances,
+                &self.state,
                 &self.scratch.draws,
                 &mut self.scratch.scores,
                 params,
@@ -671,6 +832,8 @@ impl Bf16SearchEngine {
                 &self.runtime.stream,
                 &write_launch,
                 &mut self.rows,
+                &mut self.batch,
+                &self.state,
                 &self.scratch.seeds,
                 &self.scratch.selection,
                 &self.leaves,
@@ -678,9 +841,11 @@ impl Bf16SearchEngine {
                 &self.scratch.trial_slots,
                 &mut self.scratch.status,
                 self.row_stride as u64,
+                self.row_len as u64,
                 to_u32(input.base_slot, "BF16 base slot")?,
                 to_u32(self.tile_count, "BF16 tile count")?,
                 input.coefficient,
+                u32::from(input.seed_root.is_some()),
             )
             .map_err(cuda_error)?;
         let materialize_end = profile
@@ -761,6 +926,55 @@ impl Bf16SearchEngine {
         self.check_slot(slot)?;
         sync_stream(&self.runtime, stream)?;
         Ok((self.row_pointer(slot)?, row_bytes(self.row_len)?, 0))
+    }
+
+    /// Gather resident trial slots into one contiguous device matrix.
+    pub fn device_batch(
+        &mut self,
+        slots: &[u32],
+        stream: Option<i64>,
+    ) -> CudaResult<(u64, usize, usize)> {
+        if slots.is_empty() || slots.len() > BF16_MAX_PENDING {
+            return Err("CUDA BF16 batch shape is invalid".to_string());
+        }
+        let bytes = row_bytes(self.row_len)?;
+        for (row, &slot) in slots.iter().enumerate() {
+            self.check_slot(slot as usize)?;
+            let offset = row
+                .checked_mul(bytes)
+                .ok_or("CUDA BF16 batch offset overflow")?;
+            let destination = self
+                .batch
+                .cu_deviceptr()
+                .checked_add(offset as u64)
+                .ok_or("CUDA BF16 batch pointer overflow")?;
+            unsafe {
+                cuda_core::memory::memcpy_dtod_async(
+                    destination,
+                    self.row_pointer(slot as usize)?,
+                    bytes,
+                    self.runtime.stream.cu_stream(),
+                )
+                .map_err(cuda_error)?;
+            }
+        }
+        sync_stream(&self.runtime, stream)?;
+        Ok((self.batch.cu_deviceptr(), slots.len(), self.row_len))
+    }
+
+    pub fn device_round(
+        &self,
+        rows: usize,
+        stream: Option<i64>,
+    ) -> CudaResult<(u64, usize, usize)> {
+        let elements = rows
+            .checked_mul(self.row_len)
+            .ok_or("CUDA BF16 round size overflow")?;
+        if rows == 0 || elements > self.batch.len() {
+            return Err("CUDA BF16 round shape is invalid".to_string());
+        }
+        sync_stream(&self.runtime, stream)?;
+        Ok((self.batch.cu_deviceptr(), rows, self.row_len))
     }
 
     pub fn last_profile(&self) -> Option<AskProfile> {

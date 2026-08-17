@@ -15,10 +15,10 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "MultiTrustRegion": (".._rust", "MultiTrustRegion"),
     "PackedSearch": (".._rust", "PackedSearch"),
     "BpannHistory": (".._rust", "BpannHistory"),
-    "Bf16Tree": (".._rust", "Bf16Tree"),
-    "Bf16Search": (".._rust", "Bf16Search"),
-    "Bf16Trial": (".._rust", "Bf16Trial"),
-    "Bf16View": (".._rust", "Bf16View"),
+    "ParamBuffer": (".._rust", "ParamBuffer"),
+    "ParamBlock": (".._rust", "ParamBlock"),
+    "SearchState": (".._rust", "SearchState"),
+    "Proposals": (".._rust", "Proposals"),
     "SharingPolicy": (".multi_trust_region", "SharingPolicy"),
     "RegionBatch": (".multi_trust_region", "RegionBatch"),
     "RegionCandidate": (".multi_trust_region", "RegionCandidate"),
@@ -46,6 +46,34 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
 experimental = sys.modules[__name__]
 
 
+def turbo_enn(
+    base: object,
+    base_value: float,
+    blocks: list[object],
+    capacity: int,
+    *,
+    max_pending: int = 1,
+    base_variance: float = 0.0,
+    length_init: float = 0.8,
+    length_min: float = 0.0078125,
+    length_max: float = 1.6,
+) -> object:
+    search_type = __getattr__("SearchState")
+    if search_type is None:
+        raise RuntimeError("turbo_enn requires the CUDA wheel")
+    return search_type(
+        base,
+        base_value,
+        blocks,
+        capacity,
+        max_pending=max_pending,
+        base_variance=base_variance,
+        length_init=length_init,
+        length_min=length_min,
+        length_max=length_max,
+    )
+
+
 def __getattr__(name: str):
     return lazy_getattr(
         name=name,
@@ -58,10 +86,6 @@ def __getattr__(name: str):
 
 __all__: list[str] = [
     "BpannHistory",
-    "Bf16Tree",
-    "Bf16Search",
-    "Bf16Trial",
-    "Bf16View",
     "CandidateProposal",
     "DenseLinear",
     "ModelPackage",
@@ -69,15 +93,19 @@ __all__: list[str] = [
     "MultiTrustRegionLoop",
     "NativeKdaModel",
     "Optimizer",
+    "PackedSearch",
+    "PackedTurbo",
+    "ParamBlock",
+    "ParamBuffer",
+    "Proposals",
     "RegionBatch",
     "RegionCandidate",
     "RegionRound",
     "ResidentBoSession",
+    "SearchState",
     "SharingPolicy",
     "Telemetry",
-    "PackedTurbo",
     "TurboTrial",
-    "PackedSearch",
     "allocate_region_batches",
     "create_optimizer_enn",
     "create_optimizer_enn_multi_tr",
@@ -92,6 +120,7 @@ __all__: list[str] = [
     "quantize_fp4_e2m1",
     "quantize_int4",
     "select_region_candidates",
+    "turbo_enn",
     "weight_int4_select_ucb",
     "weight_select_ucb",
 ]

@@ -81,31 +81,6 @@ fn disk_backend_roundtrip_and_search() {
 }
 
 #[test]
-fn kiss_disk_bpann_static_coverage_names() {
-    let _type_hint: Option<ennx::DiskBpannEnnBackend> = None;
-    let names: &[&str] = &[
-        "MmapColumnStore",
-        "mmap_open_or_create",
-        "mmap_append",
-        "mmap_row_slice",
-        "mmap_gather",
-        "write_metadata",
-        "append_rows",
-        "mark_index_stale",
-        "ensure_index_sync",
-        "persist_index_to_disk",
-        "train_rows_at",
-        "row_x",
-        "row_y",
-        "row_yvar",
-        "search",
-        "index_memory_bytes",
-        "new_empty",
-    ];
-    assert!(!names.is_empty());
-}
-
-#[test]
 fn disk_storage_rejects_non_disk_driver() {
     let dir = TempDir::new().expect("tempdir");
     match EpistemicNearestNeighbors::new_with_storage(
@@ -141,24 +116,4 @@ fn scale_x_rejects_bpann_disk() {
             "unexpected error: {e}"
         ),
     }
-}
-
-#[test]
-fn kiss_backend_mod_symbol_refs() {
-    fn from_env() {}
-    fn disk_read() {}
-    fn disk_write() {}
-    fn persist_enn_backend_index() {}
-    fn disk_driver() {}
-    fn index_len() {}
-    fn memory_yvar() {}
-    fn release_enn_observation_pages() {}
-    from_env();
-    disk_read();
-    disk_write();
-    persist_enn_backend_index();
-    disk_driver();
-    index_len();
-    memory_yvar();
-    release_enn_observation_pages();
 }

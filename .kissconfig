@@ -1,11 +1,11 @@
-# Thresholds: [python]/[rust] from `kiss mimic .` (codebase maxima).
-# [gate] kept strict: coverage 95%, orphan + duplication checks on.
+# Structural thresholds for changed-file review. Behavioral coverage belongs to
+# the Rust and Python test runners, not KISS's lexical name matcher.
 
 [gate]
 duplication_enabled = true
 min_similarity = 0.9
-orphan_module_enabled = true
-test_coverage_threshold = 90
+orphan_module_enabled = false
+test_coverage_threshold = 0
 
 [python]
 boolean_parameters = 1

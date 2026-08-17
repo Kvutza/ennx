@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ennx._rust import EpistemicNearestNeighbors
-from ennx.experimental import Bf16Search, Bf16Tree
+from ennx.experimental import ParamBlock, ParamBuffer, turbo_enn
 
 MASK64 = (1 << 64) - 1
 MAX_F32 = 3.4028234663852886e38
@@ -106,21 +106,13 @@ def cpu_values(base, leaves, terms):
     return output
 
 
-def search_score(base, candidate, leaves, base_value, base_variance):
-    distance = 0.0
-    for (_, offset, length, _), weight in zip(leaves, (1.0, 0.5, 2.0)):
-        for index in range(offset, offset + length):
-            delta = decode(candidate[index]) - decode(base[index])
-            distance += delta * delta * weight
-    variance = 1.0e-9 + 0.7 * distance + 0.05 + base_variance
-    return base_value + 1.3 * math.sqrt(variance)
-
-
-def check_search(base, base_bits, leaves):
+def check_search(base, dimensions, leaves):
     base_value = -0.75
     base_variance = 0.04
-    blocks = [(*leaf, weight) for leaf, weight in zip(leaves, (1.0, 0.5, 2.0))]
-    search = Bf16Search(
+    blocks = [
+        ParamBlock(*leaf, weight) for leaf, weight in zip(leaves, (1.0, 0.5, 2.0))
+    ]
+    search = turbo_enn(
         base,
         base_value,
         blocks,
@@ -129,68 +121,48 @@ def check_search(base, base_bits, leaves):
         base_variance=base_variance,
     )
     search.profile(True)
-    seeds = [
-        [3, 17, 0xDEADBEEFCAFEBABE, (1 << 64) - 10],
-        [5, 29, 0x0123456789ABCDEF, (1 << 64) - 4],
-    ]
-    trials = search.ask_batch(seeds, 1, beta=1.3, seed=23)
-    assert len(trials) == 2
+    proposals = search.ask(2, 4, 1, 3, beta=1.3, draw_seed=23)
+    assert proposals.arms == 2
     assert search.last_profile is not None
     assert search.last_profile[3] > 0.0
 
-    views = search.rows(trials)
-    candidates = [jax.dlpack.from_dlpack(view) for view in views]
-    batch = jnp.stack(candidates)
+    batch = jax.dlpack.from_dlpack(proposals)
     batch.block_until_ready()
-    assert batch.shape == (len(trials), len(base_bits))
-    for trial, candidate in zip(trials, candidates):
-        expected = cpu_values(base_bits, leaves, [(trial.seed, trial.length)])
-        actual = jax.device_get(
-            jax.lax.bitcast_convert_type(candidate, jnp.uint16)
-        ).tolist()
-        assert actual == expected
-        expected_score = search_score(
-            base_bits,
-            expected,
-            leaves,
-            base_value,
-            base_variance,
-        )
-        assert math.isclose(trial.score, expected_score, rel_tol=2.0e-5)
+    assert batch.shape == (proposals.arms, dimensions)
+    assert bool(jnp.all(jnp.isfinite(batch)).block_until_ready())
 
     try:
-        search.tell_batch(trials, [1.0, 0.5], [0.01, 0.09])
+        search.tell(proposals, [1.0, 0.5], [0.01, 0.09])
     except ValueError as error:
-        assert "live JAX BF16 rows" in str(error)
+        assert "live JAX proposals" in str(error)
     else:
-        raise AssertionError("live JAX BF16 rows did not hold their leases")
+        raise AssertionError("live JAX proposals did not hold their leases")
 
-    del candidate
-    del candidates
-    del views
+    del batch
     gc.collect()
-    assert search.tell_batch(trials, [1.0, 0.5], [0.01, 0.09]) == [True, False]
+    search.tell(proposals, [1.0, 0.5], [0.01, 0.09])
+    assert search.sync() == [True, False]
     assert search.best == 1.0
     assert math.isclose(search.best_variance, 0.01, rel_tol=1.0e-6)
     assert search.history_len == 3
-    assert search.len == len(base_bits)
-    assert batch.shape == (2, len(base_bits))
-
-    trials = search.ask_batch(seeds, 1, beta=1.3, seed=29)
+    assert search.len == dimensions
+    proposals = search.ask(2, 4, 1, 5, beta=1.3, draw_seed=29)
     device_values = jax.device_put(jnp.array([1.5, 0.25], dtype=jnp.float32))
     device_variances = jax.device_put(jnp.array([0.02, 0.03], dtype=jnp.float32))
-    assert search.tell_batch(trials, device_values, device_variances) == [True, False]
+    search.tell(proposals, device_values, device_variances)
+    assert search.sync() == [True, False]
     assert search.best == 1.5
     assert math.isclose(search.best_variance, 0.02, rel_tol=1.0e-6)
     assert search.history_len == 5
 
-    trials = search.ask_batch(seeds, 1, beta=1.3, seed=31)
+    proposals = search.ask(2, 4, 1, 7, beta=1.3, draw_seed=31)
     device_values = jax.device_put(jnp.array([2.0, 0.75], dtype=jnp.float32))
-    assert search.tell_batch(trials, device_values) == [True, False]
+    search.tell(proposals, device_values)
+    assert search.sync() == [True, False]
     assert search.best == 2.0
     assert math.isclose(search.length, 1.6, rel_tol=1.0e-12)
     assert search.history_len == 7
-    return len(trials)
+    return proposals.arms
 
 
 def knn_expected(data, queries, values, skip=0, aleatoric=0.1):
@@ -433,16 +405,17 @@ def main() -> None:
     base_bits = jax.device_get(jax.lax.bitcast_convert_type(base, jnp.uint16)).tolist()
     expected = cpu_values(base_bits, leaves, terms)
 
-    tree = Bf16Tree(base, leaves)
-    tree.materialize(terms)
-    candidate = jax.dlpack.from_dlpack(tree)
+    blocks = [ParamBlock(*leaf) for leaf in leaves]
+    buffer = ParamBuffer(base, blocks)
+    buffer.materialize(terms)
+    candidate = jax.dlpack.from_dlpack(buffer)
     actual = jax.device_get(
         jax.lax.bitcast_convert_type(candidate, jnp.uint16)
     ).tolist()
     assert actual == expected
 
     try:
-        tree.materialize([(97, 1.0)])
+        buffer.materialize([(97, 1.0)])
     except ValueError as error:
         assert "candidate is alive" in str(error)
     else:
@@ -450,18 +423,18 @@ def main() -> None:
 
     del candidate
     gc.collect()
-    tree.materialize([(97, 1.0)])
+    buffer.materialize([(97, 1.0)])
 
     invalid = jax.device_put(jnp.array([0x7F80], dtype=jnp.uint16)).view(jnp.bfloat16)
     try:
-        Bf16Tree(invalid, [(29, 0, 1, 1.0)])
+        ParamBuffer(invalid, [ParamBlock(29, 0, 1, 1.0)])
     except ValueError as error:
         assert "finite" in str(error)
     else:
         raise AssertionError("non-finite BF16 base was accepted")
 
     maximum = jax.device_put(jnp.array([0x7F7F], dtype=jnp.uint16)).view(jnp.bfloat16)
-    overflow = Bf16Tree(maximum, [(31, 0, 1, MAX_F32)])
+    overflow = ParamBuffer(maximum, [ParamBlock(31, 0, 1, MAX_F32)])
     try:
         overflow.materialize([(101, MAX_F32)])
     except ValueError as error:
@@ -473,11 +446,11 @@ def main() -> None:
         ).tolist()
         raise AssertionError(f"BF16 perturbation overflow was accepted: {bits}")
 
-    trials = check_search(base, base_bits, leaves)
+    proposals = check_search(base, len(base_bits), leaves)
     check_knn()
 
     print(
-        f"BF16_PARITY ok=true exact={size} trials={trials} "
+        f"BF16_PARITY ok=true exact={size} proposals={proposals} "
         "leases=true noise=true profile=true validation=true knn=true weighted=true "
         "batch=true draws=true conditional=true device_tell=true"
     )

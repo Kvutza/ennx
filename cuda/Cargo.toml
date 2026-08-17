@@ -4,15 +4,6 @@ version = "0.1.1"
 edition = "2024"
 publish = false
 
-[workspace]
-members = ["kernels"]
-resolver = "2"
-
-[workspace.dependencies]
-cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
-cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
-cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
-
 [dependencies]
 cuda-core.workspace = true
 cuda-host.workspace = true

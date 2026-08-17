@@ -175,7 +175,7 @@ pixi.lock                 059d2090ef1ffa0f9436aa58728860d7f596a2bc1b9ecbf6117ab3
 ```
 
 Both generated files were identical, `pixi.lock` was unchanged, and
-`buck2/accelerators/Cargo.lock` matched `Cargo.Accelerators.lock`.
+Metal and OpenCL resolved from the main Rust dependency graph.
 
 ## Linux arm64
 

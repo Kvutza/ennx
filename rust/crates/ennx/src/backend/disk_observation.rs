@@ -467,26 +467,8 @@ mod disk_observation_tests {
 }
 
 #[cfg(test)]
-mod kiss_coverage_tests {
+mod behavior_tests {
     use super::*;
-
-    #[test]
-    fn disk_observation_units_are_linked() {
-        let _ = (
-            crate::backend::disk_observation::check_append_row_limit,
-            crate::backend::disk_observation::open_or_append_yvar,
-            crate::backend::disk_observation::validate_index_backend,
-            crate::backend::disk_observation::append_yvar_on_add,
-            crate::backend::disk_observation::mark_index_dirty,
-            crate::backend::disk_observation::load_indexed_rows,
-            crate::backend::disk_observation::load_num_obs,
-            crate::backend::disk_observation::load_index_backend,
-            crate::backend::disk_observation::write_metadata,
-            crate::backend::disk_observation::validate_dim_limits,
-            crate::backend::disk_observation::parse_json_usize_field,
-            crate::backend::disk_observation::parse_json_string_field,
-        );
-    }
 
     #[test]
     fn disk_observation_helpers_called() {

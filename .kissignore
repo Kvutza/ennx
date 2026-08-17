@@ -43,7 +43,7 @@ rust/crates/ennx/src/dense/linear.rs
 rust/crates/ennx/src/knn/mod.rs
 rust/crates/ennx/src/knn/faiss_backend.rs
 # PyO3 and DLPack ownership are exercised through the built-wheel Python API;
-# KISS cannot infer coverage across the native Python extension boundary.
+# macro-generated registration makes KISS's structural graph unreliable here.
 rust/crates/ennx-py/src/
 # The optimizer configuration module is intentionally a closed product type;
 # splitting its dataclasses would make the public TOML/Python contract harder

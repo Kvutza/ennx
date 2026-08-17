@@ -383,12 +383,12 @@ pub fn bpann_brute_force_topk_mmap(
 }
 
 #[cfg(test)]
-mod kiss_coverage_tests {
+mod tests {
     use crate::index::build::BpannIndex;
     use crate::index::DEFAULT_LEAF_CAPACITY;
 
     #[test]
-    fn search_units_are_linked() {
+    fn search_returns() {
         let vectors = vec![vec![0.0f32, 0.0], vec![1.0, 0.0]];
         let dir = tempfile::TempDir::new().unwrap();
         let index = BpannIndex::build_from_vectors(

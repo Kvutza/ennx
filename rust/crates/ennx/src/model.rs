@@ -649,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    fn kiss_row_storage_and_scale_helpers() {
+    fn storage_helpers() {
         let rows = array![[1.0, 2.0], [3.0, 4.0]];
         let mut storage = RowStorage::from_array2(rows.clone());
         assert_eq!(storage.nrows(), 2);
@@ -696,7 +696,7 @@ mod tests {
     }
 
     #[test]
-    fn kiss_model_accessor_helpers() {
+    fn accessors_report() {
         let mut model = EpistemicNearestNeighbors::new(
             array![[0.0, 0.0], [1.0, 0.0]],
             array![[0.0], [1.0]],

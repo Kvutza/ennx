@@ -13,6 +13,14 @@ The Python API follows the same rule. Top-level `ennx` should stay small and
 boring. Anything that exposes native layout, packed data, hardware frontier
 behavior, or low-level quantization starts in `ennx.experimental`.
 
+Experimental native workflows that are exposed to Python should also have a
+matching Rust surface in `ennx::experimental` unless the feature is purely
+Python orchestration. Use the same concept names on both sides. For example,
+resident parameter search is `ParamBlock`, `SearchState`, `Proposal`, and
+`Proposals` in Rust, and `ParamBlock`, `SearchState`, and `Proposals` in
+Python. Hardware-specific engines, storage dtypes, and kernel names stay behind
+that API.
+
 ## Promotion rule
 
 Move an API from experimental to stable only when it has:

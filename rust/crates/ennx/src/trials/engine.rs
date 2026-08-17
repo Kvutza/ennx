@@ -1,4 +1,4 @@
-use super::{make_steps, materialize, Ask, Cpu, Engine, Leaf, SparseEdit};
+use super::{make_steps, materialize, Ask, Center, Cpu, Engine, Leaf, SparseEdit};
 use crate::weights::ComputeDevice;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
@@ -134,6 +134,99 @@ impl Engine {
             }
             #[allow(unreachable_patterns)]
             _ => Err("sparse resident trials currently require CPU or CUDA".to_string()),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn ask_multi(
+        &mut self,
+        base: usize,
+        history: &[(usize, f32)],
+        regions: usize,
+        candidates: usize,
+        seeds: &[u64],
+        leaves: &[Leaf],
+        config: Ask,
+    ) -> Result<Vec<(usize, f32)>, String> {
+        match self {
+            #[cfg(all(target_os = "macos", feature = "metal"))]
+            Self::Metal(device) => {
+                device.ask_multi_tr(base, history, regions, candidates, seeds, leaves, config)
+            }
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(device) => {
+                device.ask_multi_tr(base, history, regions, candidates, seeds, leaves, config)
+            }
+            _ => {
+                let mut results = Vec::with_capacity(regions);
+                for region in 0..regions {
+                    let start = region * candidates;
+                    let end = start + candidates;
+                    let (index, score) =
+                        self.ask(base, history, 0, &seeds[start..end], leaves, config, false)?;
+                    results.push((start + index, score));
+                }
+                Ok(results)
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn ask_tree(
+        &mut self,
+        base: usize,
+        history: &[(usize, f32)],
+        candidates: usize,
+        centers: &[Center],
+        region_centers: &[usize],
+        seeds: &[u64],
+        leaves: &[Leaf],
+        config: Ask,
+    ) -> Result<Vec<(usize, f32)>, String> {
+        match self {
+            Self::Cpu(device) => device.ask_multi_tr_tree(
+                base,
+                history,
+                candidates,
+                centers,
+                region_centers,
+                seeds,
+                leaves,
+                config,
+            ),
+            #[cfg(all(target_os = "macos", feature = "metal"))]
+            Self::Metal(device) => device.ask_multi_tr_tree(
+                base,
+                history,
+                candidates,
+                centers,
+                region_centers,
+                seeds,
+                leaves,
+                config,
+            ),
+            #[cfg(feature = "opencl")]
+            Self::OpenCl(device) => device.ask_multi_tr_tree(
+                base,
+                history,
+                candidates,
+                centers,
+                region_centers,
+                seeds,
+                leaves,
+                config,
+            ),
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+            Self::Cuda(device) => device.ask_multi_tr_tree(
+                base,
+                history,
+                candidates,
+                centers,
+                region_centers,
+                seeds,
+                leaves,
+                config,
+            ),
         }
     }
 

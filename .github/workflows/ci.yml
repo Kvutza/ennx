@@ -63,7 +63,7 @@ jobs:
             buck-out/release-py312
             buck-out/release-py313
             buck-out/release-py314
-          key: ${{ runner.os }}-buck2-${{ hashFiles('.buckconfig', '.buckroot', 'BUCK', 'buck2/**', 'rust/BUCK', 'rust/crates/**/BUCK', 'pixi.lock', 'rust/Cargo.lock') }}
+          key: ${{ runner.os }}-buck2-${{ hashFiles('.buckconfig', '.buckroot', 'BUCK', 'buck2/**', 'rust/BUCK', 'rust/crates/**/BUCK', 'pixi.lock', 'Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-buck2-
 

@@ -44,7 +44,7 @@ rust_test(
     name = "opencl",
     srcs = ["opencl.rs"],
     crate_root = "opencl.rs",
-    deps = ["//buck2/accelerators:opencl3"],
+    deps = ["//rust:opencl3"],
 )
 
 test_suite(

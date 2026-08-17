@@ -97,7 +97,7 @@ rust_library(
     ],
     target_compatible_with = ["@platforms//os:macos"],
     deps = ENNX_DEPS + [
-        "@accelerator_crates//:metal",
+        "@crates//:metal",
     ],
 )
 
@@ -118,7 +118,7 @@ rust_library(
         ":usearch_bridge",
     ],
     deps = ENNX_DEPS + [
-        "@accelerator_crates//:opencl3",
+        "@crates//:opencl3",
     ],
 )
 

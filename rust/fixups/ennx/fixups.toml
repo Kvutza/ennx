@@ -2,11 +2,11 @@ buildscript.run = false
 
 ['cfg(target_os = "macos")']
 features = ["metal"]
-extra_deps = ["//buck2/accelerators:metal"]
+extra_deps = ["//rust:metal"]
 
 ['cfg(target_os = "linux")']
 features = ["opencl"]
-extra_deps = ["//buck2/accelerators:opencl3"]
+extra_deps = ["//rust:opencl3"]
 
 [[cxx_library]]
 name = "faiss_bridge"

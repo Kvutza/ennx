@@ -349,12 +349,7 @@ fn test_compute_weighted_posterior_empty_idx() {
 }
 
 #[test]
-fn kiss_weighted_posterior_data_type() {
-    assert!(std::mem::size_of::<WeightedPosteriorData>() > 0);
-}
-
-#[test]
-fn kiss_posterior_batch_units_are_linked() {
+fn posterior_batch() {
     let model = create_test_model();
     let params = ENNParams::new(2, 1.0, 0.1).unwrap();
     let paramss = vec![params, params];

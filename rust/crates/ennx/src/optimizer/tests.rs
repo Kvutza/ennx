@@ -212,7 +212,7 @@ fn turbo_length_restart_keeps_incumbent_tracker_synced() {
 }
 
 #[test]
-fn kiss_optimizer_bounds_and_seed_helpers() {
+fn optimizer_reports() {
     let bounds = array![[0.0, 1.0], [0.0, 1.0]];
     let mut rng = StdRng::seed_from_u64(1);
     let mut opt = Optimizer::new(bounds, turbo_zero_config(), &mut rng).unwrap();

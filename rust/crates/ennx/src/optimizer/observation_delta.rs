@@ -41,7 +41,7 @@ pub(crate) fn observation_delta_from_batch(
 }
 
 #[cfg(test)]
-mod kiss_coverage_tests {
+mod tests {
     use super::*;
     use ndarray::array;
 

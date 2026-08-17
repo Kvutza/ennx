@@ -198,15 +198,15 @@ impl Drop for Input {
 
 struct LegacyOwner {
     managed: Managed,
-    shape: i64,
+    shape: [i64; 2],
     _owner: PyObject,
     lease: Lease,
 }
 
 struct VersionOwner {
     managed: ManagedV1,
-    shape: i64,
-    stride: i64,
+    shape: [i64; 2],
+    strides: [i64; 2],
     _owner: PyObject,
     lease: Lease,
 }
@@ -215,6 +215,37 @@ struct VersionOwner {
 enum Lease {
     Flag(Arc<AtomicBool>),
     Count(Arc<AtomicUsize>),
+}
+
+#[derive(Clone, Copy)]
+struct ExportShape {
+    values: [i64; 2],
+    strides: [i64; 2],
+    rank: i32,
+}
+
+impl ExportShape {
+    fn vector(len: usize) -> PyResult<Self> {
+        let len =
+            i64::try_from(len).map_err(|_| PyValueError::new_err("BF16 length exceeds i64"))?;
+        Ok(Self {
+            values: [len, 1],
+            strides: [1, 1],
+            rank: 1,
+        })
+    }
+
+    fn matrix(rows: usize, columns: usize) -> PyResult<Self> {
+        let rows =
+            i64::try_from(rows).map_err(|_| PyValueError::new_err("BF16 row count exceeds i64"))?;
+        let columns = i64::try_from(columns)
+            .map_err(|_| PyValueError::new_err("BF16 column count exceeds i64"))?;
+        Ok(Self {
+            values: [rows, columns],
+            strides: [columns, 1],
+            rank: 2,
+        })
+    }
 }
 
 impl Lease {
@@ -292,7 +323,14 @@ pub(crate) fn export(
     len: usize,
     max_version: Option<(u32, u32)>,
 ) -> PyResult<PyObject> {
-    export_with(py, owner, Lease::Flag(lease), pointer, len, max_version)
+    export_with(
+        py,
+        owner,
+        Lease::Flag(lease),
+        pointer,
+        ExportShape::vector(len)?,
+        max_version,
+    )
 }
 
 pub(crate) fn export_count(
@@ -303,7 +341,33 @@ pub(crate) fn export_count(
     len: usize,
     max_version: Option<(u32, u32)>,
 ) -> PyResult<PyObject> {
-    export_with(py, owner, Lease::Count(lease), pointer, len, max_version)
+    export_with(
+        py,
+        owner,
+        Lease::Count(lease),
+        pointer,
+        ExportShape::vector(len)?,
+        max_version,
+    )
+}
+
+pub(crate) fn export_batch(
+    py: Python<'_>,
+    owner: PyObject,
+    lease: Arc<AtomicUsize>,
+    pointer: u64,
+    rows: usize,
+    columns: usize,
+    max_version: Option<(u32, u32)>,
+) -> PyResult<PyObject> {
+    export_with(
+        py,
+        owner,
+        Lease::Count(lease),
+        pointer,
+        ExportShape::matrix(rows, columns)?,
+        max_version,
+    )
 }
 
 fn export_with(
@@ -311,7 +375,7 @@ fn export_with(
     owner: PyObject,
     lease: Lease,
     pointer: u64,
-    len: usize,
+    shape: ExportShape,
     max_version: Option<(u32, u32)>,
 ) -> PyResult<PyObject> {
     if let Some((major, minor)) = max_version.filter(|version| version.0 >= 1) {
@@ -319,9 +383,9 @@ fn export_with(
             major: 1,
             minor: if major == 1 { minor.min(3) } else { 3 },
         };
-        export_versioned(py, owner, lease, pointer, len, version)
+        export_versioned(py, owner, lease, pointer, shape, version)
     } else {
-        export_legacy(py, owner, lease, pointer, len)
+        export_legacy(py, owner, lease, pointer, shape)
     }
 }
 
@@ -330,20 +394,24 @@ fn export_legacy(
     owner: PyObject,
     lease: Lease,
     pointer: u64,
-    len: usize,
+    shape: ExportShape,
 ) -> PyResult<PyObject> {
-    let shape = i64::try_from(len).map_err(|_| PyValueError::new_err("BF16 length exceeds i64"))?;
     let mut state = Box::new(LegacyOwner {
         managed: Managed {
-            tensor: tensor(pointer, std::ptr::null_mut(), std::ptr::null_mut()),
+            tensor: tensor(
+                pointer,
+                shape.rank,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ),
             context: std::ptr::null_mut(),
             deleter: Some(release_legacy),
         },
-        shape,
+        shape: shape.values,
         _owner: owner,
         lease,
     });
-    state.managed.tensor.shape = &mut state.shape;
+    state.managed.tensor.shape = state.shape.as_mut_ptr();
     state.managed.context = (&mut *state as *mut LegacyOwner).cast();
     let managed = &mut state.managed as *mut Managed;
     let _state = Box::into_raw(state);
@@ -357,25 +425,29 @@ fn export_versioned(
     owner: PyObject,
     lease: Lease,
     pointer: u64,
-    len: usize,
+    shape: ExportShape,
     version: Version,
 ) -> PyResult<PyObject> {
-    let shape = i64::try_from(len).map_err(|_| PyValueError::new_err("BF16 length exceeds i64"))?;
     let mut state = Box::new(VersionOwner {
         managed: ManagedV1 {
             version,
             context: std::ptr::null_mut(),
             deleter: Some(release_versioned),
             flags: READ_ONLY,
-            tensor: tensor(pointer, std::ptr::null_mut(), std::ptr::null_mut()),
+            tensor: tensor(
+                pointer,
+                shape.rank,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ),
         },
-        shape,
-        stride: 1,
+        shape: shape.values,
+        strides: shape.strides,
         _owner: owner,
         lease,
     });
-    state.managed.tensor.shape = &mut state.shape;
-    state.managed.tensor.strides = &mut state.stride;
+    state.managed.tensor.shape = state.shape.as_mut_ptr();
+    state.managed.tensor.strides = state.strides.as_mut_ptr();
     state.managed.context = (&mut *state as *mut VersionOwner).cast();
     let managed = &mut state.managed as *mut ManagedV1;
     let _state = Box::into_raw(state);
@@ -384,14 +456,14 @@ fn export_versioned(
     })
 }
 
-fn tensor(pointer: u64, shape: *mut i64, strides: *mut i64) -> Tensor {
+fn tensor(pointer: u64, rank: i32, shape: *mut i64, strides: *mut i64) -> Tensor {
     Tensor {
         data: pointer as *mut c_void,
         device: Device {
             kind: CUDA,
             index: 0,
         },
-        ndim: 1,
+        ndim: rank,
         dtype: DataType {
             code: BF16,
             bits: 16,

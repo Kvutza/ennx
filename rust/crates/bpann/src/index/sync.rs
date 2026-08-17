@@ -466,122 +466,11 @@ fn on_disk_indexed_rows(index_dir: &std::path::Path) -> Result<usize, BpannError
 }
 
 #[cfg(test)]
-mod kiss_coverage_tests {
+mod tests {
     use super::*;
     use crate::mmap_store::MmapColumnStore;
     use ndarray::array;
     use tempfile::TempDir;
-
-    #[test]
-    fn sync_private_helpers_are_linked() {
-        let t = current_tuning();
-        let _ = (
-            t.index_compact_rows_per_fragment,
-            t.index_compact_fragment_max,
-            t.search_rows_per_fragment,
-            t.small_fragment_merge_rows,
-            t.search_fragment_budget_max,
-        );
-        let _ = index_compact_threshold(2000);
-        let _ = search_fragment_budget(4, 100_000);
-        let _ = search_beam_width(500);
-        let _ = (
-            IncrementalIndex::take_pending_centroid
-                as fn(&mut IncrementalIndex, usize) -> Option<Vec<f32>>,
-            IncrementalIndex::persist_to_disk_for_backend
-                as fn(
-                    &mut IncrementalIndex,
-                    &MmapColumnStore,
-                    usize,
-                    bool,
-                    &[f64],
-                    &std::path::Path,
-                    usize,
-                ) -> Result<(), BpannError>,
-            IncrementalIndex::ensure_sync
-                as fn(
-                    &mut IncrementalIndex,
-                    &IndexBuildContext<'_>,
-                    usize,
-                ) -> Result<(), BpannError>,
-            IncrementalIndex::maybe_compact
-                as fn(&mut IncrementalIndex, &IndexBuildContext<'_>) -> Result<(), BpannError>,
-            IncrementalIndex::compact
-                as fn(&mut IncrementalIndex, &IndexBuildContext<'_>) -> Result<(), BpannError>,
-            IncrementalIndex::amalgamate_smallest_run
-                as fn(
-                    &mut IncrementalIndex,
-                    &IndexBuildContext<'_>,
-                    usize,
-                ) -> Result<(), BpannError>,
-            IncrementalIndex::amalgamate_smallest_pair
-                as fn(&mut IncrementalIndex, &IndexBuildContext<'_>) -> Result<(), BpannError>,
-            IncrementalIndex::build_batch
-                as fn(
-                    &mut IncrementalIndex,
-                    &IndexBuildContext<'_>,
-                    usize,
-                    usize,
-                ) -> Result<(), BpannError>,
-            IncrementalIndex::build_empty_leaf_forest
-                as fn(
-                    &mut IncrementalIndex,
-                    &IndexBuildContext<'_>,
-                    usize,
-                    usize,
-                    usize,
-                ) -> Result<(), BpannError>,
-            IncrementalIndex::build_vector_leaf_forest
-                as fn(
-                    &mut IncrementalIndex,
-                    &IndexBuildContext<'_>,
-                    usize,
-                    usize,
-                    usize,
-                ) -> Result<(), BpannError>,
-            build_empty_leaf_forest_index
-                as fn(
-                    &IndexBuildContext<'_>,
-                    usize,
-                    usize,
-                    usize,
-                    std::path::PathBuf,
-                ) -> Result<BpannIndex, BpannError>,
-            build_vector_leaf_forest_index
-                as fn(
-                    &IndexBuildContext<'_>,
-                    usize,
-                    usize,
-                    usize,
-                    std::path::PathBuf,
-                ) -> Result<BpannIndex, BpannError>,
-            crate::index::sync_forest::first_row_centroid_from_mmap
-                as fn(&IndexBuildContext<'_>, usize) -> Result<Vec<f32>, BpannError>,
-            crate::index::sync_forest::mean_centroid_f32 as fn(&[Vec<f32>]) -> Vec<f32>,
-            load_vectors_from_mmap
-                as fn(&IndexBuildContext<'_>, usize, usize) -> Result<Vec<Vec<f32>>, BpannError>,
-            centroid_from_mmap_rows
-                as fn(&IndexBuildContext<'_>, usize, usize) -> Result<Vec<f32>, BpannError>,
-            search_index_candidates
-                as fn(
-                    &BpannIndex,
-                    &[f32],
-                    usize,
-                    Option<&MmapSearchStore<'_>>,
-                ) -> Result<Vec<(u32, f32)>, BpannError>,
-        );
-        fn _index_build_context_marker(ctx: &IndexBuildContext<'_>) {
-            let _ = (
-                ctx.train_x,
-                ctx.num_dim,
-                ctx.scale_x,
-                ctx.x_scale,
-                ctx.work_dir,
-                ctx.num_metrics,
-            );
-            _kiss_index_build_context(ctx);
-        }
-    }
 
     #[test]
     fn search_fragment_budget_respects_default_max_of_one() {
@@ -823,9 +712,5 @@ mod kiss_coverage_tests {
             "mid-size sync should stay one structured fragment"
         );
         assert_eq!(idx.indices[0].header.indexed_rows, n);
-    }
-
-    fn _kiss_index_build_context<'a>(ctx: &IndexBuildContext<'a>) {
-        let _ = (ctx.num_dim, ctx.scale_x, ctx.num_metrics);
     }
 }

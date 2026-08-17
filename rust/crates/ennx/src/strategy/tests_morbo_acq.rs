@@ -284,7 +284,7 @@ fn morbo_on_propose_rescalarize_via_ask_turbo() {
 }
 
 #[test]
-fn kiss_tie_surrogate_type() {
+fn surrogate_predicts() {
     let sur = TieSurrogate {
         sample_value: 0.0,
         mu: 0.0,

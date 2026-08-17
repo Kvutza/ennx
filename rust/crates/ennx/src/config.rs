@@ -617,11 +617,6 @@ mod tests {
     }
 
     #[test]
-    fn kiss_apply_enn_surrogate_fields_unit_name() {
-        assert_eq!("apply_enn_surrogate_fields", "apply_enn_surrogate_fields");
-    }
-
-    #[test]
     fn morbo_config_missing_rescalarize_defaults_on_propose() {
         let overrides = ConfigOverrides {
             trust_region_kind: Some(TrustRegionKind::Morbo),
@@ -637,12 +632,5 @@ mod tests {
             Rescalarize::OnPropose,
             "missing rescalarize should match Python MorboTRConfig default ON_PROPOSE"
         );
-    }
-
-    #[test]
-    fn kiss_config_override_types_linked() {
-        assert!(std::mem::size_of::<ConfigOverrides>() > 0);
-        let acq = AcquisitionConfig::default();
-        assert!(matches!(acq, AcquisitionConfig::UCB { .. }));
     }
 }
