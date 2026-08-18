@@ -17,7 +17,6 @@ _PYTHON_CONFIGS = {
         extension_infix = "314",
     ),
 }
-
 if PYTHON_VERSION not in _PYTHON_CONFIGS:
     fail("ennx.python_version must be 3.12 through 3.14, got {}".format(PYTHON_VERSION))
 

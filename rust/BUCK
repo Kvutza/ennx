@@ -4162,6 +4162,44 @@ reindeer_rust_library(
     visibility = [],
 )
 
+http_archive(
+    name = "libm-0.2.16.crate",
+    sha256 = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981",
+    strip_prefix = "libm-0.2.16",
+    urls = ["https://static.crates.io/crates/libm/0.2.16/download"],
+    visibility = [],
+)
+
+reindeer_rust_library(
+    name = "libm-0.2",
+    srcs = [":libm-0.2.16.crate"],
+    crate = "libm",
+    crate_root = "libm-0.2.16.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_BIN_NAME": "libm",
+        "CARGO_CRATE_NAME": "libm",
+        "CARGO_MANIFEST_DIR": "libm-0.2.16.crate",
+        "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>:Amanieu d'Antras <amanieu@gmail.com>:Jorge Aparicio <japaricious@gmail.com>:Trevor Gross <tg@trevorgross.com>",
+        "CARGO_PKG_DESCRIPTION": "libm in pure Rust",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "libm",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rust-lang/compiler-builtins",
+        "CARGO_PKG_RUST_VERSION": "1.63",
+        "CARGO_PKG_VERSION": "0.2.16",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "16",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "arch",
+        "default",
+    ],
+    visibility = [],
+)
+
 reindeer_rust_library(
     name = "libnvvm-sys-0.2",
     srcs = [":cuda-oxide-b3835ab4e1359278.git"],
@@ -5094,10 +5132,12 @@ reindeer_rust_library(
     features = [
         "default",
         "i128",
+        "libm",
         "std",
     ],
     rustc_flags = ["@$(location :num-traits-0.2-build-script-run[rustc_flags])"],
     visibility = [],
+    deps = [":libm-0.2"],
 )
 
 reindeer_rust_binary(
@@ -5126,6 +5166,7 @@ reindeer_rust_binary(
     features = [
         "default",
         "i128",
+        "libm",
         "std",
     ],
     visibility = [],
@@ -5151,6 +5192,7 @@ buildscript_run(
     features = [
         "default",
         "i128",
+        "libm",
         "std",
     ],
     version = "0.2.19",
@@ -7428,6 +7470,55 @@ reindeer_rust_library(
     ],
     visibility = [],
     deps = [":getrandom-0.2"],
+)
+
+alias(
+    name = "rand_distr",
+    actual = ":rand_distr-0.4",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "rand_distr-0.4.3.crate",
+    sha256 = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31",
+    strip_prefix = "rand_distr-0.4.3",
+    urls = ["https://static.crates.io/crates/rand_distr/0.4.3/download"],
+    visibility = [],
+)
+
+reindeer_rust_library(
+    name = "rand_distr-0.4",
+    srcs = [":rand_distr-0.4.3.crate"],
+    crate = "rand_distr",
+    crate_root = "rand_distr-0.4.3.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_BIN_NAME": "rand_distr",
+        "CARGO_CRATE_NAME": "rand_distr",
+        "CARGO_MANIFEST_DIR": "rand_distr-0.4.3.crate",
+        "CARGO_PKG_AUTHORS": "The Rand Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Sampling from random number distributions\n",
+        "CARGO_PKG_HOMEPAGE": "https://rust-random.github.io/book",
+        "CARGO_PKG_NAME": "rand_distr",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rust-random/rand",
+        "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "0.4.3",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "alloc",
+        "default",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":num-traits-0.2",
+        ":rand-0.8",
+    ],
 )
 
 http_archive(

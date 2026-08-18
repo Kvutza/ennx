@@ -127,7 +127,17 @@ class Optimizer:
         self, x: np.ndarray, y: np.ndarray, y_var: np.ndarray | None = None
     ) -> np.ndarray:
         """Add an observation batch and return its 2D objective array."""
-        obs = _obs(x, y, y_var, self._d)
+        x_arr = np.asarray(x, dtype=float)
+        y_arr = np.asarray(y, dtype=float)
+        x_arr.flags.writeable = False
+        y_arr.flags.writeable = False
+
+        y_var_arr = None
+        if y_var is not None:
+            y_var_arr = np.asarray(y_var, dtype=float)
+            y_var_arr.flags.writeable = False
+
+        obs = _obs(x_arr, y_arr, y_var_arr, self._d)
         seed = int(self._rng.integers(2**63 - 1))
         self._inner.tell(obs.x, obs.y, seed, obs.yvar)
         return obs.y

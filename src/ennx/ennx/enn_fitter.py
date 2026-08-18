@@ -40,11 +40,14 @@ class ENNStatefulFitter:
         y_array = np.asarray(y, dtype=float)
         if y_array.ndim == 1:
             y_array = y_array.reshape(-1, 1)
+        x_array.flags.writeable = False
+        y_array.flags.writeable = False
         yvar_array = None
         if yvar is not None:
             yvar_array = np.asarray(yvar, dtype=float)
             if yvar_array.ndim == 1:
                 yvar_array = yvar_array.reshape(-1, 1)
+            yvar_array.flags.writeable = False
         self._rust.tell(x_array, y_array, yvar_array)
 
     def y_std(self) -> np.ndarray:

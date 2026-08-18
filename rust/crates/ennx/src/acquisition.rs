@@ -1,9 +1,35 @@
 //! Acquisition function optimizers for TuRBO.
 
-use ndarray::{Array1, ArrayView1, ArrayView2};
+use ndarray::{ArrayView1, ArrayView2};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use thiserror::Error;
+
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+
+#[derive(Clone, Copy, PartialEq)]
+struct MinHeapItem {
+    score: f64,
+    index: usize,
+}
+
+impl Eq for MinHeapItem {}
+
+impl PartialOrd for MinHeapItem {
+    #[inline(always)]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MinHeapItem {
+    #[inline(always)]
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reverse order so BinaryHeap acts as a Min-Heap (smallest score on top)
+        other.score.total_cmp(&self.score)
+    }
+}
 
 /// Errors in acquisition optimization.
 #[derive(Error, Debug, Clone, PartialEq)]
@@ -44,7 +70,7 @@ impl UCBAcquisition {
         mu: &ArrayView1<f64>,
         sigma: &ArrayView1<f64>,
         num_arms: usize,
-        rng: &mut R,
+        _rng: &mut R,
     ) -> AcquisitionResult {
         if mu.is_empty() {
             return Err(AcquisitionError::NoCandidates);
@@ -54,23 +80,26 @@ impl UCBAcquisition {
             return Ok(Vec::new());
         }
 
-        // Compute UCB scores
-        let ucb: Array1<f64> = mu + &(sigma * self.beta);
+        let k = num_arms.min(mu.len());
+        let mut heap = BinaryHeap::with_capacity(k);
 
-        // Get top indices with random tie-breaking
-        let mut indices: Vec<usize> = (0..ucb.len()).collect();
-        indices.shuffle(rng);
+        // Streaming Top-K pass
+        for i in 0..mu.len() {
+            let score = self.beta.mul_add(sigma[i], mu[i]);
 
-        // Sort by UCB (descending) with stable random tie-breaking
-        indices.sort_by(|&a, &b| {
-            let ucb_a = ucb[a];
-            let ucb_b = ucb[b];
-            ucb_b.total_cmp(&ucb_a) // Descending
-        });
+            if heap.len() < k {
+                heap.push(MinHeapItem { score, index: i });
+            } else if let Some(min_item) = heap.peek() {
+                if score > min_item.score {
+                    heap.pop();
+                    heap.push(MinHeapItem { score, index: i });
+                }
+            }
+        }
 
-        // Return top num_arms
-        let result: Vec<usize> = indices.into_iter().take(num_arms).collect();
-        Ok(result)
+        let mut result: Vec<_> = heap.into_iter().collect();
+        result.sort_by(|a, b| b.score.total_cmp(&a.score));
+        Ok(result.into_iter().map(|item| item.index).collect())
     }
 }
 
@@ -106,32 +135,31 @@ impl ThompsonAcquisition {
             return Ok(Vec::new());
         }
 
-        use rand::distributions::{Distribution, Standard};
+        use rand_distr::StandardNormal;
 
-        const CLIP_MIN: f64 = 1e-12;
-        const CLIP_MAX: f64 = 1.0 - 1e-12;
+        let k = num_arms.min(mu.len());
+        let mut heap = BinaryHeap::with_capacity(k);
 
-        // Sample from posterior
-        let mut samples = Array1::zeros(mu.len());
+        // Fused Ziggurat draw and streaming Top-K in a single O(N) pass
         for i in 0..mu.len() {
             let mean = mu[i];
             let std = sigma[i];
-            // Box-Muller transform for normal sample (clamp u1 to avoid log(0) -> inf)
-            let mut u1: f64 = Standard.sample(rng);
-            u1 = u1.clamp(CLIP_MIN, CLIP_MAX);
-            let u2: f64 = Standard.sample(rng);
-            let z: f64 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-            samples[i] = mean + std * z;
+            let z: f64 = rng.sample(StandardNormal);
+            let score = z.mul_add(std, mean);
+
+            if heap.len() < k {
+                heap.push(MinHeapItem { score, index: i });
+            } else if let Some(min_item) = heap.peek() {
+                if score > min_item.score {
+                    heap.pop();
+                    heap.push(MinHeapItem { score, index: i });
+                }
+            }
         }
 
-        // Select best samples with random tie-breaking
-        let mut indices: Vec<usize> = (0..samples.len()).collect();
-        indices.shuffle(rng);
-        indices.sort_by(|&a, &b| {
-            samples[b].total_cmp(&samples[a]) // Descending
-        });
-
-        Ok(indices.into_iter().take(num_arms).collect())
+        let mut result: Vec<_> = heap.into_iter().collect();
+        result.sort_by(|a, b| b.score.total_cmp(&a.score));
+        Ok(result.into_iter().map(|item| item.index).collect())
     }
 }
 

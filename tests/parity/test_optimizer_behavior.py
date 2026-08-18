@@ -30,29 +30,19 @@ def _tr_lengths(opt, num_arms: int, num_cycles: int):
     return lengths
 
 
-def _pareto_lengths(opt, num_arms: int, num_cycles: int):
-    lengths = []
-    for _ in range(num_cycles):
-        x = opt.ask(num_arms=num_arms)
-        y = _obj(x)
-        if y.ndim == 1:
-            y = y.reshape(-1, 1)
-        opt.tell(x, y)
-        lengths.append(opt.tr_length)
-    return lengths
-
-
 def test_optimizer_tr_length_trajectory_contract():
     from .optimizer_checks import make_optimizer
 
     bounds = np.array([[0.0, 1.0], [0.0, 1.0]], dtype=float)
     num_arms = 4
     config = turbo_enn_config(
-        acq_type=AcqType.UCB,
-        enn=ENNSurrogateConfig(k=4, fit=ENNFitConfig(num_fit_samples=10)),
-        num_init=8,
+        bounds=bounds,
+        batch_size=num_arms,
+        max_evals=30,
+        device="cpu",
     )
-    opt = make_optimizer(bounds, config, seed=31)
+    opt = make_optimizer(config)
+
     lengths = _tr_lengths(opt, num_arms, num_cycles=8)
     assert len(lengths) == 8
     for length in lengths:
@@ -70,7 +60,7 @@ def test_optimizer_pareto_tr_length_contract():
         num_init=6,
     )
     opt = make_optimizer(bounds, config, seed=47)
-    lengths = _pareto_lengths(opt, num_arms, num_cycles=6)
+    lengths = _tr_lengths(opt, num_arms, num_cycles=6)
     assert len(lengths) == 6
     for length in lengths:
         assert 0.0 < length <= 2.0

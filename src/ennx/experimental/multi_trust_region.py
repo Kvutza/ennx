@@ -183,6 +183,13 @@ class MultiTrustRegionLoop:
         )
 
     def tell(self, x: np.ndarray, y: np.ndarray, y_var: np.ndarray | None = None):
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        x.flags.writeable = False
+        y.flags.writeable = False
+        if y_var is not None:
+            y_var = np.asarray(y_var, dtype=float)
+            y_var.flags.writeable = False
         if y_var is None:
             return self.state.tell(x, y)
         try:

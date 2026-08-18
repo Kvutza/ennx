@@ -130,8 +130,8 @@ impl MmapColumnStore {
             };
             dst.copy_from_slice(src_bytes);
         } else {
-            let dst_f64 =
-                unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut f64, n) };
+            let (prefix, dst_f64, suffix) = unsafe { dst.align_to_mut::<f64>() };
+            assert!(prefix.is_empty() && suffix.is_empty(), "mmap slice is unaligned or has incorrect length");
             for (i, row) in rows.axis_iter(Axis(0)).enumerate() {
                 let row_dst = &mut dst_f64[i * self.ncols..(i + 1) * self.ncols];
                 for (d, s) in row_dst.iter_mut().zip(row.iter()) {

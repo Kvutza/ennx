@@ -22,6 +22,29 @@ def test_ask_tell_cycle(cfg):
     assert opt.ask(2).shape == (2, 2)
 
 
+def test_tell_write_protects_arrays():
+    bounds = np.array([[-1.0, 1.0], [-1.0, 1.0]])
+    opt = create_optimizer(
+        bounds=bounds, config=turbo_zero_config(), rng=np.random.default_rng(0)
+    )
+    x = opt.ask(4)
+    y = _score(x)
+
+    assert x.flags.writeable
+    assert y.flags.writeable
+
+    opt.tell(x, y)
+
+    # Verify that the arrays were marked read-only
+    assert not x.flags.writeable
+    assert not y.flags.writeable
+
+    with pytest.raises(ValueError):
+        x[0, 0] = 999.0
+    with pytest.raises(ValueError):
+        y[0] = 999.0
+
+
 def test_list_bounds():
     opt = create_optimizer(
         bounds=[[0.0, 1.0], [0.0, 1.0]],

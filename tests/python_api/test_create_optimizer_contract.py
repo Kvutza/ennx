@@ -35,3 +35,28 @@ def test_optimizer_contract(cfg):
     assert x.shape == (2, 2)
     assert np.all((bounds[:, 0] <= x) & (x <= bounds[:, 1]))
     assert isinstance(opt.telemetry(), Telemetry)
+
+
+def test_tell_write_protects_arrays():
+    bounds = np.array([[-1.0, 1.0], [-1.0, 1.0]])
+    opt = create_optimizer(
+        bounds=bounds,
+        config=turbo_zero_config(),
+        rng=np.random.default_rng(0),
+    )
+    x = opt.ask(4)
+    y = -np.sum(x**2, axis=1)
+
+    assert x.flags.writeable
+    assert y.flags.writeable
+
+    opt.tell(x, y)
+
+    # Verify that the arrays were marked read-only
+    assert not x.flags.writeable
+    assert not y.flags.writeable
+
+    with pytest.raises(ValueError):
+        x[0, 0] = 999.0
+    with pytest.raises(ValueError):
+        y[0] = 999.0
