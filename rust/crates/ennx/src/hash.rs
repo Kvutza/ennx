@@ -8,6 +8,8 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use thiserror::Error;
 
+use crate::parallel::should_use_rayon;
+
 /// Errors that can occur during hash-based RNG.
 #[derive(Error, Debug, Clone, PartialEq)]
 pub enum HashError {
@@ -142,28 +144,49 @@ pub fn normal_hash_batch_multi_seed_fast(
 
     let (unique_indices, inverse) = unique_index_inverse(data_indices);
 
-    // Flat buffer (num_seeds, num_indices, num_metrics) in C order; fill by seed in parallel.
     let mut flat = vec![0.0f64; num_seeds * row_len];
-    flat.par_chunks_mut(row_len)
-        .zip(function_seeds.par_iter())
-        .for_each_init(
-            || vec![0.0f64; unique_indices.len() * num_metrics],
-            |unique_cache, (seed_out, &seed)| {
-                let seed_u64 = seed as u64;
-                for (ui, &unique_idx) in unique_indices.iter().enumerate() {
-                    for metric in 0..num_metrics {
-                        unique_cache[ui * num_metrics + metric] =
-                            normal_for_seed_index_metric(seed_u64, unique_idx, metric);
+
+    if should_use_rayon() {
+        // Flat buffer (num_seeds, num_indices, num_metrics) in C order; fill by seed in parallel.
+        flat.par_chunks_mut(row_len)
+            .zip(function_seeds.par_iter())
+            .for_each_init(
+                || vec![0.0f64; unique_indices.len() * num_metrics],
+                |unique_cache, (seed_out, &seed)| {
+                    let seed_u64 = seed as u64;
+                    for (ui, &unique_idx) in unique_indices.iter().enumerate() {
+                        for metric in 0..num_metrics {
+                            unique_cache[ui * num_metrics + metric] =
+                                normal_for_seed_index_metric(seed_u64, unique_idx, metric);
+                        }
                     }
+                    for (di, &inv) in inverse.iter().enumerate() {
+                        let src = inv * num_metrics;
+                        let dst = di * num_metrics;
+                        seed_out[dst..dst + num_metrics]
+                            .copy_from_slice(&unique_cache[src..src + num_metrics]);
+                    }
+                },
+            );
+    } else {
+        let mut row_cache = vec![0.0f64; unique_indices.len() * num_metrics];
+        for (seed_offset, &seed) in function_seeds.iter().enumerate() {
+            let seed_u64 = seed as u64;
+            for (ui, &unique_idx) in unique_indices.iter().enumerate() {
+                for metric in 0..num_metrics {
+                    row_cache[ui * num_metrics + metric] =
+                        normal_for_seed_index_metric(seed_u64, unique_idx, metric);
                 }
-                for (di, &inv) in inverse.iter().enumerate() {
-                    let src = inv * num_metrics;
-                    let dst = di * num_metrics;
-                    seed_out[dst..dst + num_metrics]
-                        .copy_from_slice(&unique_cache[src..src + num_metrics]);
-                }
-            },
-        );
+            }
+            let seed_out = &mut flat[seed_offset * row_len..(seed_offset + 1) * row_len];
+            for (di, &inv) in inverse.iter().enumerate() {
+                let src = inv * num_metrics;
+                let dst = di * num_metrics;
+                seed_out[dst..dst + num_metrics]
+                    .copy_from_slice(&row_cache[src..src + num_metrics]);
+            }
+        }
+    }
 
     let output = Array::from_shape_vec(IxDyn(&[num_seeds, num_indices, num_metrics]), flat)
         .expect("flat buffer size matches output shape");

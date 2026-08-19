@@ -37,6 +37,9 @@ can fail on Python C symbols even when the wheel/API path is healthy. Test
 `ennx-py` through the Python wheel/API tier unless the PyO3 embedding link mode
 is being changed directly.
 
+Bazel stays available for the consumer/audit path, but the repo’s primary
+development and CI flow is `./ennx` backed by Buck2.
+
 Run hardware-sensitive gates serially when checking timing, profiling, or Metal
 counter behavior. Correctness tests must not depend on a timing counter being
 available; timing is evidence for performance, not correctness.

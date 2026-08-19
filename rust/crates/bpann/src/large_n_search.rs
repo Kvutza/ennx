@@ -8,6 +8,7 @@ use crate::distance::bpann_row_to_f32;
 use crate::error::BpannError;
 use crate::index::{bpann_brute_force_topk_mmap, MmapSearchStore};
 use crate::merge::{bpann_merge_topk_candidates, merge_topk_precomputed_dist};
+use crate::parallel::should_use_rayon;
 
 pub struct SearchPendingArgs<'a> {
     pub total: usize,
@@ -44,66 +45,69 @@ pub fn search_indexed_and_pending(
         k_eff
     };
     let train_x = &backend.train_x;
-    let per_query: Vec<(Vec<f64>, Vec<i64>)> = query_rows
-        .par_iter()
-        .map(|query_buf| {
-            let mut query_f32 = Vec::with_capacity(num_dim);
-            bpann_row_to_f32(query_buf, scale_x, x_scale_vec, &mut query_f32);
-            let store = MmapSearchStore {
+    let score_query = |query_buf: &Vec<f64>| {
+        let mut query_f32 = Vec::with_capacity(num_dim);
+        bpann_row_to_f32(query_buf, scale_x, x_scale_vec, &mut query_f32);
+        let store = MmapSearchStore {
+            train_x,
+            scale_x,
+            x_scale: x_scale_vec,
+        };
+
+        let leg_a = if indexed > 0 && !backend.index.indices.is_empty() {
+            backend
+                .index
+                .search_candidates(&query_f32, index_k.max(1), Some(&store))
+                .expect("search_candidates")
+        } else {
+            Vec::new()
+        };
+
+        let leg_b = if has_pending {
+            bpann_brute_force_topk_mmap(
                 train_x,
+                pending_start,
+                total,
+                query_buf,
+                pool_k,
                 scale_x,
-                x_scale: x_scale_vec,
-            };
+                x_scale_vec,
+            )
+            .expect("bpann_brute_force_topk_mmap")
+        } else {
+            Vec::new()
+        };
 
-            let leg_a = if indexed > 0 && !backend.index.indices.is_empty() {
-                backend
-                    .index
-                    .search_candidates(&query_f32, index_k.max(1), Some(&store))
-                    .expect("search_candidates")
-            } else {
-                Vec::new()
-            };
+        let merged = if scale_x {
+            bpann_merge_topk_candidates(
+                train_x,
+                query_buf,
+                &leg_a,
+                &leg_b,
+                k_eff,
+                pool_k,
+                exclude_nearest,
+                scale_x,
+                x_scale_vec,
+            )
+            .expect("bpann_merge_topk_candidates")
+        } else {
+            merge_topk_precomputed_dist(&leg_a, &leg_b, k_eff, pool_k, exclude_nearest)
+        };
+        let mut dist_row = vec![0.0; k_eff];
+        let mut idx_row = vec![0; k_eff];
+        for (j, (id, dist)) in merged.into_iter().enumerate() {
+            dist_row[j] = dist;
+            idx_row[j] = id as i64;
+        }
+        (dist_row, idx_row)
+    };
 
-            let leg_b = if has_pending {
-                bpann_brute_force_topk_mmap(
-                    train_x,
-                    pending_start,
-                    total,
-                    query_buf,
-                    pool_k,
-                    scale_x,
-                    x_scale_vec,
-                )
-                .expect("bpann_brute_force_topk_mmap")
-            } else {
-                Vec::new()
-            };
-
-            let merged = if scale_x {
-                bpann_merge_topk_candidates(
-                    train_x,
-                    query_buf,
-                    &leg_a,
-                    &leg_b,
-                    k_eff,
-                    pool_k,
-                    exclude_nearest,
-                    scale_x,
-                    x_scale_vec,
-                )
-                .expect("bpann_merge_topk_candidates")
-            } else {
-                merge_topk_precomputed_dist(&leg_a, &leg_b, k_eff, pool_k, exclude_nearest)
-            };
-            let mut dist_row = vec![0.0; k_eff];
-            let mut idx_row = vec![0; k_eff];
-            for (j, (id, dist)) in merged.into_iter().enumerate() {
-                dist_row[j] = dist;
-                idx_row[j] = id as i64;
-            }
-            (dist_row, idx_row)
-        })
-        .collect();
+    let per_query: Vec<(Vec<f64>, Vec<i64>)> = if should_use_rayon() {
+        query_rows.par_iter().map(score_query).collect()
+    } else {
+        query_rows.iter().map(score_query).collect()
+    };
     for (q, (dist_row, idx_row)) in per_query.into_iter().enumerate() {
         for j in 0..k_eff {
             dist2s[[q, j]] = dist_row[j];

@@ -80,6 +80,59 @@ app_rust_library(
     }),
 )
 
+rust_test(
+    name = "ennx-unit",
+    srcs = glob([
+        "src/**/*.cl",
+        "src/**/*.metal",
+        "src/**/*.rs",
+    ]),
+    crate = "ennx",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    features = select({
+        "//:linux-arm64": ["opencl", "usearch-native", "zig-dense"],
+        "//:linux-x86_64": ["opencl", "usearch-native", "zig-dense"],
+        "//:macos-arm64": ["metal", "usearch-native", "zig-dense"],
+    }),
+    visibility = ["//buck2/tests:all"],
+    deps = [
+        ":faiss-bridge",
+        ":usearch-bridge",
+        "//zig:dense",
+        "//rust/crates/bpann:bpann",
+        "//rust:memmap2",
+        "//rust:ndarray",
+        "//rust:rand",
+        "//rust:rand_chacha",
+        "//rust:rand_distr",
+        "//rust:rayon",
+        "//rust:serde",
+        "//rust:sobol",
+        "//rust:tempfile",
+        "//rust:thiserror",
+        "//rust:toml",
+        "//rust:tracy-client",
+        "//rust:tracy-client-sys",
+    ] + select({
+        "//:linux-arm64": ["//rust:opencl3"],
+        "//:linux-x86_64": ["//rust:opencl3"],
+        "//:macos-arm64": [
+            "//buck2/native:openmp-macos",
+            "//rust:metal",
+        ],
+    }),
+    rpath = True,
+    run_env = {"RUST_TEST_THREADS": "1"},
+    runtime_dependency_handling = "symlink",
+    rustc_flags = select({
+        "//:macos-arm64": [
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/openmp/lib",
+        ],
+        "DEFAULT": [],
+    }),
+)
+
 app_rust_library(
     name = "ennx_bench",
     srcs = glob([

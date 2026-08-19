@@ -23,3 +23,23 @@ app_rust_library(
         "//rust:thiserror",
     ],
 )
+
+rust_test(
+    name = "bpann-unit",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "bpann",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    visibility = ["//buck2/tests:all"],
+    deps = [
+        "//rust:memmap2",
+        "//rust:ndarray",
+        "//rust:rand",
+        "//rust:rand_chacha",
+        "//rust:rayon",
+        "//rust:serde",
+        "//rust:serde_json",
+        "//rust:tempfile",
+        "//rust:thiserror",
+    ],
+)

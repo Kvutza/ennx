@@ -54,6 +54,8 @@ test_suite(
         ":dense",
         ":opencl",
         "//rust/crates/dev-cli:ennx-test",
+        "//rust/crates/bpann:bpann-unit",
+        "//rust/crates/ennx:ennx-unit",
     ] + select({
         "//:macos-arm64": [
             ":metal",

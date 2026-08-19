@@ -9,7 +9,6 @@ use crate::strategy::Strategy;
 use crate::surrogate::{Surrogate, SurrogatePrediction};
 use crate::trust_region::TRLengthConfig;
 use crate::trust_region_config::TrustRegionConfig;
-use approx::relative_eq;
 use ndarray::{array, Array1, Array2, Array3, ArrayView2};
 use rand::rngs::StdRng;
 use rand::RngCore;
@@ -220,7 +219,7 @@ fn morbo_on_restart_rescalarize_via_ask_turbo() {
         .expect("morbo tr")
         .weights()
         .to_owned();
-    assert!(relative_eq!(w0, w1, epsilon = 1e-12));
+    assert_eq!(w0, w1);
     opt.trust_region_mut().restart(Some(&mut rng));
     let w2 = opt
         .trust_region()
@@ -228,7 +227,7 @@ fn morbo_on_restart_rescalarize_via_ask_turbo() {
         .expect("morbo tr")
         .weights()
         .to_owned();
-    assert!(!relative_eq!(w1, w2, epsilon = 1e-12));
+    assert_ne!(w1, w2);
 }
 
 #[test]
@@ -280,7 +279,7 @@ fn morbo_on_propose_rescalarize_via_ask_turbo() {
         .expect("morbo tr")
         .weights()
         .to_owned();
-    assert!(!relative_eq!(w0, w1, epsilon = 1e-12));
+    assert_ne!(w0, w1);
 }
 
 #[test]

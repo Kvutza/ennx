@@ -49,8 +49,6 @@ usearch-numkong = ["dep:usearch", "usearch/numkong"]
 zig-dense = []
 
 [dev-dependencies]
-approx = "0.5"
-ndarray = { workspace = true, features = ["approx"] }
 numpy = { workspace = true }
 rand_chacha = "0.3"
 tempfile = "3"

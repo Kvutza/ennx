@@ -1,5 +1,5 @@
 {
-  "checksum": "0a245205e7d3d28c7ce909c6e49d54b664b83639374823e4a4ac2aabc53b0ffe",
+  "checksum": "a2aa9f4060173541b8259ecde41f4d688d5f6a0463df498702598abbbd0b3041",
   "crates": {
     "adler32 1.2.0": {
       "name": "adler32",
@@ -162,60 +162,6 @@
         "MIT"
       ],
       "license_file": "LICENSE-APACHE"
-    },
-    "approx 0.5.1": {
-      "name": "approx",
-      "version": "0.5.1",
-      "package_url": "https://github.com/brendanzab/approx",
-      "repository": {
-        "Http": {
-          "url": "https://static.crates.io/crates/approx/0.5.1/download",
-          "sha256": "cab112f0a86d568ea0e627cc1d6be74a1e9cd55214684db5561995f6dad897c6"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "approx",
-            "crate_root": "src/lib.rs",
-            "srcs": {
-              "allow_empty": true,
-              "include": [
-                "**/*.rs"
-              ]
-            }
-          }
-        }
-      ],
-      "library_target_name": "approx",
-      "common_attrs": {
-        "compile_data_glob": [
-          "**"
-        ],
-        "crate_features": {
-          "common": [
-            "default",
-            "std"
-          ],
-          "selects": {}
-        },
-        "deps": {
-          "common": [
-            {
-              "id": "num-traits 0.2.19",
-              "target": "num_traits"
-            }
-          ],
-          "selects": {}
-        },
-        "edition": "2015",
-        "version": "0.5.1"
-      },
-      "license": "Apache-2.0",
-      "license_ids": [
-        "Apache-2.0"
-      ],
-      "license_file": "LICENSE"
     },
     "async-trait 0.1.92": {
       "name": "async-trait",
@@ -2974,6 +2920,10 @@
               "target": "rand"
             },
             {
+              "id": "rand_distr 0.4.3",
+              "target": "rand_distr"
+            },
+            {
               "id": "rayon 1.12.0",
               "target": "rayon"
             },
@@ -3013,10 +2963,6 @@
         },
         "deps_dev": {
           "common": [
-            {
-              "id": "approx 0.5.1",
-              "target": "approx"
-            },
             {
               "id": "numpy 0.29.0",
               "target": "numpy"
@@ -3120,10 +3066,6 @@
         },
         "deps_dev": {
           "common": [
-            {
-              "id": "approx 0.5.1",
-              "target": "approx"
-            },
             {
               "id": "rand_chacha 0.3.1",
               "target": "rand_chacha"
@@ -6895,6 +6837,83 @@
       ],
       "license_file": "LICENSE"
     },
+    "libm 0.2.16": {
+      "name": "libm",
+      "version": "0.2.16",
+      "package_url": "https://github.com/rust-lang/compiler-builtins",
+      "repository": {
+        "Http": {
+          "url": "https://static.crates.io/crates/libm/0.2.16/download",
+          "sha256": "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "libm",
+            "crate_root": "src/lib.rs",
+            "srcs": {
+              "allow_empty": true,
+              "include": [
+                "**/*.rs"
+              ]
+            }
+          }
+        },
+        {
+          "BuildScript": {
+            "crate_name": "build_script_build",
+            "crate_root": "build.rs",
+            "srcs": {
+              "allow_empty": true,
+              "include": [
+                "**/*.rs"
+              ]
+            }
+          }
+        }
+      ],
+      "library_target_name": "libm",
+      "common_attrs": {
+        "compile_data_glob": [
+          "**"
+        ],
+        "crate_features": {
+          "common": [
+            "arch",
+            "default"
+          ],
+          "selects": {}
+        },
+        "deps": {
+          "common": [
+            {
+              "id": "libm 0.2.16",
+              "target": "build_script_build"
+            }
+          ],
+          "selects": {}
+        },
+        "edition": "2021",
+        "version": "0.2.16"
+      },
+      "build_script_attrs": {
+        "compile_data_glob": [
+          "**"
+        ],
+        "compile_data_glob_excludes": [
+          "**/*.rs"
+        ],
+        "data_glob": [
+          "**"
+        ]
+      },
+      "license": "MIT",
+      "license_ids": [
+        "MIT"
+      ],
+      "license_file": "LICENSE.txt"
+    },
     "libnvvm-sys 0.2.1": {
       "name": "libnvvm-sys",
       "version": "0.2.1",
@@ -8011,7 +8030,6 @@
         ],
         "crate_features": {
           "common": [
-            "approx",
             "default",
             "std"
           ],
@@ -8019,10 +8037,6 @@
         },
         "deps": {
           "common": [
-            {
-              "id": "approx 0.5.1",
-              "target": "approx"
-            },
             {
               "id": "matrixmultiply 0.3.11",
               "target": "matrixmultiply"
@@ -8390,12 +8404,17 @@
           "common": [
             "default",
             "i128",
+            "libm",
             "std"
           ],
           "selects": {}
         },
         "deps": {
           "common": [
+            {
+              "id": "libm 0.2.16",
+              "target": "libm"
+            },
             {
               "id": "num-traits 0.2.19",
               "target": "build_script_build"
@@ -11834,6 +11853,66 @@
         ],
         "edition": "2024",
         "version": "0.10.1"
+      },
+      "license": "MIT OR Apache-2.0",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "license_file": "LICENSE-APACHE"
+    },
+    "rand_distr 0.4.3": {
+      "name": "rand_distr",
+      "version": "0.4.3",
+      "package_url": "https://github.com/rust-random/rand",
+      "repository": {
+        "Http": {
+          "url": "https://static.crates.io/crates/rand_distr/0.4.3/download",
+          "sha256": "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "rand_distr",
+            "crate_root": "src/lib.rs",
+            "srcs": {
+              "allow_empty": true,
+              "include": [
+                "**/*.rs"
+              ]
+            }
+          }
+        }
+      ],
+      "library_target_name": "rand_distr",
+      "common_attrs": {
+        "compile_data_glob": [
+          "**"
+        ],
+        "crate_features": {
+          "common": [
+            "alloc",
+            "default",
+            "std"
+          ],
+          "selects": {}
+        },
+        "deps": {
+          "common": [
+            {
+              "id": "num-traits 0.2.19",
+              "target": "num_traits"
+            },
+            {
+              "id": "rand 0.8.7",
+              "target": "rand"
+            }
+          ],
+          "selects": {}
+        },
+        "edition": "2018",
+        "version": "0.4.3"
       },
       "license": "MIT OR Apache-2.0",
       "license_ids": [
@@ -20466,6 +20545,7 @@
     "opencl3 0.12.3",
     "pyo3 0.29.2",
     "rand 0.8.7",
+    "rand_distr 0.4.3",
     "rayon 1.12.0",
     "serde 1.0.229",
     "serde_json 1.0.151",
@@ -20478,7 +20558,6 @@
     "tracy-client-sys 0.28.0"
   ],
   "direct_dev_deps": [
-    "approx 0.5.1",
     "rand_chacha 0.3.1"
   ],
   "unused_patches": []

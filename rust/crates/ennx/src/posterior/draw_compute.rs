@@ -7,6 +7,7 @@ use crate::draw::DrawInternals;
 use crate::error::ENNError;
 use crate::hash::{normal_for_seed_index_metric, unique_index_inverse};
 use crate::model::EpistemicNearestNeighbors;
+use crate::parallel::should_use_rayon;
 
 pub(crate) fn draw_from_internals(
     model: &EpistemicNearestNeighbors,
@@ -67,32 +68,57 @@ pub(crate) fn draw_from_internals(
         .as_slice_memory_order_mut()
         .ok_or_else(|| ENNError::InvalidParameter("draws must be contiguous".into()))?;
 
-    draws_flat
-        .par_chunks_mut(out_stride)
-        .zip(function_seeds.par_iter())
-        .for_each_init(
-            || vec![0.0f64; n_unique * m],
-            |unique_cache, (out_seed, &seed)| {
-                let seed_u64 = seed as u64;
-                for (ui, &unique_idx) in unique_indices.iter().enumerate() {
-                    for j in 0..m {
-                        unique_cache[ui * m + j] =
-                            normal_for_seed_index_metric(seed_u64, unique_idx, j);
-                    }
-                }
-                for i in 0..n {
-                    for j in 0..m {
-                        let mut weighted_u = 0.0;
-                        for ki in 0..k {
-                            let inv = inverse[i * k + ki];
-                            let w = w_flat[(i * k + ki) * m + j];
-                            weighted_u += w * unique_cache[inv * m + j];
+    if should_use_rayon() {
+        draws_flat
+            .par_chunks_mut(out_stride)
+            .zip(function_seeds.par_iter())
+            .for_each_init(
+                || vec![0.0f64; n_unique * m],
+                |unique_cache, (out_seed, &seed)| {
+                    let seed_u64 = seed as u64;
+                    for (ui, &unique_idx) in unique_indices.iter().enumerate() {
+                        for j in 0..m {
+                            unique_cache[ui * m + j] =
+                                normal_for_seed_index_metric(seed_u64, unique_idx, j);
                         }
-                        out_seed[i * m + j] = mu_flat[i * m + j] + scale[i * m + j] * weighted_u;
                     }
+                    for i in 0..n {
+                        for j in 0..m {
+                            let mut weighted_u = 0.0;
+                            for ki in 0..k {
+                                let inv = inverse[i * k + ki];
+                                let w = w_flat[(i * k + ki) * m + j];
+                                weighted_u += w * unique_cache[inv * m + j];
+                            }
+                            out_seed[i * m + j] =
+                                mu_flat[i * m + j] + scale[i * m + j] * weighted_u;
+                        }
+                    }
+                },
+            );
+    } else {
+        for (seed_offset, out_seed) in draws_flat.chunks_mut(out_stride).enumerate() {
+            let seed_u64 = function_seeds[seed_offset] as u64;
+            let mut unique_cache = vec![0.0f64; n_unique * m];
+            for (ui, &unique_idx) in unique_indices.iter().enumerate() {
+                for j in 0..m {
+                    unique_cache[ui * m + j] =
+                        normal_for_seed_index_metric(seed_u64, unique_idx, j);
                 }
-            },
-        );
+            }
+            for i in 0..n {
+                for j in 0..m {
+                    let mut weighted_u = 0.0;
+                    for ki in 0..k {
+                        let inv = inverse[i * k + ki];
+                        let w = w_flat[(i * k + ki) * m + j];
+                        weighted_u += w * unique_cache[inv * m + j];
+                    }
+                    out_seed[i * m + j] = mu_flat[i * m + j] + scale[i * m + j] * weighted_u;
+                }
+            }
+        }
+    }
 
     Ok(draws)
 }
@@ -125,26 +151,44 @@ fn draw_from_internals_m1(
         .as_slice_memory_order_mut()
         .ok_or_else(|| ENNError::InvalidParameter("draws must be contiguous".into()))?;
 
-    draws_flat
-        .par_chunks_mut(n)
-        .zip(function_seeds.par_iter())
-        .for_each_init(
-            || vec![0.0f64; n_unique],
-            |unique_cache, (out_seed, &seed)| {
-                let seed_u64 = seed as u64;
-                for (ui, &unique_idx) in unique_indices.iter().enumerate() {
-                    unique_cache[ui] = normal_for_seed_index_metric(seed_u64, unique_idx, 0);
-                }
-                for i in 0..n {
-                    let mut weighted_u = 0.0;
-                    let base = i * k;
-                    for ki in 0..k {
-                        weighted_u += w_flat[base + ki] * unique_cache[inverse[base + ki]];
+    if should_use_rayon() {
+        draws_flat
+            .par_chunks_mut(n)
+            .zip(function_seeds.par_iter())
+            .for_each_init(
+                || vec![0.0f64; n_unique],
+                |unique_cache, (out_seed, &seed)| {
+                    let seed_u64 = seed as u64;
+                    for (ui, &unique_idx) in unique_indices.iter().enumerate() {
+                        unique_cache[ui] = normal_for_seed_index_metric(seed_u64, unique_idx, 0);
                     }
-                    out_seed[i] = mu_flat[i] + scale[i] * weighted_u;
+                    for i in 0..n {
+                        let mut weighted_u = 0.0;
+                        let base = i * k;
+                        for ki in 0..k {
+                            weighted_u += w_flat[base + ki] * unique_cache[inverse[base + ki]];
+                        }
+                        out_seed[i] = mu_flat[i] + scale[i] * weighted_u;
+                    }
+                },
+            );
+    } else {
+        for (seed_offset, out_seed) in draws_flat.chunks_mut(n).enumerate() {
+            let seed_u64 = function_seeds[seed_offset] as u64;
+            let mut unique_cache = vec![0.0f64; n_unique];
+            for (ui, &unique_idx) in unique_indices.iter().enumerate() {
+                unique_cache[ui] = normal_for_seed_index_metric(seed_u64, unique_idx, 0);
+            }
+            for i in 0..n {
+                let mut weighted_u = 0.0;
+                let base = i * k;
+                for ki in 0..k {
+                    weighted_u += w_flat[base + ki] * unique_cache[inverse[base + ki]];
                 }
-            },
-        );
+                out_seed[i] = mu_flat[i] + scale[i] * weighted_u;
+            }
+        }
+    }
 
     Ok(draws)
 }

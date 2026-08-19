@@ -31,8 +31,8 @@ ENNX_CRATES = [
 ]
 
 ENNX_TEST_CRATES = ENNX_CRATES + [
-    "approx",
     "rand_chacha",
+    "rand_distr",
     "tempfile",
 ]
 

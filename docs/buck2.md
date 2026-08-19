@@ -1,4 +1,4 @@
-# Buck2 pilot
+# Buck2 path
 
 ```sh
 ./ennx build
@@ -11,8 +11,8 @@
 ```
 
 `tools/buck2-deps` regenerates both `BUCK` dependency graphs from the checked-in
-Cargo locks. Bazel remains intact; removing the pilot means removing the Buck2
-files and the wrapper tasks behind `./ennx`.
+Cargo locks. Buck2 is the primary repo path behind `./ennx`; Bazel remains as a
+secondary compatibility and audit path.
 
 Development builds use `opt-level=1` in the `dev` isolation directory. Wheels
 use `opt-level=3` in `release`; both graphs stay warm independently.

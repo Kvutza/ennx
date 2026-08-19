@@ -34,6 +34,7 @@ pub mod model;
 pub mod morbo_trust_region;
 pub mod optimizer;
 pub mod optimizer_factory;
+mod parallel;
 pub mod params;
 pub mod posterior;
 pub mod prelude;

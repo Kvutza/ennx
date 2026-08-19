@@ -274,8 +274,8 @@ mod tests {
         let w1 = tr.morbo_mut().expect("morbo").weights().to_owned();
         tr.resample_on_propose(&mut rng);
         let w2 = tr.morbo_mut().expect("morbo").weights().to_owned();
-        assert!(!approx::relative_eq!(w0, w1, epsilon = 1e-12));
-        assert!(!approx::relative_eq!(w1, w2, epsilon = 1e-12));
+        assert_ne!(w0, w1);
+        assert_ne!(w1, w2);
     }
 
     #[test]
@@ -322,9 +322,9 @@ mod tests {
         let w0 = tr.morbo_mut().expect("morbo").weights().to_owned();
         tr.resample_on_propose(&mut rng);
         let w1 = tr.morbo_mut().expect("morbo").weights().to_owned();
-        assert!(approx::relative_eq!(w0, w1, epsilon = 1e-12));
+        assert_eq!(w0, w1);
         tr.restart(Some(&mut rng));
         let w2 = tr.morbo_mut().expect("morbo").weights().to_owned();
-        assert!(!approx::relative_eq!(w1, w2, epsilon = 1e-12));
+        assert_ne!(w1, w2);
     }
 }

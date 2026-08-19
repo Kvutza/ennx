@@ -93,13 +93,13 @@ impl ENNIndex {
             });
         }
         let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
-        let x_scaled: Array2<f64> = if self.scale_x {
-            x / &x_scale.view().insert_axis(Axis(0))
-        } else {
-            x.to_owned()
-        };
         let start_key = self.len() as u64;
-        self.inner.add(&x_scaled.view(), start_key)
+        if self.scale_x {
+            let x_scaled = x / &x_scale.view().insert_axis(Axis(0));
+            self.inner.add(&x_scaled.view(), start_key)
+        } else {
+            self.inner.add(x, start_key)
+        }
     }
 
     pub fn search(
@@ -125,12 +125,6 @@ impl ENNIndex {
         let search_k = search_k as usize;
 
         let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
-        let x_scaled: Array2<f64> = if self.scale_x {
-            x / &x_scale.view().insert_axis(Axis(0))
-        } else {
-            x.to_owned()
-        };
-
         let (mut dist2s, mut indices) = if n_train == 0 {
             (
                 Array2::from_elem((n_query, search_k), f64::INFINITY),
@@ -138,7 +132,12 @@ impl ENNIndex {
             )
         } else {
             let k_eff = search_k.min(n_train);
-            self.inner.search(&x_scaled.view(), k_eff, search_k)?
+            if self.scale_x {
+                let x_scaled = x / &x_scale.view().insert_axis(Axis(0));
+                self.inner.search(&x_scaled.view(), k_eff, search_k)?
+            } else {
+                self.inner.search(x, k_eff, search_k)?
+            }
         };
 
         if exclude_nearest {
@@ -179,21 +178,30 @@ impl ENNIndex {
             });
         }
         let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
-        let x_scaled: Array2<f64> = if self.scale_x {
-            x / &x_scale.view().insert_axis(Axis(0))
+        if self.scale_x {
+            let x_scaled = x / &x_scale.view().insert_axis(Axis(0));
+            self.inner.cuda_posterior(
+                &x_scaled.view(),
+                outcomes,
+                scales,
+                input_k,
+                used_k,
+                skip,
+                epistemic_scale,
+                aleatoric_scale,
+            )
         } else {
-            x.to_owned()
-        };
-        self.inner.cuda_posterior(
-            &x_scaled.view(),
-            outcomes,
-            scales,
-            input_k,
-            used_k,
-            skip,
-            epistemic_scale,
-            aleatoric_scale,
-        )
+            self.inner.cuda_posterior(
+                x,
+                outcomes,
+                scales,
+                input_k,
+                used_k,
+                skip,
+                epistemic_scale,
+                aleatoric_scale,
+            )
+        }
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
@@ -218,23 +226,34 @@ impl ENNIndex {
             });
         }
         let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
-        let x_scaled: Array2<f64> = if self.scale_x {
-            x / &x_scale.view().insert_axis(Axis(0))
+        if self.scale_x {
+            let x_scaled = x / &x_scale.view().insert_axis(Axis(0));
+            self.inner.cuda_weighted(
+                &x_scaled.view(),
+                outcomes,
+                variances,
+                scales,
+                input_k,
+                used_k,
+                skip,
+                epistemic_scale,
+                aleatoric_scale,
+                observation_noise,
+            )
         } else {
-            x.to_owned()
-        };
-        self.inner.cuda_weighted(
-            &x_scaled.view(),
-            outcomes,
-            variances,
-            scales,
-            input_k,
-            used_k,
-            skip,
-            epistemic_scale,
-            aleatoric_scale,
-            observation_noise,
-        )
+            self.inner.cuda_weighted(
+                x,
+                outcomes,
+                variances,
+                scales,
+                input_k,
+                used_k,
+                skip,
+                epistemic_scale,
+                aleatoric_scale,
+                observation_noise,
+            )
+        }
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
@@ -257,21 +276,30 @@ impl ENNIndex {
             });
         }
         let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
-        let x_scaled: Array2<f64> = if self.scale_x {
-            x / &x_scale.view().insert_axis(Axis(0))
+        if self.scale_x {
+            let x_scaled = x / &x_scale.view().insert_axis(Axis(0));
+            self.inner.cuda_batch(
+                &x_scaled.view(),
+                outcomes,
+                variances,
+                scales,
+                input_k,
+                skip,
+                values,
+                observation_noise,
+            )
         } else {
-            x.to_owned()
-        };
-        self.inner.cuda_batch(
-            &x_scaled.view(),
-            outcomes,
-            variances,
-            scales,
-            input_k,
-            skip,
-            values,
-            observation_noise,
-        )
+            self.inner.cuda_batch(
+                x,
+                outcomes,
+                variances,
+                scales,
+                input_k,
+                skip,
+                values,
+                observation_noise,
+            )
+        }
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
@@ -297,24 +325,36 @@ impl ENNIndex {
             });
         }
         let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
-        let x_scaled: Array2<f64> = if self.scale_x {
-            x / &x_scale.view().insert_axis(Axis(0))
+        if self.scale_x {
+            let x_scaled = x / &x_scale.view().insert_axis(Axis(0));
+            self.inner.cuda_draws(
+                &x_scaled.view(),
+                outcomes,
+                variances,
+                scales,
+                input_k,
+                used_k,
+                skip,
+                epistemic_scale,
+                aleatoric_scale,
+                observation_noise,
+                seeds,
+            )
         } else {
-            x.to_owned()
-        };
-        self.inner.cuda_draws(
-            &x_scaled.view(),
-            outcomes,
-            variances,
-            scales,
-            input_k,
-            used_k,
-            skip,
-            epistemic_scale,
-            aleatoric_scale,
-            observation_noise,
-            seeds,
-        )
+            self.inner.cuda_draws(
+                x,
+                outcomes,
+                variances,
+                scales,
+                input_k,
+                used_k,
+                skip,
+                epistemic_scale,
+                aleatoric_scale,
+                observation_noise,
+                seeds,
+            )
+        }
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
@@ -340,27 +380,39 @@ impl ENNIndex {
             });
         }
         let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
-        let (x_scaled, whatif_scaled): (Array2<f64>, Array2<f64>) = if self.scale_x {
-            (
+        if self.scale_x {
+            let (x_scaled, whatif_scaled): (Array2<f64>, Array2<f64>) = (
                 x / &x_scale.view().insert_axis(Axis(0)),
                 x_whatif / &x_scale.view().insert_axis(Axis(0)),
+            );
+            self.inner.cuda_conditional(
+                &x_scaled.view(),
+                &whatif_scaled.view(),
+                outcomes,
+                variances,
+                scales,
+                input_k,
+                used_k,
+                skip,
+                epistemic_scale,
+                aleatoric_scale,
+                observation_noise,
             )
         } else {
-            (x.to_owned(), x_whatif.to_owned())
-        };
-        self.inner.cuda_conditional(
-            &x_scaled.view(),
-            &whatif_scaled.view(),
-            outcomes,
-            variances,
-            scales,
-            input_k,
-            used_k,
-            skip,
-            epistemic_scale,
-            aleatoric_scale,
-            observation_noise,
-        )
+            self.inner.cuda_conditional(
+                x,
+                x_whatif,
+                outcomes,
+                variances,
+                scales,
+                input_k,
+                used_k,
+                skip,
+                epistemic_scale,
+                aleatoric_scale,
+                observation_noise,
+            )
+        }
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
@@ -387,28 +439,41 @@ impl ENNIndex {
             });
         }
         let x_scale = self.x_scale.lock().expect("x_scale mutex poisoned").clone();
-        let (x_scaled, whatif_scaled): (Array2<f64>, Array2<f64>) = if self.scale_x {
-            (
+        if self.scale_x {
+            let (x_scaled, whatif_scaled): (Array2<f64>, Array2<f64>) = (
                 x / &x_scale.view().insert_axis(Axis(0)),
                 x_whatif / &x_scale.view().insert_axis(Axis(0)),
+            );
+            self.inner.condition_draws(
+                &x_scaled.view(),
+                &whatif_scaled.view(),
+                outcomes,
+                variances,
+                scales,
+                input_k,
+                used_k,
+                skip,
+                epistemic_scale,
+                aleatoric_scale,
+                observation_noise,
+                seeds,
             )
         } else {
-            (x.to_owned(), x_whatif.to_owned())
-        };
-        self.inner.condition_draws(
-            &x_scaled.view(),
-            &whatif_scaled.view(),
-            outcomes,
-            variances,
-            scales,
-            input_k,
-            used_k,
-            skip,
-            epistemic_scale,
-            aleatoric_scale,
-            observation_noise,
-            seeds,
-        )
+            self.inner.condition_draws(
+                x,
+                x_whatif,
+                outcomes,
+                variances,
+                scales,
+                input_k,
+                used_k,
+                skip,
+                epistemic_scale,
+                aleatoric_scale,
+                observation_noise,
+                seeds,
+            )
+        }
     }
 
     pub fn len(&self) -> usize {
