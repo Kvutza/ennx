@@ -1,4 +1,4 @@
-# Repository checks run by the pinned ./prekw wrapper.
+# Repository checks run by `./ennx check`.
 #:schema https://www.schemastore.org/prek.json
 
 [[repos]]

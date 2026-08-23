@@ -2,7 +2,9 @@ use std::ffi::c_void;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use metal::{ComputePipelineState, MTLSize};
+extern crate metal as metal_crate;
+
+use metal_crate::{ComputePipelineState, MTLSize};
 use ndarray::{Array2, ArrayView1, ArrayView2};
 
 use crate::apple_gpu::Runtime;
@@ -160,7 +162,7 @@ impl PosteriorEngine {
         command.commit();
         command.wait_until_completed();
         let status = command.status();
-        if status == metal::MTLCommandBufferStatus::Completed {
+        if status == metal_crate::MTLCommandBufferStatus::Completed {
             Ok(())
         } else {
             Err(format!("posterior AGX command failed: {status:?}"))
@@ -169,17 +171,21 @@ impl PosteriorEngine {
 }
 
 struct Inputs {
-    distances: metal::Buffer,
-    indices: metal::Buffer,
-    outcomes: metal::Buffer,
-    y_scale: metal::Buffer,
-    mu: metal::Buffer,
-    se: metal::Buffer,
+    distances: metal_crate::Buffer,
+    indices: metal_crate::Buffer,
+    outcomes: metal_crate::Buffer,
+    y_scale: metal_crate::Buffer,
+    mu: metal_crate::Buffer,
+    se: metal_crate::Buffer,
     params: Params,
     elements: usize,
 }
 
-fn read_matrix(buffer: &metal::Buffer, rows: usize, columns: usize) -> Result<Array2<f64>, String> {
+fn read_matrix(
+    buffer: &metal_crate::Buffer,
+    rows: usize,
+    columns: usize,
+) -> Result<Array2<f64>, String> {
     Array2::from_shape_vec(
         (rows, columns),
         values(buffer, rows * columns)
@@ -190,7 +196,7 @@ fn read_matrix(buffer: &metal::Buffer, rows: usize, columns: usize) -> Result<Ar
     .map_err(|error| error.to_string())
 }
 
-fn values(buffer: &metal::Buffer, len: usize) -> &[f32] {
+fn values(buffer: &metal_crate::Buffer, len: usize) -> &[f32] {
     unsafe { std::slice::from_raw_parts(buffer.contents().cast::<f32>(), len) }
 }
 

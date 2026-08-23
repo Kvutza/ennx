@@ -49,7 +49,7 @@ fn rerank(
 }
 
 #[cfg(feature = "usearch")]
-mod backend {
+mod binding {
     use super::{usearch_error, IndexError};
     use usearch::{new_index, Index, IndexOptions, MetricKind, ScalarKind};
 
@@ -109,7 +109,7 @@ mod backend {
 }
 
 #[cfg(feature = "usearch-native")]
-mod backend {
+mod binding {
     use super::{usearch_error, IndexError};
     use std::ffi::{c_char, c_void, CStr};
     use std::ptr;
@@ -263,9 +263,9 @@ mod backend {
 }
 
 #[cfg(feature = "usearch")]
-use backend::BackendIndex;
+use binding::BackendIndex;
 #[cfg(feature = "usearch-native")]
-use backend::BackendIndex;
+use binding::BackendIndex;
 
 pub(crate) struct USearchBackend {
     index: BackendIndex,

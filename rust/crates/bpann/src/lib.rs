@@ -6,7 +6,7 @@ pub mod large_n_search;
 pub mod merge;
 pub mod mmap_store;
 pub mod observation;
-mod parallel;
+pub mod parallel;
 pub mod small_n_search;
 pub mod tuning;
 

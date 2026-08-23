@@ -24,11 +24,8 @@ fn run() -> Result<u8, String> {
     }
 
     match args[0].as_str() {
-        "build" => buck_build(&root),
-        "test" => buck_test(&root),
-        "wheel" => buck_wheel(&root),
-        "verify" => verify(&root),
-        "ci" => ci(&root),
+        "build" | "test" | "wheel" | "verify" | "ci" => project(&root, &args),
+        "check" => check(&root, &args[1..]),
         "buck" => buck(&root, &args[1..]),
         "bazel" => bazel(&root, &args[1..]),
         "rust" => rust(&root, &args[1..]),
@@ -44,6 +41,17 @@ fn run() -> Result<u8, String> {
             "unknown ennx command {command:?}\n\n{}",
             help_text()
         )),
+    }
+}
+
+fn project(root: &Path, args: &[String]) -> Result<u8, String> {
+    match args[0].as_str() {
+        "build" => buck_build(root),
+        "test" => buck_test(root),
+        "wheel" => buck_wheel(root),
+        "verify" => verify(root),
+        "ci" => ci(root),
+        _ => unreachable!("project only receives known commands"),
     }
 }
 
@@ -271,13 +279,7 @@ fn cargo_bpann_tests(root: &Path) -> Result<u8, String> {
     command(
         root,
         "cargo",
-        [
-            "test",
-            "--manifest-path",
-            "Cargo.toml",
-            "-p",
-            "ennx-bpann",
-        ],
+        ["test", "--manifest-path", "Cargo.toml", "-p", "ennx-bpann"],
     )
 }
 
@@ -367,6 +369,78 @@ fn python_fast(root: &Path) -> Result<u8, String> {
     )
 }
 
+fn check(root: &Path, args: &[String]) -> Result<u8, String> {
+    let all = check_all(args)?;
+    let files = if all {
+        Vec::new()
+    } else {
+        changed_files(root)?
+    };
+    if !all && files.is_empty() {
+        println!("No files changed in the JJ working copy.");
+        return Ok(0);
+    }
+
+    let mut prek_args = vec!["run".to_string()];
+    if all {
+        prek_args.push("--all-files".to_string());
+    } else {
+        prek_args.push("--files".to_string());
+        prek_args.extend(files);
+    }
+    run_prek(root, &prek_args)
+}
+
+fn check_all(args: &[String]) -> Result<bool, String> {
+    match args {
+        [] => Ok(false),
+        [all] if all == "--all" => Ok(true),
+        _ => Err("usage: ennx check [--all]".to_string()),
+    }
+}
+
+fn changed_files(root: &Path) -> Result<Vec<String>, String> {
+    let output = Command::new("jj")
+        .args(["diff", "--name-only"])
+        .current_dir(root)
+        .output()
+        .map_err(|error| format!("failed to run jj: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "jj diff --name-only failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|path| {
+            let candidate = root.join(path);
+            candidate.exists() || candidate.is_symlink()
+        })
+        .map(str::to_owned)
+        .collect())
+}
+
+fn run_prek(root: &Path, args: &[String]) -> Result<u8, String> {
+    if command(root, "tools/bootstrap-dotslash", std::iter::empty::<&str>())? != 0 {
+        return Err("failed to bootstrap Dotslash for prek".to_string());
+    }
+    let bin_dir = root.join(".buck2-tools/bin");
+    let dotslash = [bin_dir.join("dotslash"), bin_dir.join("dotslash.exe")]
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or("Dotslash bootstrap did not produce an executable")?;
+    let status = Command::new(dotslash)
+        .arg(root.join("tools/prek"))
+        .args(args)
+        .current_dir(root)
+        .status()
+        .map_err(|error| format!("failed to run prek: {error}"))?;
+    Ok(status
+        .code()
+        .map_or(1, |code| u8::try_from(code).unwrap_or(1)))
+}
+
 fn buck2<const N: usize>(root: &Path, args: [&str; N]) -> Result<u8, String> {
     command(root, "./buck2w", args)
 }
@@ -387,9 +461,13 @@ where
 }
 
 fn repo_root() -> Result<PathBuf, String> {
-    let mut dir = env::current_dir().map_err(|error| format!("cannot read cwd: {error}"))?;
+    let dir = env::current_dir().map_err(|error| format!("cannot read cwd: {error}"))?;
+    repo_root_from(dir)
+}
+
+fn repo_root_from(mut dir: PathBuf) -> Result<PathBuf, String> {
     loop {
-        if dir.join(".buckroot").is_file() {
+        if dir.join(".buckconfig").is_file() {
             return Ok(dir);
         }
         if !dir.pop() {
@@ -406,6 +484,7 @@ fn help_text() -> &'static str {
     "usage:
   ennx build
   ennx test
+  ennx check [--all]
   ennx wheel
   ennx verify
   ennx ci
@@ -420,14 +499,35 @@ fn help_text() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::help_text;
+    use std::fs;
+
+    use super::{check_all, help_text, repo_root_from};
 
     #[test]
     fn help_lists_language_gates() {
         let help = help_text();
         assert!(help.contains("ennx rust fast|full"));
+        assert!(help.contains("ennx check [--all]"));
         assert!(help.contains("ennx python fast|verify|wheel"));
         assert!(help.contains("ennx cuda wheel|parity"));
         assert!(help.contains("ennx release upload vX.Y.Z WHEEL..."));
+    }
+
+    #[test]
+    fn repo_root_uses_buckconfig() {
+        let root = std::env::temp_dir().join(format!("ennx-dev-cli-{}", std::process::id()));
+        let nested = root.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(root.join(".buckconfig"), "").unwrap();
+
+        assert_eq!(repo_root_from(nested).unwrap(), root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn check_accepts_only_the_all_flag() {
+        assert!(!check_all(&[]).unwrap());
+        assert!(check_all(&["--all".to_string()]).unwrap());
+        assert!(check_all(&["--all-files".to_string()]).is_err());
     }
 }

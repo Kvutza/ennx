@@ -2,7 +2,9 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use metal::ComputePipelineState;
+extern crate metal as metal_crate;
+
+use metal_crate::ComputePipelineState;
 
 use super::{tiles, DenseLeaf, DenseTerm};
 use crate::apple_gpu::{thread_group, Runtime};
@@ -86,7 +88,7 @@ impl Context {
         })
     }
 
-    fn buffer<T>(&self, values: &[T]) -> metal::Buffer {
+    fn buffer<T>(&self, values: &[T]) -> metal_crate::Buffer {
         self.runtime.buffer_with(values)
     }
 }

@@ -71,7 +71,6 @@ filegroup(
         "NOTICE",
         "README",
         "ops/cuda_wheel.py",
-        "pyproject.toml",
         "rust-toolchain.toml",
     ],
     visibility = ["PUBLIC"],

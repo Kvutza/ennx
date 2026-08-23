@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use thiserror::Error;
 
-use crate::parallel::should_use_rayon;
+use bpann::parallel::should_use_rayon;
 
 /// Errors that can occur during hash-based RNG.
 #[derive(Error, Debug, Clone, PartialEq)]

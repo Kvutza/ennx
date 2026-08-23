@@ -27,7 +27,7 @@ def cuda_oxide(name, package, workspace, bpann, ennx, python, modal, cuda, parit
             "cd $ROOT;",
             "python3 ops/cuda_wheel.py",
             "$TMP/target/release/libennx_rust.so",
-            "$TMP/wheel --root $ROOT;",
+            "$TMP/wheel --root $ROOT --version {};".format(read_config("ennx", "release_version", "0.1.1")),
             "mkdir -p ${OUT_FILE%/*};",
             "cp $TMP/wheel/ennx-{}+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl $OUT_FILE".format(read_config("ennx", "release_version", "0.1.1")),
         ]),

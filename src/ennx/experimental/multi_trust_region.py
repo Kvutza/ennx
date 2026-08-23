@@ -2,42 +2,16 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Sequence
-from enum import Enum
-from typing import Any, NamedTuple
 
 import numpy as np
 
-
-class SharingPolicy(str, Enum):
-    SHARED = "shared"
-    NEAREST_CENTER = "nearest_center"
-    INDEPENDENT = "independent"
-
-
-class RegionBatch(NamedTuple):
-    region: int
-    start: int
-    length: int
-
-
-class RegionCandidate(NamedTuple):
-    index: int
-    region: int
-    seed: int
-    score: float
-
-
-class CandidateProposal(NamedTuple):
-    region: int
-    seed: int
-    payload: Any
-
-
-class RegionRound(NamedTuple):
-    batches: list[RegionBatch]
-    proposals: list[CandidateProposal]
-    candidates: list[RegionCandidate]
-    selected: list[RegionCandidate]
+from .multi_trust_region_policy import SharingPolicy
+from .multi_trust_region_types import (
+    CandidateProposal,
+    RegionBatch,
+    RegionCandidate,
+    RegionRound,
+)
 
 
 def _policy_value(sharing_policy: SharingPolicy | str) -> str:

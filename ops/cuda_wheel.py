@@ -11,7 +11,6 @@ import shutil
 import sys
 import sysconfig
 import tempfile
-import tomllib
 import zipfile
 from pathlib import Path
 
@@ -28,12 +27,7 @@ def _write(path: Path, value: str) -> None:
     path.write_text(value, encoding="utf-8", newline="\n")
 
 
-def package_version(root: Path) -> str:
-    with (root / "pyproject.toml").open("rb") as file:
-        return tomllib.load(file)["project"]["version"]
-
-
-def build_wheel(root: Path, extension: Path, output: Path) -> Path:
+def build_wheel(root: Path, extension: Path, output: Path, version: str) -> Path:
     if sys.version_info[:2] != (3, 12):
         raise RuntimeError("CUDA wheel packaging requires CPython 3.12")
     if sys.platform != "linux":
@@ -45,7 +39,7 @@ def build_wheel(root: Path, extension: Path, output: Path) -> Path:
     if not suffix or "cpython-312" not in suffix:
         raise RuntimeError(f"unexpected extension suffix: {suffix!r}")
 
-    version = package_version(root) + "+cuda75"
+    version = version + "+cuda75"
     output.mkdir(parents=True, exist_ok=True)
     wheel = output / f"ennx-{version}-{TAG}.whl"
     with tempfile.TemporaryDirectory(prefix="ennx-cuda-wheel-") as directory:
@@ -121,8 +115,9 @@ def main() -> None:
     parser.add_argument(
         "--root", type=Path, default=Path(__file__).resolve().parents[1]
     )
+    parser.add_argument("--version", required=True)
     args = parser.parse_args()
-    print(build_wheel(args.root, args.extension, args.output))
+    print(build_wheel(args.root, args.extension, args.output, args.version))
 
 
 if __name__ == "__main__":

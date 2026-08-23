@@ -3,7 +3,9 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use metal::ComputePipelineState;
+extern crate metal as metal_crate;
+
+use metal_crate::ComputePipelineState;
 
 use super::{DenseLeaf, DenseTerm};
 use crate::apple_gpu::{thread_group, Runtime};
@@ -28,10 +30,10 @@ struct Context {
 
 pub(super) struct Resident {
     context: Rc<Context>,
-    base: metal::Buffer,
-    candidate: metal::Buffer,
-    leaves: metal::Buffer,
-    tiles: metal::Buffer,
+    base: metal_crate::Buffer,
+    candidate: metal_crate::Buffer,
+    leaves: metal_crate::Buffer,
+    tiles: metal_crate::Buffer,
     tile_count: usize,
     len: usize,
 }
@@ -82,7 +84,7 @@ impl Resident {
         command.commit();
         command.wait_until_completed();
         let status = command.status();
-        if status == metal::MTLCommandBufferStatus::Completed {
+        if status == metal_crate::MTLCommandBufferStatus::Completed {
             Ok(())
         } else {
             Err(format!("BF16 Metal command failed: {status:?}"))
@@ -95,7 +97,7 @@ impl Resident {
         }
     }
 
-    pub(super) fn buffer(&self) -> &metal::Buffer {
+    pub(super) fn buffer(&self) -> &metal_crate::Buffer {
         &self.candidate
     }
 }

@@ -21,6 +21,7 @@ ENNX_CRATES = [
     "memmap2",
     "ndarray",
     "rand",
+    "rand_distr",
     "rayon",
     "serde",
     "sobol",
@@ -32,7 +33,6 @@ ENNX_CRATES = [
 
 ENNX_TEST_CRATES = ENNX_CRATES + [
     "rand_chacha",
-    "rand_distr",
     "tempfile",
 ]
 

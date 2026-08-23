@@ -3,7 +3,9 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use metal::ComputePipelineState;
+extern crate metal as metal_crate;
+
+use metal_crate::ComputePipelineState;
 
 use super::DenseView;
 use crate::apple_gpu::{thread_group, Runtime};
@@ -39,8 +41,8 @@ struct Context {
 
 pub(super) struct Resident {
     context: Rc<Context>,
-    weight: metal::Buffer,
-    bias: metal::Buffer,
+    weight: metal_crate::Buffer,
+    bias: metal_crate::Buffer,
     rows: usize,
     columns: usize,
     has_bias: bool,
@@ -152,7 +154,7 @@ impl Context {
         })
     }
 
-    fn buffer<T>(&self, values: &[T]) -> metal::Buffer {
+    fn buffer<T>(&self, values: &[T]) -> metal_crate::Buffer {
         self.runtime.buffer_with(values)
     }
 }

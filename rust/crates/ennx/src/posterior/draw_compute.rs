@@ -7,7 +7,7 @@ use crate::draw::DrawInternals;
 use crate::error::ENNError;
 use crate::hash::{normal_for_seed_index_metric, unique_index_inverse};
 use crate::model::EpistemicNearestNeighbors;
-use crate::parallel::should_use_rayon;
+use bpann::parallel::should_use_rayon;
 
 pub(crate) fn draw_from_internals(
     model: &EpistemicNearestNeighbors,

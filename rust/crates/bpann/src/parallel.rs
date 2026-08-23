@@ -1,4 +1,4 @@
-pub(crate) fn should_use_rayon() -> bool {
+pub fn should_use_rayon() -> bool {
     rayon::current_num_threads() > 1
 }
 

@@ -11,7 +11,7 @@ must be reproducible from a seed, workload shape, and backend selection.
 
 | Tier | Purpose | Typical command |
 | --- | --- | --- |
-| Working copy | Formatting, file hygiene, Ruff, and KISS checks for files changed in the current JJ working copy. | `./prekw run`; use `./prekw run --all-files` for a repository-wide audit |
+| Working copy | Formatting, file hygiene, Ruff, and KISS checks for files changed in the current JJ working copy. | `./ennx check`; use `./ennx check --all` for a repository-wide audit |
 | Rust fast | Pure Rust logic, no-default integration coverage, and no-default example compile checks. Run while editing core Rust. | `./ennx rust fast` |
 | Rust full | Rust core tests with default crate features and example compile checks. Run before pushing Rust/native changes. | `./ennx rust full` |
 | Python fast | Python API and optimizer smoke coverage. | `./ennx python fast` |
