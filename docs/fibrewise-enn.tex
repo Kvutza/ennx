@@ -1,0 +1,949 @@
+\documentclass[11pt]{article}
+
+\usepackage[letterpaper,margin=0.82in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+
+\setlength{\parindent}{1em}
+\setlength{\parskip}{0.15em}
+\setlist{nosep,leftmargin=1.5em}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{algorithm}[theorem]{Algorithm}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\X}{\mathcal X}
+\newcommand{\A}{\mathcal A}
+\newcommand{\Gg}{\mathcal G}
+\newcommand{\Hh}{\mathcal H}
+\newcommand{\Ii}{\mathcal I}
+\newcommand{\Qq}{\mathcal Q}
+\newcommand{\Tt}{\mathcal T}
+\newcommand{\R}{\mathbb R}
+\newcommand{\E}{\mathbb E}
+\newcommand{\Pp}{\mathbb P}
+\newcommand{\1}{\mathbf 1}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\supp}{\operatorname{supp}}
+\newcommand{\diam}{\operatorname{diam}}
+\newcommand{\argmax}{\operatorname*{arg\,max}}
+\newcommand{\argmin}{\operatorname*{arg\,min}}
+
+\title{\vspace{-2.2em}\textbf{Quotient-Robust ENN Bayesian Optimization}\\[-0.15em]
+\large Learning Which Decision-Space Directions the Objective Can Distinguish}
+\author{ENNX}
+\date{August 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.2em}
+
+\begin{abstract}
+We consider Bayesian optimization of expensive black-box objectives over high-dimensional
+continuous, quantized, and mixed-variable domains.  Our starting point is a local structural
+hypothesis: objective variation is dominated by a low-dimensional block pseudometric whose null
+classes form approximately invariant fibres.  We introduce quotient-robust epistemic
+nearest-neighbour upper confidence bound (QR-ENN-UCB), which maintains a confidence set of plausible
+pseudometrics and optimizes an upper confidence bound jointly over candidate points and geometries.
+Each round evaluates one objective value; coordinate perturbations are used only to construct the
+finite acquisition domain.  We establish an additive simple-regret cost for approximate fibres, an
+impossibility result for certifying null directions from finitely many unrestricted observations, a
+finite-candidate regret decomposition into prediction uncertainty, geometry uncertainty, candidate
+coverage, and quotient misspecification, and a conditional nonparametric rate governed by quotient
+dimension rather than ambient dimension.  We then give a systems design for quantized model
+parameters and map the resulting method onto implicit candidate descriptors, bit-packed storage,
+and accelerator-resident ENN scoring.  The framework separates the statistical claim of dimension
+reduction from the representation and computational mechanisms used to realize it.
+\end{abstract}
+
+\section{Introduction}
+
+Bayesian optimization (BO) allocates a small budget of expensive function evaluations by combining
+a surrogate model with an acquisition rule \cite{Frazier,GPUCB}.  Its application to
+high-dimensional parameter spaces is limited by two distinct costs.  Statistically, nonparametric
+prediction and candidate coverage deteriorate with dimension.  Computationally, conventional
+surrogates and acquisition optimizers can become more expensive than the black-box interface can
+tolerate.  Existing high-dimensional BO methods address these costs through local trust regions,
+random or adaptive subspaces, additive structure, and specialized sampling schemes
+\cite{TuRBO,REMBO,BAxUS,CylTS}.  These methods still require the optimizer to specify, assume, or
+learn which directions are relevant.
+
+We study the case in which relevance is local and may be degenerate.  Within a trust region, the
+objective may vary substantially along a small number of directions while remaining nearly constant
+on large sets of configurations.  A positive-definite metric can rescale directions but cannot
+express exact invariance.  We instead use a pseudometric: zero-distance classes represent
+configurations that the objective cannot distinguish up to a controlled error.  The induced quotient
+is allowed to vary between trust regions.
+
+Learning this geometry from the evaluations used for BO creates a model-selection problem.  A
+single regularized metric estimate can assign zero weight to an untested direction and subsequently
+prevent the acquisition function from testing it.  QR-ENN-UCB retains a set of geometries compatible
+with the observations.  Its acquisition function is optimistic over this set, and its regret bound
+contains an explicit geometry-disagreement term.  Dimension reduction is therefore claimed only
+when the geometry set contracts and the fibre approximation error remains controlled.
+
+\paragraph{Contributions.}
+The paper makes four methodological contributions.
+\begin{enumerate}
+\item It formulates local dimension reduction as approximate factorization through an
+objective-dominating pseudometric and isolates the resulting fibre-misspecification cost.
+\item It separates a domination set, which preserves valid objective bounds, from an identification
+set, which supports model selection and approximate elimination of directions.  A finite-sample
+impossibility theorem shows why these roles cannot be conflated.
+\item It introduces QR-ENN-UCB and proves a finite-candidate regret decomposition whose terms expose
+the statistical requirements for ambient-dimension-independent behavior.
+\item It gives an implementation design for quantized high-dimensional models that distinguishes
+the logical optimization domain, coordinate proposal kernel, ENN metric, and physical encoding.
+\end{enumerate}
+
+The present results do not constitute a global no-regret theorem.  Such a theorem additionally
+requires contraction of geometry uncertainty, adaptive candidate-coverage guarantees, and control
+of trust-region transitions.  We state these missing conditions explicitly rather than absorbing
+them into an oracle assumption.
+
+\subsection{Problem formulation}\label{sec:problem}
+
+Let
+\[
+  \X=\prod_{\ell=1}^{L}\X_\ell,
+  \qquad D=\sum_{\ell=1}^{L}n_\ell,
+\]
+be a compact continuous, discrete, quantized, or mixed decision space.  At round $t$, an algorithm chooses
+$x_t\in\X$ based on the filtration $\mathcal F_{t-1}$ and receives
+\begin{equation}\label{eq:oracle}
+  Y_t=F(x_t)+\varepsilon_t,
+  \qquad
+  \E(\varepsilon_t\mid\mathcal F_{t-1},x_t)=0,
+\end{equation}
+where the noise is conditionally $\sigma$-sub-Gaussian.  We maximize $F$; minimization reverses
+signs.  At each round the algorithm constructs a finite candidate set $A_t\subset\X$, evaluates an
+acquisition function on $A_t$, and queries one selected point.  The candidate set may depend on the
+past, subject to the measurability conditions used in the confidence analysis.
+
+\subsection{Quantized domains and proposal kernels}\label{sec:proposal-domain}
+
+For quantized numerical parameters, the logical search space is a Cartesian product of finite code
+alphabets,
+\begin{equation}\label{eq:quantized-domain}
+  \mathcal C=\prod_{\ell=1}^{L}\mathcal Z_\ell^{n_\ell},
+  \qquad \mathcal Z_\ell=\{0,\ldots,2^{b_\ell}-1\},
+  \qquad q_\ell:\mathcal Z_\ell^{n_\ell}\to\R^{n_\ell},
+\end{equation}
+where $q_\ell$ decodes a block using its quantization format and scale.  The numerical geometry is
+defined on decoded values.  Domains combining continuous, integer, ordinal, or categorical
+variables fall under mixed-variable optimization \cite{MiVaBo,Casmopolitan}.
+
+For $c,z\in\mathcal C$, define the generalized Hamming distance
+\begin{equation}\label{eq:hamming-support}
+  d_H(c,z)=\sum_{\ell=1}^{L}\sum_{r=1}^{n_\ell}
+  \mathbf 1\{c_{\ell r}\ne z_{\ell r}\}.
+\end{equation}
+The support-restricted proposal kernel samples $s$ coordinate indices and changes only those
+coordinates, so its support lies in the Hamming ball
+$\mathcal N_s(c)=\{z:d_H(c,z)\le s\}$.  We refer to this as fixed-cardinality coordinate mutation
+or a support-restricted coordinate proposal.  A second proposal kernel may perturb coordinates
+across the full vector.  Hamming trust regions and local acquisition search are standard in
+categorical and combinatorial BO \cite{Casmopolitan,COMBO}; the decoded metric introduced below
+additionally records the numerical magnitude and objective relevance of code changes.
+
+Both proposal kernels define finite acquisition domains; neither constructs a finite-difference
+gradient.  QR-ENN-UCB predicts and acquires over the resulting candidates and evaluates one point per
+round.  Section~\ref{sec:zoo-boundary} distinguishes this feedback model from zeroth-order gradient
+estimation.
+
+\section{Local quotient model}
+
+For decoded block values $q_\ell(x)\in\R^{n_\ell}$ define
+\[
+\begin{aligned}
+  D_\ell(x,z)&=\|q_\ell(x)-q_\ell(z)\|_2^2,\\
+  G(g)&=\diag(g_1I_{n_1},\ldots,g_LI_{n_L}),\\
+  m_g(x,z)&=\sum_{\ell=1}^{L}g_\ell D_\ell(x,z),
+  &d_g(x,z)&=m_g(x,z)^{1/2}.
+\end{aligned}
+\]
+for $g\in\R_+^L$.  Zero coordinates are intentional: $d_g$ is a pseudometric.  Its equivalence
+classes define a quotient map
+\[
+  \pi_g:U\longrightarrow B_g=U/{\sim_g},
+  \qquad x\sim_g z\Longleftrightarrow d_g(x,z)=0,
+\]
+inside a local region $U\subset\X$.  A block weight is therefore not merely a length scale.  At zero
+it asserts that all allowed movement in that block is observationally invisible up to a declared
+error.
+
+\begin{definition}[admissible quotient geometry]\label{def:admissible}
+For $\alpha\in(0,1]$, $L_F>0$, and $\eta\ge0$, a geometry $g$ is
+$(\alpha,L_F,\eta)$-admissible for $F$ on $U$ if
+\begin{equation}\label{eq:domination}
+  |F(x)-F(z)|\le L_F d_g(x,z)^\alpha+2\eta
+  \qquad (x,z\in U).
+\end{equation}
+\end{definition}
+If $F(x)=f(\pi_g(x))+e(x)$, $f$ is $\alpha$-H\"older under $d_g$, and
+$\|e\|_{\infty,U}\le\eta$, then \eqref{eq:domination} follows.  Conversely, when $d_g(x,z)=0$,
+\eqref{eq:domination} bounds every fibre's objective diameter by $2\eta$.  Define the exact local
+half-oscillation
+\begin{equation}\label{eq:eta}
+  \eta_U(g)=\frac12\sup_{b\in B_g}
+  \left\{\sup_{x\in\pi_g^{-1}(b)}F(x)-
+  \inf_{x\in\pi_g^{-1}(b)}F(x)\right\}.
+\end{equation}
+
+The quotient terminology has its standard mathematical meaning: a function constant on equivalence
+classes factors uniquely through the corresponding quotient.  Here the equivalence classes are the
+zero-distance fibres of $d_g$, and the residual in \eqref{eq:eta} quantifies approximate rather than
+exact factorization.
+
+\begin{proposition}[cost of quotienting]\label{prop:quotient-cost}
+Let $f_g(b)$ be the midpoint of the range of $F$ on the fibre over $b$.  For any queried lifts
+$x_t\in\pi_g^{-1}(b_t)$,
+\begin{equation}\label{eq:quotient-regret}
+ \max_{x\in U}F(x)-\max_{t\le T}F(x_t)
+ \le
+ \max_{b\in B_g}f_g(b)-\max_{t\le T}f_g(b_t)+2\eta_U(g).
+\end{equation}
+The constant $2$ is sharp when the lifts are uncontrolled.
+\end{proposition}
+\begin{proof}
+By construction, $|F(x)-f_g(\pi_g(x))|\le\eta_U(g)$.  Apply opposite sides of this inequality
+to an optimizer and the best queried lift.  Opposite fibre endpoints attain equality.
+\end{proof}
+
+Proposition~\ref{prop:quotient-cost} isolates the approximation cost of dimension reduction: an
+approximate quotient exchanges ambient dimension for a simple-regret floor.  Consequently,
+$\eta_U(g)$ must appear in any guarantee based on an inexact quotient.
+
+\subsection{Proposal geometry versus quotient geometry}
+
+Sampling on an ellipsoid or hypersphere changes the proposal measure and may improve radial
+concentration or candidate coverage; cylindrical sampling uses this effect in high-dimensional BO
+\cite{CylTS}.  Such a proposal does not by itself reduce the number of directions along which $F$
+varies.  QR-ENN-UCB samples metric balls or spheres under each plausible geometry, while dimensional
+reduction arises only from the null classes of the pseudometric.
+
+\section{Identifiability of quotient geometry}
+
+A natural baseline chooses the minimum-complexity metric that majorizes observed response differences.
+For local pairs $E_t$, one might solve
+\begin{equation}\label{eq:point-lp}
+\begin{aligned}
+  (\widehat g_t,\widehat\xi_t)\in\argmin_{g,\xi\ge0}\quad&
+  c^\top g+C\sum_{(i,j)\in E_t}\omega_{ij}\xi_{ij},\\
+  \text{subject to}\quad&
+  h_{ij}\le \langle g,D_{ij}\rangle+\xi_{ij},
+\end{aligned}
+\end{equation}
+where $D_{ij}=(D_1(x_i,x_j),\ldots,D_L(x_i,x_j))$ and $h_{ij}$ is a
+noise-corrected squared response separation.  The $\ell_1$ objective encourages zero blocks and is
+computationally attractive.  It is not, by itself, a confidence procedure.  If two blocks are
+correlated in the sampled configurations, the linear program can assign all variation to either one.  If a
+block has not been tested, the cost term sets it to zero precisely because there is no evidence.
+
+The failure is statistical, not a tuning defect.
+
+\begin{theorem}[finite data cannot certify a null direction]\label{thm:no-collapse}
+Let $U\subset\R^D$ be nonempty and open, let $S=\{x_1,\ldots,x_n\}\subset U$ be finite, and let
+$\ell$ be a coordinate block.  There exist smooth objectives $F_0,F_1:U\to\R$ such that
+\begin{enumerate}[label=(\roman*)]
+\item $F_0(x_i)=F_1(x_i)$ for every $x_i\in S$;
+\item block $\ell$ is null for $F_0$;
+\item block $\ell$ is non-null for $F_1$ and the two objectives have different maxima.
+\end{enumerate}
+Consequently, under the same observation-noise law, no rule based only on observations at $S$ can
+distinguish the two objectives or certify that block $\ell$ is globally null.
+\end{theorem}
+\begin{proof}
+Choose a point $z$ and a small ball $V\subset U$ disjoint from $S$.  Let $\varphi$ be a smooth bump
+supported in $V$ whose value changes in block $\ell$.  Take $F_0=0$ and $F_1=\varphi$.  They agree
+on $S$, while only $F_1$ varies in block $\ell$ and has a positive maximum.  Since their response
+distributions on $S$ coincide, every observation-measurable decision has the same law under both.
+\end{proof}
+
+\begin{remark}[requirements for exact elimination]
+An exact zero requires additional structure: known invariance, exhaustive coverage at the relevant
+resolution, an equivalence test with a declared smoothness class and power, or an explicit prior-risk
+assumption.  In the absence of such structure, a strictly positive reference geometry preserves
+reachability and small weights represent approximate local irrelevance rather than exact invariance.
+\end{remark}
+
+\section{Confidence sets for quotient geometry}
+
+We use a set-valued geometry estimate and separate evidence that guarantees objective domination
+from evidence that identifies a parsimonious geometry.
+
+\subsection{Domination set}
+
+Suppose a simultaneous event provides bounds
+\begin{equation}\label{eq:noise-envelope}
+  |Y_i-F(x_i)|\le b_i
+  \qquad (i<t).
+\end{equation}
+For a proposed $(\alpha,L_F,\eta)$, define
+\begin{equation}\label{eq:secant-threshold}
+  a_{ij}=
+  \left(
+    \frac{(|Y_i-Y_j|-b_i-b_j-2\eta)_+}{L_F}
+  \right)^{2/\alpha}.
+\end{equation}
+Let $\Gamma=[0,\bar g_1]\times\cdots\times[0,\bar g_L]$ encode physically meaningful maximum
+scales and put
+\begin{equation}\label{eq:dom-set}
+  \Gg_t^{\rm dom}=
+  \left\{g\in\Gamma:
+  a_{ij}\le\langle g,D_{ij}\rangle
+  \text{ for all }(i,j)\in E_t\right\}.
+\end{equation}
+This is a polytope.  Scale is retained in $g$ for statistical domination; candidate motion can use
+a separately normalized copy.
+
+\begin{proposition}[coverage of the true geometry]\label{prop:dom-coverage}
+On event \eqref{eq:noise-envelope}, if $g_\star\in\Gamma$ is
+$(\alpha,L_F,\eta)$-admissible on $U$, then $g_\star\in\Gg_t^{\rm dom}$ for every $t$ whose pair
+set lies in $U$.
+\end{proposition}
+\begin{proof}
+The reverse triangle inequality and \eqref{eq:noise-envelope} give
+$(|Y_i-Y_j|-b_i-b_j-2\eta)_+\le
+(|F(x_i)-F(x_j)|-2\eta)_+$.  Apply \eqref{eq:domination}, raise both sides to $2/\alpha$, and use
+$d_{g_\star}^2=\langle g_\star,D_{ij}\rangle$.
+\end{proof}
+
+The proposition survives adaptive BO locations because it only needs a simultaneous noise event;
+time-uniform sub-Gaussian confidence sequences or a summable allocation of failure probabilities can
+provide such an event.  But $\Gg_t^{\rm dom}$ has a crucial limitation: its constraints are lower
+bounds on weighted distances.  Increasing a coordinate of $g$ preserves feasibility.  Domination
+data can prove that a block is needed, but cannot prove that a block is unnecessary.
+
+\subsection{Identification set}
+
+Let $\Ii_t\subseteq\Gamma$ be a confidence set from a predeclared identification model, and require
+\begin{equation}\label{eq:id-coverage}
+  \Pp(g_\star\in\Ii_t\text{ for every }t)\ge1-\delta_{\rm geom}.
+\end{equation}
+The active geometry set is
+\begin{equation}\label{eq:active-set}
+  \Gg_t=\Gg_t^{\rm dom}\cap\Ii_t.
+\end{equation}
+If this intersection is empty, at least one of $L_F$, $\eta$, the noise envelope, or the
+identification model must be relaxed.  Projection to a metric with unsupported zero block weights
+would invalidate the coverage event.
+
+We consider three constructions for $\Ii_t$.
+\begin{enumerate}
+\item \textbf{Finite model family.}  Predeclare geometries
+$g^{(1)},\ldots,g^{(J)}$, run residual tests, and eliminate a model only after a time-uniform test
+rejects its advertised domination and calibration guarantees.  This construction is the most direct
+and is closest to bandit model selection \cite{DynamicBalancing}.
+\item \textbf{Local variogram model.}  Use randomized, predictable block perturbations to estimate
+the blockwise second moment of objective increments.  Confidence intervals for those moments induce
+a box or ellipsoid for $g$.  This can identify small directions, but its conclusion is local and
+requires curvature control.
+\item \textbf{Structural invariance.}  A decoder or simulator may declare transformations known to
+leave the evaluated system's behaviour unchanged.  These directions can be quotiented exactly without reward
+evidence.
+\end{enumerate}
+
+The point estimate \eqref{eq:point-lp} remains useful as one representative of $\Gg_t$, not as the
+whole state.  Additional representatives include coordinate extremizers
+\[
+  g_{t,\ell}^{\min}\in\argmin_{g\in\Gg_t}g_\ell,
+  \qquad
+  g_{t,\ell}^{\max}\in\argmax_{g\in\Gg_t}g_\ell,
+\]
+and geometries returned by acquisition maximization.  Their disagreement is the uncertainty that
+prevents self-confirming collapse.
+
+\subsection{Local identification through block variograms}
+
+The following calculation explains why blockwise perturbations are informative without turning the
+optimizer into a finite-difference method.
+
+\begin{lemma}[block variogram]\label{lem:variogram}
+Suppose $F$ is $C^2$ near $c$ with $\|\nabla^2F\|_{\rm op}\le H$.  Let
+$\Delta=(\Delta_1,\ldots,\Delta_L)$ have independent centred blocks with
+$\|\Delta_\ell\|=r_\ell$ and
+$\E\Delta_\ell\Delta_\ell^\top=(r_\ell^2/n_\ell)I$.  As
+$r=(\sum_\ell r_\ell^2)^{1/2}\to0$,
+\begin{equation}\label{eq:variogram}
+  \E\{F(c+\Delta)-F(c)\}^2
+  =\sum_{\ell=1}^{L}
+  \frac{\|\nabla_\ell F(c)\|_2^2}{n_\ell}r_\ell^2
+  +O(\|\nabla F(c)\|Hr^3+H^2r^4).
+\end{equation}
+\end{lemma}
+\begin{proof}
+Taylor-expand at $c$.  Centring and block independence remove cross terms, and isotropy gives the
+displayed quadratic term.  The first-order term is $O(\|\nabla F(c)\|r)$ and the Hessian remainder
+is $O(Hr^2)$, so their cross term and the squared remainder give the stated error.
+\end{proof}
+
+Thus a natural infinitesimal target is
+\begin{equation}\label{eq:infinitesimal-g}
+  g_\ell^\circ(c)=\frac{\|\nabla_\ell F(c)\|_2^2}{n_\ell}.
+\end{equation}
+Support-restricted coordinate proposals can estimate \eqref{eq:variogram} over many rounds by comparing a new
+reward to a stored centre or local anchor.  The selected candidate evaluation still contributes to optimization;
+there is no mandatory antithetic mate.  With noisy objectives, a reused noisy anchor induces
+dependence and a squared-increment noise bias.  A rigorous estimator must use a replicate-averaged
+anchor, independent anchor observations, or a martingale analysis that includes that dependence.
+
+Small gradient at one point is not a fibre certificate.  If
+$\|\nabla^2F\|_{\rm op}\le H$ on a radius-$\rho$ region and a confidence bound gives
+$\|\nabla_\ell F(c)\|\le u_\ell$, then
+\begin{equation}\label{eq:block-gradient-bound}
+  \sup_{x\in U}\|\nabla_\ell F(x)\|
+  \le u_\ell+H\rho.
+\end{equation}
+If $Z$ is a proposed set of null blocks and every two points on one proposed fibre can be joined by
+a path whose total motion in block $\ell$ is at most $R_\ell$, then
+\begin{equation}\label{eq:fibre-certificate}
+  2\eta_U(g)
+  \le\sum_{\ell\in Z}R_\ell(u_\ell+H\rho).
+\end{equation}
+Equation \eqref{eq:fibre-certificate} provides an approximate-collapse certificate: it
+combines statistical uncertainty, curvature, and trust-region scale.  It also explains why a block
+may become negligible only after the region contracts.
+
+\section{ENN surrogate and calibration}
+
+For a query $x$ and geometry $g$, retrieve the $k$ nearest prediction observations under $d_g$.
+For noise estimates $s_i^2$, define inverse-distance weights
+\begin{equation}\label{eq:enn-weights}
+  a_{i,g}(x)=\{\epsilon+s_i^2+\lambda d_g(x,x_i)^2\}^{-1},
+  \qquad
+  w_{i,g}(x)=\frac{a_{i,g}(x)}{\sum_j a_{j,g}(x)},
+\end{equation}
+and
+\begin{equation}\label{eq:enn-predictor}
+  \widehat F_{t,g}(x)=\sum_i w_{i,g}(x)Y_i,
+  \qquad
+  N_{\rm eff}(t,g,x)=\frac{1}{\sum_iw_{i,g}(x)^2}.
+\end{equation}
+Write $r_{t,g,k}(x)=\max_{i:w_{i,g}(x)>0}d_g(x,x_i)$.
+
+ENNX's internal epistemic and aleatoric scales are useful acquisition features.  They become a
+Bayesian posterior only under a generative model, and they become frequentist confidence bounds only
+after a coverage argument.  We use ``ENN-UCB'' to name the decision rule, not to assert that the
+existing ENNX scale already has the following guarantee.
+
+\begin{theorem}[cross-fitted ENN interval]\label{thm:enn-interval}
+Fix $g$, a query $x$, and neighbour weights that are independent of the prediction-fold response
+noises.  Suppose $g$ is $(\alpha,L_F,\eta_g)$-admissible and the selected noises are independent
+$\sigma$-sub-Gaussian variables.  Then, with probability at least $1-\delta$,
+\begin{equation}\label{eq:enn-radius}
+  |\widehat F_{t,g}(x)-F(x)|\le C_{t,g}(x;\delta),
+\end{equation}
+where
+\begin{equation}\label{eq:confidence-radius}
+  C_{t,g}(x;\delta)=
+  L_F r_{t,g,k}(x)^\alpha+2\eta_g+
+  \sigma\sqrt{2\log(2/\delta)\sum_iw_{i,g}(x)^2}.
+\end{equation}
+\end{theorem}
+\begin{proof}
+For every selected neighbour, admissibility bounds the deterministic difference from $F(x)$ by
+$L_Fr_{t,g,k}(x)^\alpha+2\eta_g$.  Convex averaging preserves this bound.  The weighted noise sum
+is sub-Gaussian with proxy variance $\sigma^2\sum_iw_{i,g}(x)^2$.
+\end{proof}
+
+Strict independence can be obtained with a geometry/training stream and a prediction stream whose
+locations are committed before their responses are observed.  For Theorem~\ref{thm:enn-interval}, $g$, the candidate
+pool, and the centre used to generate that pool must be measurable without the prediction-stream
+responses.  Retrospectively splitting a single adaptive BO trajectory is insufficient: later
+locations encode earlier noise.  Cross-fitting can rotate genuinely valid streams, while an all-data
+predictor needs a separate predictable-weight or martingale proof.  This independence condition is
+essential because reusing outcomes both to choose $g$ and to report an interval under $g$ can cause
+systematic undercoverage.
+
+Conditionally on a sigma-field under which a finite candidate pool $A_t$, a finite representative
+geometry set $Q_t$, and all prediction weights are fixed independently of prediction-fold noise, a
+union bound uses $\delta/(|A_t||Q_t|)$.  Finiteness alone is not enough when the set itself depends
+on that noise.  A continuous geometry set requires either a uniform empirical-process bound or a
+finite net plus a continuity error.  Our finite implementation uses a small $Q_t$ and reports the
+resulting discretization error; continuous-set optimization is not treated as exact.
+
+\section{Quotient-robust acquisition and regret}
+
+Let $Q_t\subset\Gg_t$ be a finite representative set.  For each $g\in Q_t$, define
+\begin{equation}\label{eq:intervals}
+  u_{t,g}(x)=\widehat F_{t,g}(x)+C_{t,g}(x),
+  \qquad
+  \ell_{t,g}(x)=\widehat F_{t,g}(x)-C_{t,g}(x).
+\end{equation}
+The quotient-robust upper envelope and computable geometry disagreement are
+\begin{equation}\label{eq:robust-envelope}
+  U_t(x)=\max_{g\in Q_t}u_{t,g}(x),
+  \qquad
+  \Omega_t(x)=
+  \max_{g\in Q_t}u_{t,g}(x)-\min_{g\in Q_t}u_{t,g}(x).
+\end{equation}
+The acquisition rule is
+\begin{equation}\label{eq:qr-ucb}
+  x_t\in\argmax_{x\in A_t}U_t(x).
+\end{equation}
+Only $x_t$ is evaluated.  Maximizing over $g$ implements optimism over structural uncertainty
+without imposing a posterior distribution on metrics.
+
+\begin{proposition}[one-step robust regret]\label{prop:robust-regret}
+Let $x_U^\star\in\argmax_{x\in U}F(x)$ and
+$x_{A_t}^\star\in\argmax_{x\in A_t}F(x)$.  Define the candidate-pool gap
+\[
+  \Delta_t^{\rm pool}=F(x_U^\star)-F(x_{A_t}^\star).
+\]
+Suppose $g_\star\in Q_t$ and Theorem~\ref{thm:enn-interval}'s interval holds for all
+$x\in A_t$ under $g_\star$.  Then the selection \eqref{eq:qr-ucb} satisfies
+\begin{equation}\label{eq:robust-regret-bound}
+  F(x_U^\star)-F(x_t)
+  \le \Delta_t^{\rm pool}+2C_{t,g_\star}(x_t)+\Gamma_t(x_t)
+  \le \Delta_t^{\rm pool}+2C_{t,g_\star}(x_t)+\Omega_t(x_t),
+\end{equation}
+where
+\[
+  \Gamma_t(x)=U_t(x)-u_{t,g_\star}(x).
+\]
+\end{proposition}
+\begin{proof}
+At the pool optimizer,
+$F(x_{A_t}^\star)\le u_{t,g_\star}(x_{A_t}^\star)\le U_t(x_{A_t}^\star)$.
+Selection gives $U_t(x_{A_t}^\star)\le U_t(x_t)$, while the true-geometry lower interval gives
+$F(x_t)\ge\ell_{t,g_\star}(x_t)$.  Hence
+\[
+ F(x_{A_t}^\star)-F(x_t)
+ \le U_t(x_t)-\ell_{t,g_\star}(x_t)
+ =\Gamma_t(x_t)+2C_{t,g_\star}(x_t).
+\]
+Add the pool gap.  Since $u_{t,g_\star}$ is one member of the finite family,
+$\Gamma_t\le\Omega_t$.
+\end{proof}
+
+Proposition~\ref{prop:robust-regret} gives the central decomposition.  A point estimate suppresses
+$\Omega_t$ operationally without eliminating geometry uncertainty statistically.  Robust
+acquisition retains this term and allocates evaluations where plausible geometries disagree.  If
+the geometries make similar predictions at selected points, $\Omega_t$ is small even when their raw
+weights differ; prediction disagreement is therefore more relevant than parameter distance.
+
+If $g_\star\notin Q_t$ but $Q_t$ is an $\varepsilon_t$-net of a confidence set containing it, and
+$u_{t,g}(x)$ is $K_t$-Lipschitz in $g$ on that set, the same argument adds at most
+$2K_t\varepsilon_t$.  This is the geometry-discretization term.  Near zero weights, neighbour
+identities can change discontinuously, so $K_t$ may be large.  We therefore include coordinate
+extremes and observed neighbour-order breakpoints in the representative set.
+
+Summing \eqref{eq:robust-regret-bound} gives the conditional cumulative-regret statement
+\begin{equation}\label{eq:cumulative}
+  R_T
+  \le \sum_{t=1}^{T}\Delta_t^{\rm pool}
+  +2\sum_{t=1}^{T}C_{t,g_\star}(x_t)
+  +\sum_{t=1}^{T}\Omega_t(x_t),
+\end{equation}
+up to geometry discretization and trust-region transition terms.  A sublinear theorem therefore
+requires all three sums to be controlled.  Geometry coverage alone is not enough.
+
+\subsection{Intrinsic-dimension dependence}
+
+Let $q$ denote a local covering dimension under the true pseudometric, not the count of nonzero
+ambient coordinates.  Suppose that, conditionally on the selected region, the prediction history is
+quasi-uniform enough that
+\begin{equation}\label{eq:knn-radius-rate}
+  r_{t,g_\star,k}(x_t)\le C_r(k/t)^{1/q}
+\end{equation}
+and the normalized weights satisfy
+$\sum_iw_{i,g_\star}(x_t)^2\le C_w/k$.  These are substantive sampling assumptions; adaptive BO
+does not grant them for free.
+
+\begin{corollary}[conditional quotient rate]\label{cor:quotient-rate}
+Under \eqref{eq:knn-radius-rate}, exact fibres $\eta_{g_\star}=0$, bounded logarithmic factors, and
+$k_t\asymp t^{2\alpha/(2\alpha+q)}$, the true-geometry ENN radius obeys
+\begin{equation}\label{eq:radius-rate}
+  C_{t,g_\star}(x_t)=\widetilde O
+  \left(t^{-\alpha/(2\alpha+q)}\right),
+\end{equation}
+and its contribution to \eqref{eq:cumulative} is
+\begin{equation}\label{eq:cumulative-rate}
+  \widetilde O
+  \left(T^{1-\alpha/(2\alpha+q)}\right).
+\end{equation}
+\end{corollary}
+\begin{proof}
+The H\"older bias is $O((k/t)^{\alpha/q})$ and the stochastic term is
+$\widetilde O(k^{-1/2})$.  Balancing them gives the stated $k_t$ and radius.  Sum the resulting
+power law.
+\end{proof}
+
+Ambient dimension $D$ has disappeared from this conditional statistical term, but it can re-enter
+through candidate generation, geometry identification, $\Omega_t$, or a poor block family.  This
+is the precise sense in which quotient BO could scale, and also the list of ways it can fail.
+
+\section{Candidate-set construction and coverage}
+
+For a centre $c$, metric radius $\rho$, and coordinate-change budget $s$, let
+$d_{\rm supp}(x,c)$ count the coordinates whose values differ.  On the quantization-code domain
+$\mathcal C$, this is $d_H$ from \eqref{eq:hamming-support}; in a continuous decoded chart it is
+$\|q(x)-q(c)\|_0$.  Define the intersection of a pseudometric ball and a support ball,
+\begin{equation}\label{eq:trust-region}
+  \Tt_g(c,\rho,s)=
+  \{x\in\X:d_g(x,c)\le\rho,
+  d_{\rm supp}(x,c)\le s\}.
+\end{equation}
+The support ball controls how many variables change, while $d_g$ controls the decoded magnitude and
+objective-relevant geometry of those changes.  A continuous candidate can be formed by drawing a
+support-restricted direction $z$ on a unit sphere or in a unit ball and applying a scaled lift
+$A_gz$ satisfying $A_g^\top G(g)A_g\approx I$.  In the quantized backend, the analogue is bounded coordinate
+mutation inside $\mathcal N_s(c)$, followed by decoding for metric evaluation.  For zero or tiny
+weights, step sizes must be capped by block radii and a reference metric; otherwise an inverse square
+root would produce unbounded coordinate changes.
+
+The robust pool is a union
+\begin{equation}\label{eq:pool-union}
+  A_t=A_t^{\rm ref}\cup
+  \bigcup_{g\in Q_t}A_{t,g},
+  \qquad A_{t,g}\subset\Tt_g(c_t,\rho_t,s_t).
+\end{equation}
+Candidate descriptors can share seeds across geometries so that differences are attributable to
+scaling rather than Monte Carlo noise.  $A_t^{\rm ref}$ uses a fixed strictly positive reference geometry and
+prevents an incorrect learned family from making part of the decision space unreachable.
+
+The pool term has a simple dimension-dependent interpretation.  Suppose the candidate law under
+$g_\star$ assigns mass at least $c\epsilon^{q/\alpha}$ to the $\epsilon$-optimal set in the current
+region.  For $M$ independent true-geometry candidates,
+\begin{equation}\label{eq:pool-probability}
+  \Pp(\Delta_t^{\rm pool}>\epsilon)
+  \le \exp(-Mc\epsilon^{q/\alpha}).
+\end{equation}
+Thus, with probability $1-\delta$,
+\begin{equation}\label{eq:pool-rate}
+  \Delta_t^{\rm pool}
+  \le
+  \left(\frac{\log(1/\delta)}{cM}\right)^{\alpha/q}.
+\end{equation}
+This elementary bound explains why large cheap candidate pools matter.  It also explains why a
+sphere alone is insufficient: the exponent improves only when the proposal reaches a
+$q$-dimensional near-optimal set under a valid geometry.
+
+\section{QR-ENN-UCB algorithm}
+
+We call the proposed method \textbf{QR-ENN-UCB}: quotient-robust epistemic nearest-neighbour upper
+confidence bound.  The analysis uses independent geometry/training and prediction streams as
+specified in Theorem~\ref{thm:enn-interval}.  An all-data implementation is a practical
+approximation whose adaptive calibration is evaluated empirically in Section~\ref{sec:experiments}.
+
+\begin{algorithm}[QR-ENN-UCB]
+\begin{enumerate}
+\item \textbf{Localize.}  Choose the active region $U_t$, centre $c_t$, metric radius $\rho_t$,
+and coordinate-change budget $s_t$ from trust-region state.
+\item \textbf{Update evidence.}  Add valid secant constraints to $\Gg_t^{\rm dom}$ and update the
+predeclared identification set $\Ii_t$.  If their intersection is empty, relax the structural model
+or restart the local region.
+\item \textbf{Represent geometry.}  Build $Q_t$ from the point-LP solution, the reference metric,
+coordinate extremizers, surviving finite models, and any geometry that maximized the previous
+acquisition.  Cap $|Q_t|$ by merging metrics with indistinguishable predictions.
+\item \textbf{Generate candidates.}  Using shared seeds, sample bounded coordinate proposals inside
+each $\Tt_g(c_t,\rho_t,s_t)$ and add reference-geometry and restart candidates.
+\item \textbf{Predict.}  Run ENN neighbour retrieval and prediction for every $(x,g)\in A_t\times
+Q_t$.  Form calibrated $u_{t,g}(x)$ and the robust envelope $U_t(x)$.
+\item \textbf{Acquire.}  Select $x_t\in\argmax_{x\in A_t,g\in Q_t}u_{t,g}(x)$.  Break ties by
+larger geometry disagreement, then by a deterministic seed order.
+\item \textbf{Evaluate once.}  Query $Y_t$, append the observation with its preassigned fold, and
+update success, coverage, geometry-disagreement, and region-transition diagnostics.
+\end{enumerate}
+\end{algorithm}
+
+We record the acquisition-maximizing geometry alongside the selected configuration.  If a candidate
+geometry repeatedly selects configurations whose rewards violate its intervals or whose empirical regret
+exceeds its candidate bound, it becomes eligible for elimination.  Balancing or elimination methods
+for bandit model selection provide a template for this logic \cite{DynamicBalancing}; directly
+importing their regret theorem would still require each geometry-specific ENN learner to satisfy its
+advertised bound.
+
+\subsection{Trust-region updates}
+
+TuRBO supplies a practical success/failure mechanism for local BO regions \cite{TuRBO}.  We expand
+a region only when all of the following hold:
+\begin{enumerate}
+\item incumbent improvement is statistically credible;
+\item held-out ENN coverage is not below target;
+\item $\Omega_t$ is small near the proposed expanded boundary;
+\item the fibre certificate \eqref{eq:fibre-certificate} remains below its budget.
+\end{enumerate}
+The region contracts when local coverage fails or curvature invalidates the geometry, and restarts when
+no member of $\Gg_t$ is admissible at a useful $\eta$.  These tests distinguish objective failure
+from surrogate failure and geometry failure.
+
+Different regions may have different quotients.  On an overlap, two metrics $g_a,g_b$ are
+compatible at distortion $\kappa$ if
+\begin{equation}\label{eq:transition}
+  \kappa^{-1}d_{g_a}(x,z)\le d_{g_b}(x,z)
+  \le\kappa d_{g_a}(x,z)
+\end{equation}
+on held-out secants.  Distortion multiplies along a chain of regions; large cycle distortion is
+evidence that no single global geometry is justified.  The method then maintains an atlas of local
+quotients rather than averaging incompatible weights.
+
+\section{Systems design for ENNX}
+
+The ENNX \texttt{PackedSearch} backend realizes the quantized domain
+\eqref{eq:quantized-domain}.  Each logical variable block is stored as a contiguous sequence of
+4- or 8-bit quantization codes together with a decoder scale, distance weight, and proposal radius;
+the current API names this record a \texttt{Leaf}.  ENN distances are accumulated from decoded
+numerical differences and are therefore distinct from both bitwise Hamming distance and the
+code-coordinate distance $d_H$ in \eqref{eq:hamming-support}.
+
+Candidate generation is deterministic conditional on a centre, random seed, block metadata, and
+proposal length.  The tuple of these values is an implicit candidate descriptor.  In the lazy path,
+the selected descriptor is materialized as a full bit-packed vector only after acquisition.  This
+reduces candidate-write traffic but does not alter the logical search space, proposal distribution,
+or statistical model.
+
+Computational viability requires geometry uncertainty not to erase the throughput advantage of
+bit-packed low-precision data and accelerator-resident scoring.  The current ENNX architecture
+provides the required outer loop: seed-defined candidate descriptors, resident bit-packed
+observations, decoded distance/top-$k$ kernels, ENN prediction, UCB or Thompson acquisition, and
+trust-region state.  The new cost is evaluating a small family of blockwise distance-weight vectors
+rather than one vector.
+
+Let $J=|Q_t|$, $M=|A_t|$, $N$ be resident history size, $k$ the retained neighbour count, and $s$
+the coordinate-change budget.  The complexity depends on the proposal operator.  For a
+support-restricted proposal, after the base-to-observation distances have been cached for each
+geometry, each candidate distance is a rank-$s$ coordinate update.  A direct exact scorer then costs
+\begin{equation}\label{eq:support-cost}
+  O(JMN(s+k)).
+\end{equation}
+For the regular full-vector proposal, distance scoring examines all $D$ decoded coordinates and the
+corresponding bound is $O(JMN(D+k))$.  Lazy materialization avoids writing all $D$ output codes for
+unselected candidates, but does not remove the $D$ work needed to score a full-vector proposal.
+Therefore a dimension-independent systems claim is valid only for the support-restricted path (or
+for a future index with a proved exact-recall shortcut), not for \texttt{PackedSearch} in general.
+
+The representative count $J$ is controlled by three mechanisms:
+\begin{enumerate}
+\item share seeds, selected coordinate sets, and decoded coordinate changes across geometries;
+\item retain only prediction-distinct extreme geometries, not a dense parameter grid;
+\item use column generation: score the current $Q_t$, then solve for a new geometry only at the few
+candidates whose robust acquisition can still improve.
+\end{enumerate}
+An indexed shortlist replaces $N$ by shortlist size, provided the shortlist has a reference-geometry
+recall guarantee.  Candidate-value quantization and any future low-precision representation of
+geometry weights introduce different numerical errors and must be accounted for separately.
+
+\subsection{Incremental implementation}
+
+We separate the proposed implementation into independently testable components.
+\begin{enumerate}
+\item \textbf{Prediction surface.}  The \texttt{PackedSearch} ask/tell interface remains unchanged,
+while the selected candidate's ENN mean and error components are exposed for calibration.
+\item \textbf{Finite geometry ensemble.}  The ensemble interface accepts $J$ blockwise
+distance-weight and proposal-radius vectors, generates candidates with shared seeds, scores their
+Cartesian product, and returns the maximizing configuration, geometry index, mean, uncertainty, and
+$\Omega_t$.
+\item \textbf{Reference coverage.}  A configurable fraction of the candidate budget uses a fixed
+strictly positive reference geometry.  UCB still selects the single objective query.
+\item \textbf{Geometry updater.}  The CPU control plane maintains the domination polytope and
+finite-model residual tests.  LP solves occur once per BO round or region update, outside the
+distance kernel.
+\item \textbf{Calibration.}  Preassigned folds, replay evaluation, and interval-coverage telemetry
+support calibration; exact zero weights are disabled in the absence of a certificate.
+\item \textbf{Continuous-set optimization.}  Coordinate extremizers and acquisition-driven column
+generation extend the finite ensemble after its coverage and throughput have been established.
+\end{enumerate}
+
+The existing all-data posterior-like draw remains an empirical Thompson option.  The QR-ENN-UCB
+guarantee applies only after its draws or intervals are calibrated under adaptive data.
+
+\section{Related work}
+
+Unknown or implicit metric bandits already exist.  Slivkins studies a taxonomy whose tree is known
+but whose numerical subtree widths are hidden \cite{ImplicitMetric}.  Wanigasekara and Yu learn
+nonparametric similarities among a finite set of contextual-bandit arms and adaptively partition the
+context--arm space \cite{UnknownMetric}.  Input warping learns bijective transformations for
+nonstationary GP BO \cite{InputWarping}, and BO with unknown stationary-kernel hyperparameters can
+retain no-regret guarantees by expanding the considered function class \cite{UnknownHyper}.
+Misspecified GP bandits explicitly pay for uniform approximation error \cite{MisspecifiedGP}.
+These results establish that learning an unknown metric is not itself new.  QR-ENN-UCB differs by
+combining a pseudometric with nontrivial null fibres, confidence sets over local quotient geometries,
+an explicit geometry-disagreement term in acquisition and regret, and an ENNX-oriented systems design for
+quantized high-dimensional configurations.  The same geometry controls candidate generation,
+neighbour retrieval, and trust-region shape, while the fibre approximation error remains explicit.
+
+Related high-dimensional BO methods make different assumptions.  REMBO uses a
+low-dimensional embedding \cite{REMBO}; BAxUS expands nested subspaces \cite{BAxUS}; TuRBO
+localizes BO \cite{TuRBO}; and cylindrical Thompson sampling changes proposal geometry
+\cite{CylTS}.  QR-ENN-UCB instead tries to learn local equivalence classes from objective evidence.
+
+\section{Experimental protocol}\label{sec:experiments}
+
+The experimental protocol tests geometry identification, statistical calibration, optimization
+performance, and systems throughput separately before evaluating the complete method.
+
+\subsection{Synthetic benchmark families}
+
+The synthetic family fixes quotient dimension $q$ while increasing ambient nuisance dimension $D-q$
+without changing the quotient objective.  It contains five settings:
+\begin{enumerate}
+\item axis-aligned exact null blocks, $\eta=0$;
+\item weakly active blocks with a controlled $\eta$ floor;
+\item correlated blocks for which \eqref{eq:point-lp} is nonunique;
+\item quotient changes across regions, requiring an atlas;
+\item rotated active subspaces inside a block, which the scalar block family cannot represent.
+\end{enumerate}
+The fifth case is a negative control.  Scalar block weights eliminate whole blocks but cannot
+recover an arbitrary low-rank subspace within a block.  Representing that setting requires the
+extension $m_G(x,z)=(q(x)-q(z))^\top G(q(x)-q(z))$ with block-low-rank $G$, together with its
+additional identification and systems costs.
+
+The reported quantities are simple regret versus oracle calls and wall-clock time, coverage of
+$\eta$ and ENN intervals, geometry-set coverage of $g_\star$, $\Omega_t$, effective neighbour
+count, pool gap against a large offline reference pool, and candidate throughput.  Results are
+stratified by $D$, $q$, $J$, noise level, and quantization format.
+
+\subsection{Ablations}
+
+At matched oracle-query and wall-clock budgets, we compare:
+\begin{enumerate}
+\item current single-geometry ENNX;
+\item QR-ENN-UCB with the same point estimate but no geometry extremes;
+\item robust prediction with Euclidean/reference candidate motion;
+\item learned candidate motion with reference ENN distances;
+\item full shared geometry;
+\item TuRBO, BAxUS, cylindrical or spherical sampling, random search, and an appropriate direct-search
+baseline.
+\end{enumerate}
+The two mismatch ablations isolate whether gains arise from better candidate
+coverage, better ENN neighbourhoods, or their coupling.
+
+\subsection{Evaluation criteria}
+
+Evidence against the proposed scaling mechanism consists of any persistent observation below:
+\begin{enumerate}
+\item empirical ENN intervals undercover materially under adaptive search;
+\item $\Gg_t$ loses the planted geometry more often than its declared failure probability;
+\item $\Omega_t$ remains linear in the regret accounting because geometries cannot be identified;
+\item nuisance dimensions force $J$, pool size, or reference exploration to scale with $D$;
+\item the quotient metric improves prediction but harms candidate coverage, or conversely;
+\item ensemble scoring removes the measured speed advantage over a GP or random-search baseline;
+\item exact zero-weight selection improves benchmarks only because the benchmark's null directions are known in
+advance.
+\end{enumerate}
+
+\section{Limitations and open problems}
+
+Proposition~\ref{prop:robust-regret} is a correct finite-pool decision statement, but it is not yet a
+global no-regret theorem.  A complete theory needs the following pieces.
+
+\paragraph{Adaptive ENN concentration.}
+A time-uniform result requires either confidence sequences for predictable local weights or a fold
+construction with exact independence.  Nearest-neighbour sets selected after observing an adaptive
+trajectory are not automatically covered by a fixed-query concentration bound.
+
+\paragraph{Geometry contraction.}
+Sublinear cumulative regret requires assumptions under which $\Omega_t(x_t)$ is summable or
+sublinear; secant domination alone is insufficient.  A promising route is a finite nested family of
+quotient models with time-uniform misspecification tests followed by regret-bound balancing
+\cite{DynamicBalancing,ModelSelection}.  A continuous block metric may follow by covering the
+parameter set, but neighbour-order discontinuities must be handled.
+
+\paragraph{Candidate coverage under adaptive geometry.}
+Extending \eqref{eq:pool-rate} to support-restricted proposals on quantized variables requires a
+coverage result for candidates generated under a mixture of learned metrics.  The relevant dimension
+is likely a near-optimality or zooming dimension
+\cite{XArmed}, not merely the number of active coordinates or nonzero block weights.
+
+\paragraph{Misspecification adaptation.}
+When $\eta$ is unknown, a grid of misspecification budgets must balance invalid optimism at small
+$\eta$ against vacuous bounds at large $\eta$.  Phased elimination or regret balancing, analogous
+to misspecified kernel bandits \cite{MisspecifiedGP}, is a plausible mechanism.
+
+\paragraph{Local-to-global accounting.}
+A global result must account for trust-region restarts and metric transitions.  A region graph with
+controlled overlap distortion may support an atlas theorem; arbitrary changing quotients will not.
+
+\paragraph{Computational geometry.}
+The number of extreme metrics required to approximate
+$\max_{g\in\Gg_t}u_{t,g}(x)$ after top-$k$ neighbour identities are considered is not yet
+characterized.  The score is piecewise smooth over cells of metric space induced by
+pairwise distance-order hyperplanes.  An
+acquisition-driven traversal of only occupied cells may be much cheaper than a uniform metric net.
+
+\section{Relation to zeroth-order gradient estimation}\label{sec:zoo-boundary}
+
+The oracle in \eqref{eq:oracle} is zeroth order, but QR-ENN-UCB is not a zeroth-order gradient
+algorithm.  If a separate method draws $u$ on a $q$-sphere and evaluates an antithetic pair at radius
+$\mu$, the classical two-point estimator scales with $q$ rather than $D$ only when the quotient is
+valid.  Under a residual $|e|\le\eta$, its gradient bias contains a term of order $q\eta/\mu$.
+That creates a different optimization tradeoff and consumes two evaluations per direction
+\cite{Duchi,Shamir}.  Such estimators may provide diagnostics, but they are outside the BO algorithm
+and regret analysis developed here.
+
+\section{Conclusion}
+
+We introduced a pure BO framework over two coupled unknowns: the maximizing configuration and the
+local geometry through which objective values can be predicted.  ENN supplies the nonparametric
+surrogate, the quotient hypothesis provides a route to intrinsic-dimension dependence, and the
+geometry confidence set prevents unsupported elimination of directions.  The resulting regret
+decomposition is
+\begin{align*}
+  \text{regret}\ \lesssim\;&
+  \text{pool coverage}+\text{ENN uncertainty in dimension }q\\
+  &+\text{geometry disagreement}+\text{fibre misspecification}
+  +\text{region transitions}.
+\end{align*}
+The method scales only when these terms are simultaneously estimable and the geometry-disagreement
+term contracts without ambient-dimensional probing.  The proposed ENNX design makes this
+condition empirically testable while retaining low-precision candidate-scoring throughput.
+
+\begin{thebibliography}{99}\small
+\bibitem{Frazier} P. I. Frazier, \emph{A tutorial on Bayesian optimization}, arXiv:1807.02811
+(2018).
+\bibitem{GPUCB} N. Srinivas, A. Krause, S. M. Kakade, and M. Seeger, \emph{Gaussian process
+optimization in the bandit setting: no regret and experimental design}, ICML (2010), 1015--1022.
+\bibitem{TuRBO} D. Eriksson, M. Pearce, J. Gardner, R. Turner, and M. Poloczek,
+\emph{Scalable global optimization via local Bayesian optimization}, NeurIPS 32 (2019).
+\bibitem{REMBO} Z. Wang, F. Hutter, M. Zoghi, D. Matheson, and N. de Freitas,
+\emph{Bayesian optimization in a billion dimensions via random embeddings}, IJCAI (2013),
+1778--1784.
+\bibitem{CylTS} B. Rashidi, K. Johnstonbaugh, and C. Gao, \emph{Cylindrical Thompson sampling for
+high-dimensional Bayesian optimization}, AISTATS, PMLR 238 (2024), 3502--3510.
+\bibitem{BAxUS} L. Papenmeier, L. Nardi, and M. Poloczek, \emph{Increasing the scope as you learn:
+adaptive Bayesian optimization in nested subspaces}, NeurIPS 35 (2022), 11586--11601.
+\bibitem{MiVaBo} E. Daxberger, A. Makarova, M. Turchetta, and A. Krause,
+\emph{Mixed-variable Bayesian optimization}, IJCAI (2020), 2633--2639.
+\bibitem{Casmopolitan} X. Wan, V. Nguyen, H. Ha, B. Ru, C. Lu, and M. A. Osborne,
+\emph{Think global and act local: Bayesian optimisation over high-dimensional categorical and mixed
+search spaces}, ICML, PMLR 139 (2021), 10663--10674.
+\bibitem{COMBO} C. Oh, J. Tomczak, E. Gavves, and M. Welling,
+\emph{Combinatorial Bayesian optimization using the graph Cartesian product}, NeurIPS 32 (2019).
+\bibitem{XArmed} S. Bubeck, R. Munos, G. Stoltz, and C. Szepesv\'ari, \emph{$X$-armed bandits},
+JMLR 12 (2011), 1655--1695.
+\bibitem{ImplicitMetric} A. Slivkins, \emph{Multi-armed bandits on implicit metric spaces},
+NeurIPS 24 (2011), 1602--1610.
+\bibitem{UnknownMetric} N. Wanigasekara and C. L. Yu, \emph{Nonparametric contextual bandits in an
+unknown metric space}, NeurIPS 32 (2019).
+\bibitem{InputWarping} J. Snoek, K. Swersky, R. Zemel, and R. Adams, \emph{Input warping for
+Bayesian optimization of non-stationary functions}, ICML, PMLR 32(2) (2014), 1674--1682.
+\bibitem{UnknownHyper} F. Berkenkamp, A. P. Schoellig, and A. Krause, \emph{No-regret Bayesian
+optimization with unknown hyperparameters}, JMLR 20(50) (2019), 1--24.
+\bibitem{MisspecifiedGP} I. Bogunovic and A. Krause, \emph{Misspecified Gaussian process bandit
+optimization}, NeurIPS 34 (2021).
+\bibitem{DynamicBalancing} A. Cutkosky, C. Dann, A. Das, C. Gentile, A. Pacchiano, and M. Purohit,
+\emph{Dynamic balancing for model selection in bandits and RL}, ICML, PMLR 139 (2021), 2276--2285.
+\bibitem{ModelSelection} D. J. Foster, A. Krishnamurthy, and H. Luo, \emph{Model selection for
+contextual bandits}, NeurIPS 32 (2019).
+\bibitem{Kpotufe} S. Kpotufe, \emph{$k$-NN regression adapts to local intrinsic dimension},
+NeurIPS 24 (2011), 729--737.
+\bibitem{Reeve} H. Reeve, J. Mellor, and G. Brown, \emph{The $k$-nearest neighbour UCB algorithm
+for multi-armed bandits with covariates}, ALT, PMLR 83 (2018), 725--752.
+\bibitem{Duchi} J. Duchi, M. Jordan, M. Wainwright, and A. Wibisono, \emph{Optimal rates for
+zero-order convex optimization: the power of two function evaluations}, IEEE Transactions on
+Information Theory 61 (2015), 2788--2806.
+\bibitem{Shamir} O. Shamir, \emph{An optimal algorithm for bandit and zero-order convex optimization
+with two-point feedback}, JMLR 18(52) (2017), 1--11.
+\end{thebibliography}
+
+\end{document}

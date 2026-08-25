@@ -405,6 +405,61 @@ impl PyPackedSearch {
         Ok((trial.index, trial.seed, trial.score))
     }
 
+    /// Return ENN posterior means and standard errors without opening a trial.
+    ///
+    /// Each seed is treated as its own one-candidate region.  This preserves
+    /// the exact packed-weight geometry used by `ask` while leaving the base,
+    /// history, and pending-trial state unchanged.
+    #[pyo3(signature=(seeds,length,neighbors,epistemic_scale=0.7,aleatoric_scale=0.05,y_scale=1.0,seed=0))]
+    #[allow(clippy::too_many_arguments)]
+    fn predict(
+        &mut self,
+        seeds: PyReadonlyArray1<'_, u64>,
+        length: f32,
+        neighbors: usize,
+        epistemic_scale: f32,
+        aleatoric_scale: f32,
+        y_scale: f32,
+        seed: u64,
+    ) -> PyResult<(Vec<f32>, Vec<f32>)> {
+        let seeds = array1_vec(seeds);
+        let config = |beta| SearchConfig {
+            length,
+            neighbors,
+            epistemic_scale,
+            aleatoric_scale,
+            y_scale,
+            beta,
+            acquisition: AcquisitionKind::Ucb,
+            seed,
+        };
+        let means = self
+            .inner
+            .ask_multi_tr(seeds.len(), 1, &seeds, config(0.0))
+            .map_err(err)?;
+        let upper = self
+            .inner
+            .ask_multi_tr(seeds.len(), 1, &seeds, config(1.0))
+            .map_err(err)?;
+        if means.len() != upper.len() {
+            return Err(PyValueError::new_err(
+                "packed posterior returned inconsistent result counts",
+            ));
+        }
+        let mut mean = Vec::with_capacity(means.len());
+        let mut error = Vec::with_capacity(means.len());
+        for ((mean_index, mean_score), (upper_index, upper_score)) in means.into_iter().zip(upper) {
+            if mean_index != upper_index {
+                return Err(PyValueError::new_err(
+                    "packed posterior returned inconsistent candidate indices",
+                ));
+            }
+            mean.push(mean_score);
+            error.push((upper_score - mean_score).max(0.0));
+        }
+        Ok((mean, error))
+    }
+
     fn row<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<u8>>> {
         let trial = self
             .pending

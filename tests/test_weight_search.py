@@ -42,6 +42,30 @@ def test_weight_search_keeps_state_across_ask_and_tell():
     assert not np.array_equal(cpu[3], _base())
 
 
+def test_predict():
+    search = optimizer.PackedSearch(_base(), 0.25, _leaves(), 4, "cpu")
+    search.ask(np.asarray([17], dtype=np.uint64), 1.0, 1)
+    search.tell(0.75, False)
+    history_len = search.history_len
+
+    mean, error = search.predict(
+        np.asarray([19, 23, 29], dtype=np.uint64),
+        0.65,
+        2,
+    )
+
+    mean = np.asarray(mean)
+    error = np.asarray(error)
+    assert mean.shape == (3,)
+    assert error.shape == (3,)
+    assert np.all(np.isfinite(mean))
+    assert np.all(np.isfinite(error))
+    assert np.all(error >= 0.0)
+    assert search.history_len == history_len
+    with pytest.raises(ValueError, match="no pending trial"):
+        search.tell(1.0, False)
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Metal backend requires macOS")
 def test_weight_search_metal_matches_cpu():
     cpu = _ask("cpu")
@@ -49,6 +73,24 @@ def test_weight_search_metal_matches_cpu():
     assert metal[:2] == cpu[:2]
     assert np.isclose(metal[2], cpu[2], atol=1.0e-5)
     assert np.array_equal(metal[3], cpu[3])
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Metal backend requires macOS")
+def test_predict_metal():
+    def predict(backend):
+        search = optimizer.PackedSearch(_base(), 0.25, _leaves(), 4, backend)
+        search.ask(np.asarray([17], dtype=np.uint64), 1.0, 1)
+        search.tell(0.75, False)
+        return search.predict(
+            np.asarray([19, 23, 29], dtype=np.uint64),
+            0.65,
+            2,
+        )
+
+    cpu_mean, cpu_error = predict("cpu")
+    gpu_mean, gpu_error = predict("metal")
+    np.testing.assert_allclose(gpu_mean, cpu_mean, atol=1.0e-5)
+    np.testing.assert_allclose(gpu_error, cpu_error, atol=1.0e-5)
 
 
 def test_bpann_history_shortlists_stable_observation_ids(tmp_path):
