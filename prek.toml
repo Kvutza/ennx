@@ -33,7 +33,7 @@ hooks = [
     name = "kiss check",
     entry = "kiss check .",
     language = "system",
-    pass_filenames = true
+    pass_filenames = false
   }
 ]
 

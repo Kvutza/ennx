@@ -1,11 +1,11 @@
-load("//buck2/wheel:wheel.bzl", "python_wheel")
-load("//buck2/cuda:defs.bzl", "cuda_oxide")
 load(
     "//buck2:python.bzl",
     "PYTHON_ABI",
     "PYTHON_REQUIRES",
     "python_extension_suffix",
 )
+load("//buck2/cuda:defs.bzl", "cuda_oxide")
+load("//buck2/wheel:wheel.bzl", "python_wheel")
 
 config_setting(
     name = "linux-arm64",
@@ -69,7 +69,7 @@ filegroup(
     srcs = glob(["src/ennx/**/*.py"]) + [
         "LICENSE",
         "NOTICE",
-        "README",
+        "README.md",
         "ops/cuda_wheel.py",
         "rust-toolchain.toml",
     ],
@@ -99,6 +99,7 @@ python_wheel(
     python_abi = PYTHON_ABI,
     python_requires = PYTHON_REQUIRES,
     python_srcs = glob(["src/ennx/**/*.py"]),
+    readme = "README.md",
     runtime_libraries = ["//buck2/native:linux-native"],
     target_compatible_with = [
         "prelude//cpu/constraints:arm64",
@@ -118,6 +119,7 @@ python_wheel(
     python_abi = PYTHON_ABI,
     python_requires = PYTHON_REQUIRES,
     python_srcs = glob(["src/ennx/**/*.py"]),
+    readme = "README.md",
     runtime_libraries = ["//buck2/native:linux-native"],
     target_compatible_with = [
         "prelude//cpu/constraints:x86_64",
@@ -137,6 +139,7 @@ python_wheel(
     python_abi = PYTHON_ABI,
     python_requires = PYTHON_REQUIRES,
     python_srcs = glob(["src/ennx/**/*.py"]),
+    readme = "README.md",
     runtime_libraries = ["//buck2/native:faiss-build[openmp]"],
     target_compatible_with = [
         "prelude//cpu/constraints:arm64",

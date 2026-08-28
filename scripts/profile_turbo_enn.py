@@ -27,6 +27,12 @@ class ProfileConfig:
     seed: int
 
 
+@dataclass(frozen=True)
+class ProfileActions:
+    profile_ask: bool
+    time_center: bool
+
+
 def _make_bounds(num_dim: int) -> np.ndarray:
     return np.array([[0.0, 1.0]] * num_dim, dtype=float)
 
@@ -206,7 +212,7 @@ def run_sweep(cfg: ProfileConfig, *, num_obs_values: list[int]) -> None:
     _estimate_scaling(num_obs_values, tell_times, "tell_time_sec")
 
 
-def run_profile(cfg: ProfileConfig, *, profile: bool, profile_center: bool) -> None:
+def run_profile(cfg: ProfileConfig, actions: ProfileActions) -> None:
     rng = np.random.default_rng(cfg.seed)
     opt = _make_optimizer(cfg)
     _seed_observations(opt, rng, cfg)
@@ -214,7 +220,7 @@ def run_profile(cfg: ProfileConfig, *, profile: bool, profile_center: bool) -> N
     # Warmup to avoid import overhead in profile
     _ = opt.ask(num_arms=cfg.num_arms)
 
-    if profile_center:
+    if actions.time_center:
         dt_center = _time_find_center(opt, rng)
         print(
             "center_time_sec",
@@ -223,7 +229,7 @@ def run_profile(cfg: ProfileConfig, *, profile: bool, profile_center: bool) -> N
             cfg.num_obs,
         )
 
-    if profile:
+    if actions.profile_ask:
         prof = cProfile.Profile()
         prof.enable()
         _ = opt.ask(num_arms=cfg.num_arms)
@@ -285,7 +291,13 @@ def main() -> None:
             raise ValueError("--sweep-values must be non-empty")
         run_sweep(cfg, num_obs_values=sweep_vals)
     else:
-        run_profile(cfg, profile=args.profile, profile_center=args.profile_center)
+        run_profile(
+            cfg,
+            ProfileActions(
+                profile_ask=args.profile,
+                time_center=args.profile_center,
+            ),
+        )
 
 
 if __name__ == "__main__":

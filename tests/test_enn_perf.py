@@ -128,7 +128,6 @@ def _neighbor_lookup_ratio(n: int, *, d: int = 1, k: int = 10, seed: int = 42) -
             rust,
             train_x,
             search_k=k,
-            exclude_nearest=False,
         )
 
     def faiss_batch_neighbors() -> None:
@@ -267,8 +266,7 @@ def _self_search_timing_ratios(
             rust,
             x,
             search_k=k,
-            exclude_nearest=False,
-            tie_break_neighbors=tie_break_neighbors,
+            flags=PosteriorFlags(tie_break_neighbors=tie_break_neighbors),
         )
 
     def faiss_neighbors() -> None:

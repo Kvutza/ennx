@@ -130,10 +130,10 @@ query = rng.normal(size=(4, 5))
 flat = EpistemicNearestNeighbors(train_x, train_y, index_driver=ENNIndexDriver.FLAT)
 usearch = EpistemicNearestNeighbors(train_x, train_y, index_driver=ENNIndexDriver.USEARCH)
 expected = enn_index_neighbor_distances_and_indices(
-    flat.rust_backend, query, search_k=10, exclude_nearest=False
+    flat.rust_backend, query, search_k=10
 )
 actual = enn_index_neighbor_distances_and_indices(
-    usearch.rust_backend, query, search_k=10, exclude_nearest=False
+    usearch.rust_backend, query, search_k=10
 )
 assert np.array_equal(actual[1], expected[1])
 assert np.max(np.abs(actual[0] - expected[0])) == 0.0

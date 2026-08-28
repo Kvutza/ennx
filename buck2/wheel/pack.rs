@@ -12,6 +12,7 @@ struct Args {
     platform_tag: String,
     python_abi: String,
     python_requires: String,
+    readme: PathBuf,
     extension_suffix: String,
 }
 
@@ -31,6 +32,7 @@ fn args() -> Args {
         platform_tag: get("--platform-tag"),
         python_abi: get("--python-abi"),
         python_requires: get("--python-requires"),
+        readme: get("--readme").into(),
         extension_suffix: get("--extension-suffix"),
     };
     assert!(values.next().is_none(), "unexpected argument");
@@ -291,14 +293,13 @@ fn main() -> io::Result<()> {
         format!("{dist_info}/licenses/NOTICE"),
         fs::read(args.src_dir.join("NOTICE"))?,
     );
-    wheel_files.insert(
-        format!("{dist_info}/METADATA"),
-        format!(
-            "Metadata-Version: 2.3\nName: {}\nVersion: {}\nSummary: Epistemic Nearest Neighbors\nRequires-Python: {}\nRequires-Dist: numpy>=2.1\n\n",
-            args.package, args.version, args.python_requires
-        )
-        .into_bytes(),
-    );
+    let mut metadata = format!(
+        "Metadata-Version: 2.3\nName: {}\nVersion: {}\nSummary: Epistemic Nearest Neighbors\nRequires-Python: {}\nRequires-Dist: numpy>=2.1\nDescription-Content-Type: text/markdown; charset=UTF-8\n\n",
+        args.package, args.version, args.python_requires
+    )
+    .into_bytes();
+    metadata.extend(fs::read(args.src_dir.join(args.readme))?);
+    wheel_files.insert(format!("{dist_info}/METADATA"), metadata);
     wheel_files.insert(
         format!("{dist_info}/WHEEL"),
         format!("Wheel-Version: 1.0\nGenerator: buck2\nRoot-Is-Purelib: false\nTag: {tag}\n\n")

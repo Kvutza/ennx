@@ -1,10 +1,13 @@
-# Structural thresholds for changed-file review. Behavioral coverage belongs to
+# Structural thresholds for repository-wide review. Behavioral coverage belongs to
 # the Rust and Python test runners, not KISS's lexical name matcher.
 
-[gate]
+[global]
+docs_allowed = ["./"]
 duplication_enabled = true
 min_similarity = 0.9
 orphan_module_enabled = false
+
+[test]
 test_coverage_threshold = 0
 
 [python]

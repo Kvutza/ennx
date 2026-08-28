@@ -9,6 +9,7 @@ def python_wheel(
         python_abi,
         python_requires,
         python_srcs,
+        readme,
         runtime_libraries,
         target_compatible_with,
         version):
@@ -22,7 +23,7 @@ def python_wheel(
     )
     native.genrule(
         name = name,
-        srcs = python_srcs + runtime_libraries + [extension, license, notice],
+        srcs = python_srcs + runtime_libraries + [extension, license, notice, readme],
         out = filename,
         cmd = " ".join([
             "$(exe //buck2/wheel:pack)",
@@ -40,6 +41,8 @@ def python_wheel(
             python_abi,
             "--python-requires",
             "'{}'".format(python_requires),
+            "--readme",
+            readme,
             "--extension-suffix",
             extension_suffix,
         ]),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ennx.ennx.posterior_flags import PosteriorFlags
 from ennx.turbo.config.enn_index_driver import ENNIndexDriver
 
 
@@ -16,14 +17,13 @@ def enn_index_neighbor_distances_and_indices(
     x: np.ndarray,
     *,
     search_k: int,
-    exclude_nearest: bool,
-    tie_break_neighbors: bool = True,
+    flags: PosteriorFlags = PosteriorFlags(),
 ) -> tuple[np.ndarray, np.ndarray]:
     dist2s, idx = rust_model.index_neighbor_distances_and_indices(
         np.asarray(x, dtype=float),
         int(search_k),
-        bool(exclude_nearest),
-        bool(tie_break_neighbors),
+        bool(flags.exclude_nearest),
+        bool(flags.tie_break_neighbors),
     )
     return np.asarray(dist2s, dtype=float), np.asarray(idx, dtype=int)
 

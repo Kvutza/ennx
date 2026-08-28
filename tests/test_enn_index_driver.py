@@ -45,11 +45,11 @@ def test_accelerator_index_matches_flat(index_driver):
         raise
 
     flat_distances, flat_indices = enn_index_neighbor_distances_and_indices(
-        flat.rust_backend, query, search_k=3, exclude_nearest=False
+        flat.rust_backend, query, search_k=3
     )
     accelerator_distances, accelerator_indices = (
         enn_index_neighbor_distances_and_indices(
-            accelerator.rust_backend, query, search_k=3, exclude_nearest=False
+            accelerator.rust_backend, query, search_k=3
         )
     )
     np.testing.assert_array_equal(accelerator_indices, flat_indices)
@@ -66,10 +66,10 @@ def test_usearch_small_history_matches_flat():
     usearch = _enn(train_x, index_driver=ENNIndexDriver.USEARCH)
 
     expected = enn_index_neighbor_distances_and_indices(
-        flat.rust_backend, query, search_k=10, exclude_nearest=False
+        flat.rust_backend, query, search_k=10
     )
     actual = enn_index_neighbor_distances_and_indices(
-        usearch.rust_backend, query, search_k=10, exclude_nearest=False
+        usearch.rust_backend, query, search_k=10
     )
     np.testing.assert_array_equal(actual[1], expected[1])
     np.testing.assert_allclose(actual[0], expected[0], rtol=0.0, atol=0.0)
@@ -95,7 +95,7 @@ def test_enn_index_driver_neighbor_indices_fuzz(seed: int):
     query = rng.uniform(0.0, 1.0, size=(1, dim))
     enn = _enn(train_x, index_driver=ENNIndexDriver.FLAT)
     _, idx = enn_index_neighbor_distances_and_indices(
-        enn.rust_backend, query, search_k=search_k, exclude_nearest=False
+        enn.rust_backend, query, search_k=search_k
     )
     assert idx.shape == (1, search_k)
     assert np.all(idx >= 0)
@@ -342,10 +342,10 @@ def test_enn_disk_backend_incremental_add_and_search_bpann_disk(tmp_path, driver
     for qi in range(10):
         query = train_x[qi : qi + 1]
         _, idx = enn_index_neighbor_distances_and_indices(
-            model.rust_backend, query, search_k=1, exclude_nearest=False
+            model.rust_backend, query, search_k=1
         )
         _, flat_idx = enn_index_neighbor_distances_and_indices(
-            flat.rust_backend, query, search_k=1, exclude_nearest=False
+            flat.rust_backend, query, search_k=1
         )
         assert int(idx[0, 0]) == int(flat_idx[0, 0]), f"query row {qi}"
 

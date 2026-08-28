@@ -49,8 +49,8 @@ copy_extension(
 py_wheel(
     name = "wheel",
     abi = "cp313",
-    description_content_type = "text/plain",
-    description_file = "README",
+    description_content_type = "text/markdown",
+    description_file = "README.md",
     distribution = "ennx",
     extra_distinfo_files = {
         ":LICENSE": "licenses/LICENSE",

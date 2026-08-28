@@ -12,7 +12,7 @@ from ennx.ennx.enn_hash import (
     normal_hash_batch_multi_seed,
     normal_hash_batch_multi_seed_fast,
 )
-from ennx.ennx.enn_params import ENNParams
+from ennx.ennx.enn_params import ENNParams, PosteriorFlags
 from ennx.turbo.config.enn_index_driver import ENNIndexDriver
 
 
@@ -108,15 +108,13 @@ def test_enn_index_neighbor_tie_break_flag():
         enn.rust_backend,
         query,
         search_k=2,
-        exclude_nearest=False,
-        tie_break_neighbors=True,
+        flags=PosteriorFlags(tie_break_neighbors=True),
     )
     _, idx_off = enn_index_neighbor_distances_and_indices(
         enn.rust_backend,
         query,
         search_k=2,
-        exclude_nearest=False,
-        tie_break_neighbors=False,
+        flags=PosteriorFlags(tie_break_neighbors=False),
     )
     assert idx_on[0].tolist() == [0, 1]
     assert idx_off[0].tolist() in ([0, 1], [1, 0])
@@ -131,16 +129,14 @@ def test_enn_index_neighbor_tie_break_batch_matches_single_on_train():
         enn.rust_backend,
         train_x,
         search_k=k,
-        exclude_nearest=False,
-        tie_break_neighbors=True,
+        flags=PosteriorFlags(tie_break_neighbors=True),
     )
     for i in range(train_x.shape[0]):
         _, idx_one = enn_index_neighbor_distances_and_indices(
             enn.rust_backend,
             train_x[i : i + 1],
             search_k=k,
-            exclude_nearest=False,
-            tie_break_neighbors=True,
+            flags=PosteriorFlags(tie_break_neighbors=True),
         )
         assert idx_batch[i].tolist() == idx_one[0].tolist()
 
@@ -154,15 +150,12 @@ def test_enn_index_neighbor_tie_break_expands_when_more_than_k_at_cutoff():
         enn.rust_backend,
         query,
         search_k=2,
-        exclude_nearest=False,
-        tie_break_neighbors=True,
+        flags=PosteriorFlags(tie_break_neighbors=True),
     )
     assert idx_on[0].tolist() == [0, 1]
 
 
 def test_enn_posterior_tie_break_self_search_batch():
-    from ennx.ennx.posterior_flags import PosteriorFlags
-
     train_x = np.array([[(i - 9.5) / 3.0 + 0.01 * i] for i in range(20)])
     train_y = np.array([[(i + 1) * 0.37 - 2.1] for i in range(20)])
     enn = _enn(train_x, scale_x=False, train_y=train_y)
@@ -186,7 +179,7 @@ def test_enn_index_neighbor_search_matches_faiss_when_no_ties(scale_x):
         enn.rust_backend, query, search_k=search_k, exclude_nearest=False
     )
     exact_d2, exact_idx = enn_index_neighbor_distances_and_indices(
-        enn.rust_backend, query, search_k=search_k, exclude_nearest=False
+        enn.rust_backend, query, search_k=search_k
     )
     assert exact_d2.shape == faiss_d2.shape == (5, search_k)
     assert exact_idx.shape == faiss_idx.shape
@@ -199,7 +192,10 @@ def test_enn_index_neighbor_search_exclude_nearest():
     query = train_x[:3]
     enn = _enn(train_x, scale_x=False, index_driver=ENNIndexDriver.FLAT)
     dist2s, idx = enn_index_neighbor_distances_and_indices(
-        enn.rust_backend, query, search_k=3, exclude_nearest=True
+        enn.rust_backend,
+        query,
+        search_k=3,
+        flags=PosteriorFlags(exclude_nearest=True),
     )
     assert dist2s.shape == (3, 2) and idx.shape == (3, 2)
     assert np.all(idx >= 0) and np.all(idx < 20)
@@ -211,7 +207,10 @@ def test_enn_index_neighbor_search_k_one_exclude_nearest_yields_zero_columns():
     enn = _enn(train_x, scale_x=False)
     q = rng.standard_normal((3, 2))
     dist2s, idx = enn_index_neighbor_distances_and_indices(
-        enn.rust_backend, q, search_k=1, exclude_nearest=True
+        enn.rust_backend,
+        q,
+        search_k=1,
+        flags=PosteriorFlags(exclude_nearest=True),
     )
     assert dist2s.shape == (3, 0) and idx.shape == (3, 0)
 
@@ -221,11 +220,11 @@ def test_exact_index_search_zero_k_and_k_exceeds_train():
     enn = _enn(train_x, scale_x=False)
     query = np.array([[0.5], [1.5]], dtype=float)
     d0, i0 = enn_index_neighbor_distances_and_indices(
-        enn.rust_backend, query, search_k=0, exclude_nearest=False
+        enn.rust_backend, query, search_k=0
     )
     assert d0.shape == (2, 0) and i0.shape == (2, 0)
     d_all, i_all = enn_index_neighbor_distances_and_indices(
-        enn.rust_backend, query, search_k=10, exclude_nearest=False
+        enn.rust_backend, query, search_k=10
     )
     assert d_all.shape == (2, 10) and i_all.shape == (2, 10)
     assert np.all(i_all[:, :3] >= 0) and np.all(i_all[:, :3] < 3)
