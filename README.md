@@ -1,46 +1,56 @@
 # ENNX · 𑅑 𑅓𑅧 𑅓𑅧 𑅓𑅕𑅰
 
-## 𑅪𑅢𑅐𑅯
+## 𑅪𑅢𑅐𑅯𑅔
 
-ENNX 𑅭𑅐 𑅰𑅐𑅦𑅐𑅭𑅢 𑅕𑅐𑅬 `./ennx` 𑅰𑅒𑅧 𑅙𑅐𑅮𑅑; Buck2 𑅑𑅢𑅭𑅔 𑅬𑅒𑅖𑅛 build system 𑅱𑅑। raw Buck2 𑅐𑅭 Bazel command 𑅖𑅐𑅮𑅑 𑅖𑅐𑅰 debugging 𑅐𑅭 compatibility 𑅖𑅐𑅣𑅭 𑅙𑅮𑅐𑅯𑅔।
+ENNX 𑅭𑅔 𑅰𑅐𑅦𑅐𑅭𑅢 𑅕𑅐𑅬 `./ennx` 𑅰𑅒𑅧 𑅙𑅐𑅮𑅐𑅯𑅔। Buck2 𑅑𑅢𑅭𑅔 𑅬𑅒𑅖𑅛 build system 𑅱𑅑। raw Buck2 𑅐𑅭 Bazel command 𑅖𑅐𑅮𑅑 debugging 𑅐𑅭 compatibility 𑅖𑅐𑅣𑅭 𑅙𑅐𑅮𑅐𑅯𑅔।
 
     ./ennx build
 
-wheel 𑅪𑅢𑅐𑅯𑅢 𑅐𑅭 𑅒𑅢𑅭𑅑 𑅨𑅭𑅖 𑅖𑅐𑅣𑅭:
+wheel 𑅪𑅢𑅐𑅯𑅢 𑅐𑅭 𑅨𑅭𑅖𑅢 𑅖𑅐𑅣𑅭:
 
     ./ennx wheel
     ./ennx verify
 
-`./ennx wheel` Buck2 𑅰𑅒𑅧 CPython 3.13 𑅭𑅑 wheel 𑅪𑅢𑅐𑅯𑅑। GitHub Releases, PyPI 𑅕𑅔𑅧𑅑, CPython 3.12 𑅰𑅒𑅧 3.14 𑅣𑅕 𑅭𑅑 platform wheels 𑅪𑅐𑅧𑅞𑅑। 𑅐𑅨𑅭𑅑 Python ABI 𑅐𑅭 platform 𑅭𑅑 wheel release asset 𑅰𑅒𑅧 𑅰𑅑𑅦𑅑 install 𑅕𑅭𑅔।
+`./ennx wheel` Buck2 𑅰𑅒𑅧 CPython 3.13 𑅭𑅔 wheel 𑅪𑅢𑅐𑅯𑅑। CPython 3.12 𑅰𑅒𑅧 3.14 𑅣𑅕 𑅭𑅐 platform wheel GitHub Releases 𑅬𑅐𑅧𑅛 𑅬𑅑𑅮𑅑; PyPI 𑅬𑅐𑅧𑅛 𑅕𑅔𑅧𑅑। 𑅐𑅨𑅭𑅑 Python ABI 𑅐𑅭 platform 𑅭𑅔 wheel install 𑅕𑅭𑅔।
 
-CUDA wheel 𑅪𑅢𑅐𑅯𑅢 𑅐𑅭 parity 𑅨𑅭𑅖 𑅖𑅐𑅣𑅭:
+CUDA wheel 𑅪𑅢𑅐𑅯𑅢 𑅐𑅭 parity 𑅨𑅭𑅖𑅢 𑅖𑅐𑅣𑅭:
 
     ./ennx cuda wheel
     ./ennx cuda parity
 
-𑅣𑅑𑅛𑅐𑅭 CUDA wheel 𑅔𑅑 release 𑅭𑅑 𑅰𑅐𑅤 𑅛𑅔𑅲𑅢 𑅖𑅐𑅣𑅭:
+𑅣𑅑𑅛𑅐𑅭 CUDA wheel release 𑅬𑅐𑅧𑅛 upload 𑅕𑅭𑅢 𑅖𑅐𑅣𑅭:
 
     ./ennx release upload vX.Y.Z PATH/TO/ennx-*.whl
 
-## 𑅨𑅭𑅖
+## 𑅨𑅭𑅖𑅔
 
     ./ennx check
     ./ennx check --all
     ./ennx test
     ./ennx ci
 
-𑅪𑅥𑅮𑅓𑅮 files 𑅭𑅑 𑅣𑅓𑅛 𑅨𑅭𑅖 𑅖𑅐𑅣𑅭 `./ennx check` 𑅙𑅮𑅐𑅯𑅔; 𑅰𑅗𑅮𑅳𑅑 repo 𑅖𑅐𑅣𑅭 `--all` 𑅛𑅔𑅲𑅔। Buck2 𑅭𑅐 native tests 𑅖𑅐𑅣𑅭 `./ennx test` 𑅐𑅭 build, test, wheel, verify 𑅭𑅑 𑅨𑅒𑅭𑅑 gate 𑅖𑅐𑅣𑅭 `./ennx ci` 𑅙𑅮𑅐𑅯𑅔।
+𑅪𑅥𑅮𑅑𑅛𑅐 file: `./ennx check`
 
-𑅨𑅭𑅖 𑅭𑅐 𑅥𑅭𑅛𑅐, generated workload 𑅭𑅑 𑅭𑅑𑅣𑅑 𑅐𑅭 hardware/benchmark 𑅕𑅰𑅒𑅞𑅑𑅛𑅐𑅧 𑅖𑅐𑅣𑅭 `docs/testing.md` 𑅥𑅓𑅖𑅔।
+𑅰𑅗𑅮𑅳𑅔 repo: `./ennx check --all`
 
-hosted T4 CUDA development workflow 𑅖𑅐𑅣𑅭 `docs/colab.md` 𑅥𑅓𑅖𑅔।
+Buck2 𑅭𑅐 native test: `./ennx test`
 
-stable, experimental 𑅐𑅭 internal API 𑅭𑅑 𑅱𑅥 𑅖𑅐𑅣𑅭 `docs/api.md` 𑅥𑅓𑅖𑅔।
+𑅨𑅒𑅭𑅑 gate: `./ennx ci`
+
+𑅨𑅭𑅖 𑅭𑅐 𑅥𑅭𑅛𑅐 𑅐𑅭 benchmark 𑅭𑅑 𑅕𑅰𑅒𑅞𑅑: `docs/testing.md`
+
+T4 CUDA development: `docs/colab.md`
+
+API 𑅭𑅑 𑅱𑅥: `docs/api.md`
 
 ## 𑅪𑅑𑅗𑅣
 
-𑅰𑅗𑅮𑅳𑅐 CLI 𑅱𑅒𑅕𑅬 𑅖𑅐𑅣𑅭:
+𑅰𑅗𑅮𑅳𑅐 CLI 𑅱𑅒𑅕𑅬:
 
     ./ennx --help
 
-𑅬𑅒𑅖𑅛 Buck2 path 𑅐𑅭 platform 𑅭𑅑 𑅪𑅑𑅗𑅣 𑅖𑅐𑅣𑅭 `docs/buck2.md` 𑅥𑅓𑅖𑅔। secondary Bazel compatibility path 𑅖𑅐𑅣𑅭 `docs/bazel.md` 𑅥𑅓𑅖𑅔।
+𑅬𑅒𑅖𑅛 Buck2 path 𑅐𑅭 platform 𑅭𑅑 𑅪𑅑𑅗𑅣: `docs/buck2.md`
+
+secondary Bazel compatibility path: `docs/bazel.md`
+
+𑅰𑅭𑅭𑅐𑅩𑅑 𑅨𑅡𑅳𑅢 𑅐𑅭 𑅪𑅔𑅮𑅢 𑅭𑅑 𑅬𑅥𑅥: `docs/sarrafi.md`
