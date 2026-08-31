@@ -343,6 +343,13 @@ mod tests {
     }
 
     #[cfg(feature = "opencl")]
+    fn opencl_runtime_unavailable(error: &str) -> bool {
+        error.contains("no OpenCL GPU or CPU device")
+            || error.contains("CL_PLATFORM_NOT_FOUND_KHR")
+            || error.contains("failed to enumerate OpenCL")
+    }
+
+    #[cfg(feature = "opencl")]
     #[test]
     fn opencl_matches_cpu() {
         let base = vec![
@@ -359,7 +366,7 @@ mod tests {
         let mut cpu = ParamBuffer::new(base.clone(), leaves.clone(), ComputeDevice::Cpu).unwrap();
         let mut opencl = match ParamBuffer::new(base, leaves, ComputeDevice::OpenCl) {
             Ok(buffer) => buffer,
-            Err(error) if error.contains("no OpenCL") => return,
+            Err(error) if opencl_runtime_unavailable(&error) => return,
             Err(error) => panic!("OpenCL BF16 setup failed: {error}"),
         };
         cpu.materialize(&terms).unwrap();

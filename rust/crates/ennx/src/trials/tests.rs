@@ -100,12 +100,19 @@ fn metal_history() {
 }
 
 #[cfg(feature = "opencl")]
+fn opencl_runtime_unavailable(error: &str) -> bool {
+    error.contains("no OpenCL GPU or CPU device")
+        || error.contains("CL_PLATFORM_NOT_FOUND_KHR")
+        || error.contains("failed to enumerate OpenCL")
+}
+
+#[cfg(feature = "opencl")]
 #[test]
 fn opencl_history() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
     match Search::new(&base, 0.0, leaves(), 3, ComputeDevice::OpenCl) {
         Ok(_) => lazy_match(ComputeDevice::OpenCl),
-        Err(error) if error.contains("no OpenCL GPU or CPU device") => {}
+        Err(error) if opencl_runtime_unavailable(&error) => {}
         Err(error) => panic!("{error}"),
     }
 }
