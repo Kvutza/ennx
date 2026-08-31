@@ -4,6 +4,61 @@ set -eu
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_dir"
 
+run_tests=0
+case ${1:-} in
+    "") ;;
+    --tests) run_tests=1 ;;
+    *)
+        echo "usage: tools/buck2-wheel-verify [--tests]" >&2
+        exit 2
+        ;;
+esac
+test "$#" -le 1
+
+fixture_restore_dir=
+verify_dir=
+
+cleanup() {
+    if [ -n "$fixture_restore_dir" ] && [ -f "$fixture_restore_dir/paths" ]; then
+        while IFS= read -r fixture; do
+            cp "$fixture_restore_dir/files/$fixture" "$repo_dir/$fixture"
+        done < "$fixture_restore_dir/paths"
+        rm -rf "$fixture_restore_dir"
+    fi
+    if [ -n "$verify_dir" ]; then
+        rm -rf "$verify_dir"
+    fi
+}
+trap cleanup EXIT HUP INT TERM
+
+hydrate_lfs_fixtures() {
+    fixture_restore_dir=$(mktemp -d "${TMPDIR:-/tmp}/ennx-lfs-fixtures.XXXXXX")
+    grep -RIl '^version https://git-lfs.github.com/spec/v1$' tests/fixtures \
+        > "$fixture_restore_dir/paths" || true
+    if [ ! -s "$fixture_restore_dir/paths" ]; then
+        rm -rf "$fixture_restore_dir"
+        fixture_restore_dir=
+        return
+    fi
+    if ! git lfs version >/dev/null 2>&1; then
+        echo "Git LFS is required to materialize test fixtures" >&2
+        exit 1
+    fi
+    while IFS= read -r fixture; do
+        mkdir -p "$fixture_restore_dir/files/$(dirname "$fixture")"
+        cp "$fixture" "$fixture_restore_dir/files/$fixture"
+        materialized="$fixture_restore_dir/materialized"
+        git lfs smudge -- "$fixture" < "$fixture" > "$materialized"
+        if grep -Fqx 'version https://git-lfs.github.com/spec/v1' "$materialized"; then
+            echo "Git LFS object is unavailable for fixture: $fixture" >&2
+            exit 1
+        fi
+        cp "$materialized" "$fixture"
+    done < "$fixture_restore_dir/paths"
+}
+
+hydrate_lfs_fixtures
+
 python_version=${ENNX_PYTHON_VERSION:-3.13}
 case "$python_version" in
     3.12)
@@ -65,7 +120,6 @@ case $(basename "$wheel_path") in
 esac
 
 verify_dir=$(mktemp -d "${TMPDIR:-/tmp}/ennx-buck2-wheel.XXXXXX")
-trap 'rm -rf "$verify_dir"' EXIT HUP INT TERM
 "$python_bin" -m zipfile -e "$wheel_path" "$verify_dir"
 
 extension=$(find "$verify_dir/ennx" -maxdepth 1 -name 'ennx_rust*.so' -print)
@@ -74,6 +128,11 @@ test -n "$extension"
 test -n "$dist_info"
 test -f "$dist_info/licenses/LICENSE"
 test -f "$dist_info/licenses/NOTICE"
+grep -Fqx 'Requires-Dist: numpy>=2.1' "$dist_info/METADATA"
+grep -Fqx 'Requires-Dist: scipy>=1.11' "$dist_info/METADATA"
+grep -Fqx 'Provides-Extra: gp' "$dist_info/METADATA"
+grep -Fqx "Requires-Dist: torch>=2.0; extra == 'gp'" "$dist_info/METADATA"
+grep -Fqx "Requires-Dist: gpytorch>=1.11; extra == 'gp'" "$dist_info/METADATA"
 
 case $(uname -s) in
     Darwin)
@@ -198,5 +257,15 @@ PY
         "$repo_dir/tests/test_enn_neighbors.py" \
         "$repo_dir/tests/test_weight_search.py"
 )
+
+if [ "$run_tests" -eq 1 ]; then
+    (
+        cd "$repo_dir"
+        ENNX_TEST_WHEEL_ROOT="$verify_dir" \
+            PYTHONPATH="$verify_dir:$repo_dir:$repo_dir/tests" \
+            "$python_bin" -m pytest -q -p no:cacheprovider \
+            -m 'not slow or gp' tests
+    )
+fi
 
 printf '%s\n' "$wheel_path"

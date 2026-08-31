@@ -51,3 +51,11 @@ fn excludes_release_artifacts_from_the_dev_graph() {
     assert!(is_dev_target("//cuda:ennx-cuda"));
     assert!(!is_dev_target("//:wheel-linux-x86_64"));
 }
+
+#[test]
+fn identifies_changes_that_require_wheel_backed_python_tests() {
+    assert!(needs_python_tests(&["src/ennx/turbo/optimizer.py".into()]));
+    assert!(needs_python_tests(&["rust/crates/ennx/src/model.rs".into()]));
+    assert!(needs_python_tests(&["tests/test_turbo_optimizer.py".into()]));
+    assert!(!needs_python_tests(&["docs/testing.md".into()]));
+}

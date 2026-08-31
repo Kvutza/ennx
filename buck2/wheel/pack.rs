@@ -57,6 +57,25 @@ fn files_below(root: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(files)
 }
 
+fn add_optimizer_fixtures(
+    args: &Args,
+    wheel_files: &mut BTreeMap<String, Vec<u8>>,
+) -> io::Result<()> {
+    let fixture_root = args.src_dir.join("tests/fixtures");
+    for source in files_below(&fixture_root)? {
+        let relative = source.strip_prefix(&fixture_root).unwrap();
+        wheel_files.insert(
+            format!(
+                "{}/turbo/optimizer_fixtures/data/{}",
+                args.package,
+                relative.to_string_lossy().replace('\\', "/")
+            ),
+            fs::read(source)?,
+        );
+    }
+    Ok(())
+}
+
 fn crc32(data: &[u8]) -> u32 {
     let mut crc = !0_u32;
     for &byte in data {
@@ -257,6 +276,7 @@ fn main() -> io::Result<()> {
             );
         }
     }
+    add_optimizer_fixtures(&args, &mut wheel_files)?;
     wheel_files.insert(
         format!("{}/ennx_rust{}", args.package, args.extension_suffix),
         fs::read(extensions[0])?,
@@ -294,7 +314,7 @@ fn main() -> io::Result<()> {
         fs::read(args.src_dir.join("NOTICE"))?,
     );
     let mut metadata = format!(
-        "Metadata-Version: 2.3\nName: {}\nVersion: {}\nSummary: Epistemic Nearest Neighbors\nRequires-Python: {}\nRequires-Dist: numpy>=2.1\nDescription-Content-Type: text/markdown; charset=UTF-8\n\n",
+        "Metadata-Version: 2.3\nName: {}\nVersion: {}\nSummary: Epistemic Nearest Neighbors\nRequires-Python: {}\nRequires-Dist: numpy>=2.1\nRequires-Dist: scipy>=1.11\nProvides-Extra: gp\nRequires-Dist: torch>=2.0; extra == 'gp'\nRequires-Dist: gpytorch>=1.11; extra == 'gp'\nDescription-Content-Type: text/markdown; charset=UTF-8\n\n",
         args.package, args.version, args.python_requires
     )
     .into_bytes();

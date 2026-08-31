@@ -14,8 +14,8 @@ must be reproducible from a seed, workload shape, and backend selection.
 | Working copy | Repair and check the current JJ diff with KISS coverage. | `./ennx dev`; use `./ennx dev --full` for the current-platform full pass |
 | Rust core | Targeted Buck2 checks for the dev CLI or ENNX core crate. | `./buck2w test //rust/crates/dev-cli:ennx-test`; `./buck2w test //rust/crates/ennx:ennx-unit` |
 | Wheel/API | Tests that require the built wheel or native extension. | `./ennx wheel`; the GitHub Actions matrix covers every supported CPython version |
-| Python optional | Tests requiring optional packages such as Torch/Gpytorch/click or source-tree extension setup. | Install the optional dependencies and built extension, then run the selected pytest group. |
-| Project CI | Full source verification plus Buck2 build/test on the current platform. | `./ennx ci` |
+| Python | Wheel-backed Python correctness, including the optional Torch/GPyTorch surrogate. | `./ennx dev --full` or `./ennx ci` |
+| Project CI | Full source, Buck2, wheel, and Python verification on the current platform. | `./ennx ci` |
 | Wheel build | Build and verify the current platform wheel. | `./ennx wheel` |
 | Hardware | Metal/OpenCL behavior and CPU parity. Run when touching accelerator, KNN, dense, BF16, or native build code. | platform-specific Rust, Bazel, or Buck2 tests |
 | Benchmark | Speed and numerical-regression checks. Run before performance claims. | benchmark scripts plus platform profiler captures |
@@ -26,6 +26,11 @@ run every tier affected by the files changed.
 Prefer `./ennx` for normal testing. It is the repo-owned entrypoint and wraps
 the Buck2 workflow. Use raw `cargo test`, `pytest`, or `buck2w`
 only when diagnosing one specific package, test file, or feature set.
+
+The broad Python gate extracts the Buck2 wheel and places that artifact first
+on `PYTHONPATH`. Repository helpers remain importable, but `src/ennx` cannot
+shadow the packaged extension. It runs correctness tests selected by
+`not slow or gp`; stress, performance, and hardware gates remain explicit.
 
 Do not use `cargo test --manifest-path Cargo.toml --workspace` as the
 canonical Rust gate. `ennx-py` is a PyO3 `cdylib`; generic Cargo test linking

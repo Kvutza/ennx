@@ -35,13 +35,8 @@ def test_optimizer_tr_length_trajectory_contract():
 
     bounds = np.array([[0.0, 1.0], [0.0, 1.0]], dtype=float)
     num_arms = 4
-    config = turbo_enn_config(
-        bounds=bounds,
-        batch_size=num_arms,
-        max_evals=30,
-        device="cpu",
-    )
-    opt = make_optimizer(config)
+    config = turbo_enn_config()
+    opt = make_optimizer(bounds, config, seed=41)
 
     lengths = _tr_lengths(opt, num_arms, num_cycles=8)
     assert len(lengths) == 8

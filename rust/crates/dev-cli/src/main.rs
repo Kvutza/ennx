@@ -133,11 +133,14 @@ fn run_dev(root: &Path, full: bool) -> Result<u8, String> {
     if full {
         run_prek(root, true, &[], CHECK_HOOKS)?;
         run_buck_graph(root, &buck_graph_for_full_mode())?;
-        run_wheel(root)?;
+        run_python_tests(root)?;
     } else {
         run_prek(root, false, &changed_paths, CHECK_HOOKS)?;
         let graph = affected_graph(root, &changed_paths)?;
         run_buck_graph(root, &graph)?;
+        if needs_python_tests(&changed_paths) {
+            run_python_tests(root)?;
+        }
     }
 
     let final_diff = capture_jj_diff(root)?;
@@ -149,6 +152,7 @@ fn run_ci(root: &Path) -> Result<u8, String> {
     let _initial_diff = capture_jj_diff(root)?;
     run_prek(root, true, &[], CHECK_HOOKS)?;
     run_buck_graph(root, &buck_graph_for_full_mode())?;
+    run_python_tests(root)?;
     let final_diff = capture_jj_diff(root)?;
     stamp_successful_diff(root, final_diff)?;
     Ok(0)
@@ -156,6 +160,26 @@ fn run_ci(root: &Path) -> Result<u8, String> {
 
 fn run_wheel(root: &Path) -> Result<u8, String> {
     command_status(root, "tools/buck2-wheel-verify", &[])
+}
+
+fn run_python_tests(root: &Path) -> Result<u8, String> {
+    command_status(root, "tools/buck2-wheel-verify", &["--tests"])
+}
+
+fn needs_python_tests(paths: &[PathBuf]) -> bool {
+    paths.iter().any(|path| {
+        let path = path.to_string_lossy();
+        path == "pixi.toml"
+            || path == "pixi.lock"
+            || path == "pytest.ini"
+            || path == "BUCK"
+            || path == "buck2/wheel/pack.rs"
+            || path == "tools/buck2-wheel-verify"
+            || path.starts_with("src/")
+            || path.starts_with("tests/")
+            || path.starts_with("rust/crates/ennx/")
+            || path.starts_with("rust/crates/ennx-py/")
+    })
 }
 
 fn run_buck_graph(root: &Path, graph: &[String]) -> Result<u8, String> {
@@ -465,7 +489,7 @@ fn normalize_target(target: &str) -> String {
 }
 
 fn help_text() -> &'static str {
-    "Usage: ennx <COMMAND>\n\nCommands:\n  dev [--full]   Repair the current jj diff, verify the changed paths, and build/test the affected Buck2 graph.\n  ci             Run full source verification plus Buck2 build/test without repair.\n  wheel          Build the current platform wheel and verify the installed artifact.\n  tune CONFIG.toml\n                 Run the tuning workflow described by CONFIG.toml.\n  help           Show this help text.\n  version        Print the CLI version."
+    "Usage: ennx <COMMAND>\n\nCommands:\n  dev [--full]   Repair and verify the current jj diff, including affected Buck2 and Python tests.\n  ci             Run full source, Buck2, wheel, and Python verification without repair.\n  wheel          Build the current platform wheel and verify the installed artifact.\n  tune CONFIG.toml\n                 Run the tuning workflow described by CONFIG.toml.\n  help           Show this help text.\n  version        Print the CLI version."
 }
 
 fn print_help() {

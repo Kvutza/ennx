@@ -7,7 +7,7 @@ from ennx.turbo.gp import Surrogate
 from ennx.turbo.gp.model import Noisy
 from ennx.turbo.gp.train import fit
 
-pytestmark = pytest.mark.slow
+pytestmark = [pytest.mark.slow, pytest.mark.gp]
 
 
 def _data(n=12, d=3, m=1):

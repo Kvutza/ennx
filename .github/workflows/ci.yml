@@ -44,6 +44,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Install Rust toolchain
         run: rustup toolchain install 1.88.0 --profile minimal
@@ -92,6 +94,14 @@ jobs:
           ./buck2w --isolation-dir dev test \
             //buck2/tests:all \
             --local-only --num-threads 4
+
+      - name: Test Python wheel
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'build-test'
+        run: |
+          pixi run -e ennx \
+            env ENNX_PYTHON_VERSION=3.13 \
+            ENNX_PYTHON=.pixi/envs/ennx/bin/python \
+            tools/buck2-wheel-verify --tests
 
       - name: Build wheel
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'wheel'

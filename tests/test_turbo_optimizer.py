@@ -64,7 +64,7 @@ def test_bad_batch_is_rejected():
         opt.tell(opt.ask(3), np.ones(2))
 
 
-@pytest.mark.slow
+@pytest.mark.gp
 def test_gp_noise_cycle():
     bounds = np.array([[-1.0, 1.0], [-1.0, 1.0]])
     rng = np.random.default_rng(3)

@@ -16,7 +16,11 @@ from .catalog import (
     fixture_subdir_for_entry,
 )
 
-FIXTURES_ROOT = Path(__file__).resolve().parents[4] / "tests" / "fixtures"
+_PACKAGE_FIXTURES_ROOT = Path(__file__).resolve().parent / "data"
+_SOURCE_FIXTURES_ROOT = Path(__file__).resolve().parents[4] / "tests" / "fixtures"
+FIXTURES_ROOT = (
+    _PACKAGE_FIXTURES_ROOT if _PACKAGE_FIXTURES_ROOT.is_dir() else _SOURCE_FIXTURES_ROOT
+)
 
 EXACT_RTOL = 1e-14
 EXACT_ATOL = 1e-14

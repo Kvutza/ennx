@@ -2,6 +2,7 @@ def python_wheel(
         name,
         extension,
         extension_suffix,
+        fixture_srcs,
         license,
         notice,
         package,
@@ -23,7 +24,7 @@ def python_wheel(
     )
     native.genrule(
         name = name,
-        srcs = python_srcs + runtime_libraries + [extension, license, notice, readme],
+        srcs = python_srcs + fixture_srcs + runtime_libraries + [extension, license, notice, readme],
         out = filename,
         cmd = " ".join([
             "$(exe //buck2/wheel:pack)",

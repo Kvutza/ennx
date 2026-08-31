@@ -69,8 +69,9 @@ def _run_fast_test_smoke(notebook_path: str) -> None:
     smoke = FAST_TEST_SMOKE[notebook_path]
     repo_root = Path(__file__).resolve().parent.parent
     shim_dir = Path(__file__).resolve().parent / "_nbmake_sitecustomize"
-    src_dir = repo_root / "src"
-    pythonpath_parts = [str(shim_dir), str(src_dir)]
+    pythonpath_parts = [str(shim_dir)]
+    if "ENNX_TEST_WHEEL_ROOT" not in os.environ:
+        pythonpath_parts.append(str(repo_root / "src"))
     existing_pythonpath = os.environ.get("PYTHONPATH", "")
     if existing_pythonpath:
         pythonpath_parts.append(existing_pythonpath)

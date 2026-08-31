@@ -13,6 +13,8 @@ import pytest
 from ennx.ennx.enn_class import EpistemicNearestNeighbors
 from ennx.turbo.config.enn_index_driver import ENNIndexDriver
 
+pytestmark = pytest.mark.slow
+
 
 def _live_rss_bytes() -> int:
     out = subprocess.check_output(["ps", "-o", "rss=", "-p", str(os.getpid())])
