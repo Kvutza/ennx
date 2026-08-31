@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
     inputs:
       platform:
@@ -27,12 +30,12 @@ permissions:
 
 jobs:
   ci:
-    name: ${{ matrix.os }} / ${{ inputs.target }}
+    name: ${{ matrix.os }} / ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'all' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.platform == 'all' && '["ubuntu-24.04","macos-14"]' || format('["{0}"]', inputs.platform)) }}
+        os: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.platform == 'all') && '["ubuntu-24.04","macos-14"]' || format('["{0}"]', inputs.platform)) }}
 
     defaults:
       run:
@@ -78,13 +81,13 @@ jobs:
           pixi install -e ennx-py314 --locked
 
       - name: Build and test
-        if: inputs.target == 'all' || inputs.target == 'build-test'
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'build-test'
         run: |
-          pixi run -e ennx buck2-build
-          pixi run -e ennx buck2-test
+          ./ennx build
+          ./ennx test
 
       - name: Build wheel
-        if: inputs.target == 'all' || inputs.target == 'wheel'
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'wheel'
         run: |
           for spec in "3.12:ennx-py312" "3.13:ennx" "3.14:ennx-py314"; do
             python_version=${spec%%:*}
@@ -106,7 +109,7 @@ jobs:
           done
 
       - name: Collect wheel artifacts
-        if: inputs.target == 'all' || inputs.target == 'wheel'
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'wheel'
         run: |
           mkdir -p artifacts
           find buck-out/release-py312 buck-out/release-py313 buck-out/release-py314 \
@@ -114,7 +117,7 @@ jobs:
           test "$(find artifacts -type f -name 'ennx-*.whl' | wc -l | tr -d ' ')" -eq 3
 
       - name: Upload wheel artifacts
-        if: inputs.target == 'all' || inputs.target == 'wheel'
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'wheel'
         uses: actions/upload-artifact@v4
         with:
           name: ennx-${{ matrix.os }}

@@ -67,8 +67,8 @@ jobs:
 
       - name: Run platform build and tests
         run: |
-          pixi run -e ennx buck2-build
-          pixi run -e ennx buck2-test
+          ./ennx build
+          ./ennx test
 
       - name: Build wheel
         run: |
