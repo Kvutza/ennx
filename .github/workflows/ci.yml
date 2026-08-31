@@ -83,8 +83,15 @@ jobs:
       - name: Build and test
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'build-test'
         run: |
-          ./ennx build
-          ./ennx test
+          ./buck2w --isolation-dir dev build \
+            //rust/crates/bpann:bpann \
+            //rust/crates/ennx:ennx \
+            //rust/crates/ennx-py:ennx-py \
+            //rust/crates/dev-cli:ennx \
+            --local-only --num-threads 4 -M none
+          ./buck2w --isolation-dir dev test \
+            //buck2/tests:all \
+            --local-only --num-threads 4
 
       - name: Build wheel
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'wheel'
