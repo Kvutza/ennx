@@ -96,10 +96,9 @@ cargo run --manifest-path Cargo.toml -p ennx-modal -- \
   wheel /tmp/ennx-cuda-wheel.whl --mjx
 ```
 
-CUDA events are the authoritative kernel timer. Tracy zones cover the parity
-and benchmark host paths. `TrialEngine::set_profiling(true)` records score,
-argmax, materialization, and total CUDA event times as Tracy plots; setting
-`ENNX_CUDA_PROFILE` enables the same plots outside the benchmark.
+CUDA events are the authoritative kernel timer. `TrialEngine::set_profiling(true)`
+records score, argmax, materialization, and total CUDA event times; setting
+`ENNX_CUDA_PROFILE` enables the same event timing outside the benchmark.
 
 ## Integration order
 

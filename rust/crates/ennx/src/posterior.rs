@@ -50,8 +50,6 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
         params: &ENNParams,
         flags: &PosteriorFlags,
     ) -> Result<ENNNormal, ENNError> {
-        let span = crate::tracy::zone(tracy_client::span_location!("posterior.compute"));
-        span.emit_value(x.nrows() as u64);
         let (mu, se, se_epi, se_ale, idx) = if !flags.observation_noise && !self.has_yvar() {
             compute_posterior_light(self, x, params, flags)?
         } else {
@@ -92,8 +90,6 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
         paramss: &[ENNParams],
         flags: &PosteriorFlags,
     ) -> Result<ENNNormal, ENNError> {
-        let span = crate::tracy::zone(tracy_client::span_location!("posterior.batch"));
-        span.emit_value(x.nrows() as u64);
         if paramss.is_empty() {
             return Err(ENNError::InvalidParameter(
                 "paramss must be non-empty".to_string(),
@@ -220,8 +216,6 @@ impl PosteriorComputation for EpistemicNearestNeighbors {
         function_seeds: &[i64],
         flags: &PosteriorFlags,
     ) -> Result<(Array3<f64>, Vec<Vec<usize>>), ENNError> {
-        let span = crate::tracy::zone(tracy_client::span_location!("posterior.draw"));
-        span.emit_value(x.nrows() as u64);
         #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
         if self.backend_driver() == IndexDriver::Cuda
             && self.num_obs() > 0

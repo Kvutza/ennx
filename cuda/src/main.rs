@@ -314,10 +314,6 @@ fn cpu_resident_distance(
 }
 
 fn parity() -> AppResult<()> {
-    let client = tracy_client::Client::start();
-    let _zone = client
-        .clone()
-        .span(tracy_client::span_location!("ennx.cuda.parity"), 0);
     let context = CudaContext::new(0)?;
     let stream = context.default_stream();
     // SAFETY: the generated bindings load the matching embedded kernel artifact.
@@ -379,11 +375,6 @@ fn benchmark(args: &[String]) -> AppResult<()> {
     }
     stream.synchronize()?;
 
-    let client = tracy_client::Client::start();
-    let _zone = client.clone().span(
-        tracy_client::span_location!("ennx.cuda.materialize.bench"),
-        0,
-    );
     let event_flags = cuda_core::sys::CUevent_flags_enum_CU_EVENT_DEFAULT;
     let start = stream.record_event(Some(event_flags))?;
     for iteration in 0..iterations {

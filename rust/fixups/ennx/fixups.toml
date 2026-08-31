@@ -1,5 +1,3 @@
-buildscript.run = false
-
 ['cfg(target_os = "macos")']
 features = ["metal"]
 extra_deps = ["//rust:metal"]

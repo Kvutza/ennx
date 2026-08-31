@@ -41,9 +41,6 @@ mod quantization;
 pub mod stats;
 pub mod strategy;
 pub mod surrogate;
-pub mod tracy;
-#[cfg(all(target_os = "macos", feature = "metal"))]
-mod tracy_metal;
 pub mod traits;
 mod trials;
 pub mod trust_region;

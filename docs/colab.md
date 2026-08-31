@@ -125,7 +125,7 @@ cargo run --manifest-path Cargo.toml -p ennx-modal -- \
 After the T4 gate succeeds, attach its wheel to the matching GitHub Release:
 
 ```bash
-./ennx release upload vX.Y.Z /tmp/ennx-cuda-wheel.whl
+gh release upload vX.Y.Z /tmp/ennx-cuda-wheel.whl
 ```
 
 Colab runtimes and GPU assignments change over time. Record the notebook's

@@ -23,36 +23,29 @@ guessed.
 
 ENNX रो साधारण काम `./ennx` सूं चालावो। Buck2 इणरो मुख्य build system है। raw Buck2 अर Bazel command खाली debugging अर compatibility खातर चालावो।
 
-    ./ennx build
+    ./ennx dev
 
 wheel बणावण अर परखण खातर:
 
     ./ennx wheel
-    ./ennx verify
 
-`./ennx wheel` Buck2 सूं CPython 3.13 रो wheel बणावै। CPython 3.12 सूं 3.14 तक रा platform wheel GitHub Releases मांय मिलै; PyPI मांय कोनी। आपरै Python ABI अर platform रो wheel install करो।
+`./ennx wheel` Buck2 सूं CPython 3.13 रो wheel बणावै अर verify करै। CPython 3.12 सूं 3.14 तक रा platform wheel GitHub Releases मांय मिलै; PyPI मांय कोनी। आपरै Python ABI अर platform रो wheel install करो।
 
-CUDA wheel बणावण अर parity परखण खातर:
+CUDA wheel बणावण अर parity परखण खातर Buck2 targets अर GitHub Actions मांय रहै।
 
-    ./ennx cuda wheel
-    ./ennx cuda parity
+तैयार wheel release मांय upload करण खातर:
 
-तैयार CUDA wheel release मांय upload करण खातर:
-
-    ./ennx release upload vX.Y.Z PATH/TO/ennx-*.whl
+    gh release upload vX.Y.Z PATH/TO/ennx-*.whl
 
 ## परखो
 
-    ./ennx check
-    ./ennx check --all
-    ./ennx test
+    ./ennx dev
+    ./ennx dev --full
     ./ennx ci
 
-बदलिया file: `./ennx check`
+bदलिया file: `./ennx dev`
 
-सगळो repo: `./ennx check --all`
-
-Buck2 रा native test: `./ennx test`
+सगळो repo: `./ennx ci`
 
 पूरी gate: `./ennx ci`
 
@@ -127,9 +120,8 @@ CUDA wheel baṇāvaṇ ar parity parakhaṇ khātar.
 taiyār CUDA wheel release mā̃y upload karaṇ khātar.
 
 parakho.
-badaliyā file: ./ennx check.
-sagaḷo repo: ./ennx check --all.
-Buck2 rā native test: ./ennx test.
+badaliyā file ar native Buck2 graph: ./ennx dev.
+sagaḷo repo ar wheel: ./ennx dev --full.
 pūrī gate: ./ennx ci.
 parakh rā darajā ar benchmark rī kasauṭī: docs/testing.md.
 T4 CUDA development: docs/colab.md.

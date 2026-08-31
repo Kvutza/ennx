@@ -427,8 +427,6 @@ impl Search {
         config: Ask,
         materialize_row: bool,
     ) -> Result<Trial, String> {
-        let span = crate::tracy::zone(tracy_client::span_location!("trials.ask"));
-        span.emit_value(seeds.len() as u64);
         if !self.pending.is_empty() {
             return Err("tell must finish the pending trial before ask".to_string());
         }
@@ -473,8 +471,6 @@ impl Search {
         seeds: &[u64],
         config: Ask,
     ) -> Result<Vec<(usize, f32)>, String> {
-        let span = crate::tracy::zone(tracy_client::span_location!("trials.multi"));
-        span.emit_value(seeds.len() as u64);
         if !self.pending.is_empty() {
             return Err("tell must finish the pending trial before ask".to_string());
         }
@@ -518,8 +514,6 @@ impl Search {
         seeds: &[u64],
         config: Ask,
     ) -> Result<Vec<(usize, f32)>, String> {
-        let span = crate::tracy::zone(tracy_client::span_location!("trials.tree"));
-        span.emit_value(seeds.len() as u64);
         tree::check(centers, region_centers, num_regions)?;
         if !self.pending.is_empty() {
             return Err("tell must finish the pending trial before ask".to_string());
@@ -672,7 +666,6 @@ impl Search {
     }
 
     pub fn tell(&mut self, trial: Trial, value: f32, accept: bool) -> Result<(), String> {
-        let _span = crate::tracy::zone(tracy_client::span_location!("trials.tell"));
         if !value.is_finite() {
             return Err("trial value must be finite".to_string());
         }

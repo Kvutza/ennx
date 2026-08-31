@@ -170,8 +170,6 @@ impl ENNFitter {
         params_warm_start: Option<&ENNParams>,
         rng: &mut R,
     ) -> Result<ENNParams, ENNError> {
-        let span = crate::tracy::zone(tracy_client::span_location!("fitter.ask"));
-        span.emit_value(num_fit_candidates as u64);
         if model.num_obs() < 2 {
             let best = ENNParams::new(self.k, 1.0, 0.0).map_err(|e| {
                 ENNError::InvalidParameter(format!("Failed to create default params: {e}"))

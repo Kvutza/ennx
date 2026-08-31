@@ -303,14 +303,8 @@ impl MetalIndex {
             ));
         }
 
-        let query_values = {
-            let span = crate::tracy::zone(tracy_client::span_location!("knn.metal.prepare"));
-            span.emit_value(queries.nrows() as u64);
-            arr2_rows_to_f32(queries)
-        };
+        let query_values = arr2_rows_to_f32(queries);
         {
-            let span = crate::tracy::zone(tracy_client::span_location!("knn.metal.upload"));
-            span.emit_value(queries.nrows() as u64);
             self.scratch
                 .ensure(&self.runtime, self.num_dim, queries.nrows(), k_eff);
             self.write_f32(&self.scratch.query, 0, &query_values);
@@ -321,22 +315,14 @@ impl MetalIndex {
             );
         }
         let plan = {
-            let span = crate::tracy::zone(tracy_client::span_location!("knn.metal.calibrate"));
-            span.emit_value(queries.nrows() as u64);
             self.calibrate_distance(queries.nrows())?;
             let plan = self.tile_plan(queries.nrows(), k_eff)?;
-            span.emit_value(plan.id());
             plan
         };
         self.plan = plan;
 
         let command_buffer = self.runtime.queue.new_command_buffer();
-        let lists = plan_lists(plan, self.len());
-        let passes = plan.graph().passes(lists, k_eff);
-        let mut gpu = self
-            .runtime
-            .trace(passes)
-            .map_err(IndexError::InvalidParameter)?;
+        let start = Instant::now();
         let init_params = Params {
             rows: to_u32(self.len(), "row count")?,
             dim: to_u32(self.num_dim, "dimension")?,
@@ -350,24 +336,20 @@ impl MetalIndex {
             groups: 0,
         };
         {
-            let span = crate::tracy::zone(tracy_client::span_location!("knn.metal.encode"));
-            span.emit_value(queries.nrows() as u64);
             if matches!(
                 plan,
                 Plan::Tree | Plan::Tiled | Plan::Simd | Plan::Gram | Plan::Wide
             ) {
-                self.encode_tree(plan, command_buffer, &mut gpu, queries.nrows(), k_eff)
+                self.encode_tree(plan, command_buffer, queries.nrows(), k_eff)
                     .map_err(IndexError::InvalidParameter)?;
             } else {
-                let encoder = gpu
-                    .encoder(command_buffer, "knn.init")
-                    .map_err(IndexError::InvalidParameter)?;
+                let encoder = command_buffer.new_compute_command_encoder();
                 encoder.set_compute_pipeline_state(&self.init_results);
                 encoder.set_buffer(0, Some(&self.scratch.result_distances), 0);
                 encoder.set_buffer(1, Some(&self.scratch.result_indices), 0);
                 set_params(&encoder, 2, &init_params);
                 dispatch(&encoder, queries.nrows() * k_eff);
-                drop(encoder);
+                encoder.end_encoding();
 
                 for tile_start in (0..self.len()).step_by(TILE_ROWS) {
                     let tile_rows = (self.len() - tile_start).min(TILE_ROWS);
@@ -386,9 +368,7 @@ impl MetalIndex {
 
                     match plan {
                         Plan::Split => {
-                            let encoder = gpu
-                                .encoder(command_buffer, "knn.distance")
-                                .map_err(IndexError::InvalidParameter)?;
+                            let encoder = command_buffer.new_compute_command_encoder();
                             encoder.set_compute_pipeline_state(
                                 &self.distance
                                     [self.distance_choice.expect("distance schedule calibrated")],
@@ -398,11 +378,9 @@ impl MetalIndex {
                             encoder.set_buffer(2, Some(&self.scratch.tile_distances), 0);
                             set_params(&encoder, 3, &params);
                             self.dispatch_distance(&encoder, queries.nrows());
-                            drop(encoder);
+                            encoder.end_encoding();
 
-                            let encoder = gpu
-                                .encoder(command_buffer, "knn.topk")
-                                .map_err(IndexError::InvalidParameter)?;
+                            let encoder = command_buffer.new_compute_command_encoder();
                             let topk = if k_eff <= 16 {
                                 &self.topk16
                             } else {
@@ -425,12 +403,10 @@ impl MetalIndex {
                                     depth: 1,
                                 },
                             );
-                            drop(encoder);
+                            encoder.end_encoding();
                         }
                         Plan::Fused => {
-                            let encoder = gpu
-                                .encoder(command_buffer, "knn.l2_topk")
-                                .map_err(IndexError::InvalidParameter)?;
+                            let encoder = command_buffer.new_compute_command_encoder();
                             encoder.set_compute_pipeline_state(&self.fused16);
                             encoder.set_buffer(0, Some(&self.rows), 0);
                             encoder.set_buffer(1, Some(&self.scratch.query), 0);
@@ -449,16 +425,14 @@ impl MetalIndex {
                                     depth: 1,
                                 },
                             );
-                            drop(encoder);
+                            encoder.end_encoding();
                         }
                         Plan::Tree | Plan::Tiled | Plan::Simd | Plan::Gram | Plan::Wide => {
                             unreachable!("tree plan encoded above")
                         }
                     }
 
-                    let encoder = gpu
-                        .encoder(command_buffer, "knn.merge")
-                        .map_err(IndexError::InvalidParameter)?;
+                    let encoder = command_buffer.new_compute_command_encoder();
                     encoder.set_compute_pipeline_state(&self.merge);
                     encoder.set_buffer(0, Some(&self.scratch.result_distances), 0);
                     encoder.set_buffer(1, Some(&self.scratch.result_indices), 0);
@@ -477,55 +451,25 @@ impl MetalIndex {
                             depth: 1,
                         },
                     );
-                    drop(encoder);
+                    encoder.end_encoding();
                 }
             }
         }
-        gpu.resolve(command_buffer);
-        {
-            let span = crate::tracy::zone(tracy_client::span_location!("knn.metal.execute"));
-            span.emit_value(queries.nrows() as u64);
-            span.emit_text(&format!(
-                "rows={} queries={} dims={} k={} plan={}",
-                self.len(),
-                queries.nrows(),
-                self.num_dim,
-                k_eff,
-                plan.name()
-            ));
-            command_buffer.commit();
-            command_buffer.wait_until_completed();
-            let stages = gpu.stages().map_err(IndexError::InvalidParameter)?;
-            let elapsed = stages.iter().map(|(_, elapsed)| *elapsed).sum();
-            let mut profile = KnnProfile {
-                rows: self.len(),
-                queries: queries.nrows(),
-                dims: self.num_dim,
-                k: k_eff,
-                plan: plan.name(),
-                gpu: elapsed,
-                scan: Duration::ZERO,
-                select: Duration::ZERO,
-                reduce: Duration::ZERO,
-            };
-            for (name, elapsed) in stages {
-                if name.contains("distance") || name.contains("scan") || name.contains("l2_topk") {
-                    profile.scan += elapsed;
-                } else if name.contains("topk") {
-                    profile.select += elapsed;
-                } else if name.contains("merge") || name.contains("reduce") || name.contains("fold")
-                {
-                    profile.reduce += elapsed;
-                }
-            }
-            crate::tracy::knn(&profile);
-            self.profile = Some(profile);
-            gpu.upload().map_err(IndexError::InvalidParameter)?;
-        }
+        command_buffer.commit();
+        command_buffer.wait_until_completed();
+        self.profile = Some(KnnProfile {
+            rows: self.len(),
+            queries: queries.nrows(),
+            dims: self.num_dim,
+            k: k_eff,
+            plan: plan.name(),
+            gpu: start.elapsed(),
+            scan: Duration::ZERO,
+            select: Duration::ZERO,
+            reduce: Duration::ZERO,
+        });
 
         let output = {
-            let span = crate::tracy::zone(tracy_client::span_location!("knn.metal.readback"));
-            span.emit_value(queries.nrows() as u64);
             let distances = unsafe {
                 std::slice::from_raw_parts(
                     self.scratch.result_distances.contents().cast::<f32>(),
@@ -563,7 +507,6 @@ impl MetalIndex {
         &self,
         plan: Plan,
         command: &metal::CommandBufferRef,
-        gpu: &mut crate::tracy_metal::Batch,
         queries: usize,
         k: usize,
     ) -> Result<(), String> {
@@ -585,15 +528,7 @@ impl MetalIndex {
         } else {
             (&self.scratch.tree_distances, &self.scratch.tree_indices)
         };
-        let name = match plan {
-            Plan::Tree => "knn.tree.scan",
-            Plan::Tiled => "knn.tiled.scan",
-            Plan::Simd => "knn.simd.scan",
-            Plan::Gram => "knn.gram.scan",
-            Plan::Wide => "knn.wide.scan",
-            Plan::Split | Plan::Fused => unreachable!("serial plan cannot encode a tree"),
-        };
-        let encoder = gpu.encoder(command, name)?;
+        let encoder = command.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(match plan {
             Plan::Tree => &self.tree16,
             Plan::Tiled => &self.tiled16,
@@ -629,7 +564,7 @@ impl MetalIndex {
                 depth: 1,
             },
         );
-        drop(encoder);
+        encoder.end_encoding();
 
         let mut lists = scan_lists;
         let mut tree_input = true;
@@ -660,12 +595,7 @@ impl MetalIndex {
                 groups: to_u32(groups, "merge groups").map_err(|error| error.to_string())?,
                 ..params
             };
-            let name = if plan == Plan::Wide {
-                "knn.wide.fold"
-            } else {
-                "knn.tree.reduce"
-            };
-            let encoder = gpu.encoder(command, name)?;
+            let encoder = command.new_compute_command_encoder();
             encoder.set_compute_pipeline_state(if plan == Plan::Wide {
                 &self.fold
             } else {
@@ -688,7 +618,7 @@ impl MetalIndex {
                     depth: 1,
                 },
             );
-            drop(encoder);
+            encoder.end_encoding();
             lists = groups;
             tree_input = !tree_input;
         }
@@ -836,25 +766,14 @@ impl MetalIndex {
     }
 
     fn run_plan(&self, plan: Plan, queries: usize, k: usize) -> Result<Duration, String> {
-        let span = match plan {
-            Plan::Split => crate::tracy::zone(tracy_client::span_location!("knn.plan.split")),
-            Plan::Fused => crate::tracy::zone(tracy_client::span_location!("knn.plan.fused")),
-            Plan::Tree => crate::tracy::zone(tracy_client::span_location!("knn.plan.tree")),
-            Plan::Tiled => crate::tracy::zone(tracy_client::span_location!("knn.plan.tiled")),
-            Plan::Simd => crate::tracy::zone(tracy_client::span_location!("knn.plan.simd")),
-            Plan::Gram => crate::tracy::zone(tracy_client::span_location!("knn.plan.gram")),
-            Plan::Wide => crate::tracy::zone(tracy_client::span_location!("knn.plan.wide")),
-        };
         let start = Instant::now();
         let command_buffer = self.runtime.queue.new_command_buffer();
-        let lists = plan_lists(plan, self.len());
-        let passes = plan.graph().passes(lists, k);
-        let mut gpu = self.runtime.trace(passes)?;
+
         if matches!(
             plan,
             Plan::Tree | Plan::Tiled | Plan::Simd | Plan::Gram | Plan::Wide
         ) {
-            self.encode_tree(plan, command_buffer, &mut gpu, queries, k)?;
+            self.encode_tree(plan, command_buffer, queries, k)?;
         } else {
             let init = Params {
                 rows: to_u32(self.len(), "row count").map_err(|error| error.to_string())?,
@@ -868,13 +787,13 @@ impl MetalIndex {
                 lists: 0,
                 groups: 0,
             };
-            let encoder = gpu.encoder(command_buffer, "knn.plan.init")?;
+            let encoder = command_buffer.new_compute_command_encoder();
             encoder.set_compute_pipeline_state(&self.init_results);
             encoder.set_buffer(0, Some(&self.scratch.result_distances), 0);
             encoder.set_buffer(1, Some(&self.scratch.result_indices), 0);
             set_params(&encoder, 2, &init);
             dispatch(&encoder, queries * k);
-            drop(encoder);
+            encoder.end_encoding();
             for tile_start in (0..self.len()).step_by(TILE_ROWS) {
                 let params = Params {
                     rows: to_u32(self.len(), "row count").map_err(|error| error.to_string())?,
@@ -892,7 +811,7 @@ impl MetalIndex {
                 };
                 match plan {
                     Plan::Split => {
-                        let encoder = gpu.encoder(command_buffer, "knn.plan.distance")?;
+                        let encoder = command_buffer.new_compute_command_encoder();
                         encoder.set_compute_pipeline_state(
                             &self.distance
                                 [self.distance_choice.expect("distance schedule calibrated")],
@@ -902,9 +821,9 @@ impl MetalIndex {
                         encoder.set_buffer(2, Some(&self.scratch.tile_distances), 0);
                         set_params(&encoder, 3, &params);
                         self.dispatch_distance(&encoder, params.queries as usize);
-                        drop(encoder);
+                        encoder.end_encoding();
 
-                        let encoder = gpu.encoder(command_buffer, "knn.plan.topk")?;
+                        let encoder = command_buffer.new_compute_command_encoder();
                         encoder.set_compute_pipeline_state(if k <= 16 {
                             &self.topk16
                         } else {
@@ -926,10 +845,10 @@ impl MetalIndex {
                                 depth: 1,
                             },
                         );
-                        drop(encoder);
+                        encoder.end_encoding();
                     }
                     Plan::Fused => {
-                        let encoder = gpu.encoder(command_buffer, "knn.plan.l2_topk")?;
+                        let encoder = command_buffer.new_compute_command_encoder();
                         encoder.set_compute_pipeline_state(&self.fused16);
                         encoder.set_buffer(0, Some(&self.rows), 0);
                         encoder.set_buffer(1, Some(&self.scratch.query), 0);
@@ -948,13 +867,13 @@ impl MetalIndex {
                                 depth: 1,
                             },
                         );
-                        drop(encoder);
+                        encoder.end_encoding();
                     }
                     Plan::Tree | Plan::Tiled | Plan::Simd | Plan::Gram | Plan::Wide => {
                         unreachable!("tree plan encoded above")
                     }
                 }
-                let encoder = gpu.encoder(command_buffer, "knn.plan.merge")?;
+                let encoder = command_buffer.new_compute_command_encoder();
                 encoder.set_compute_pipeline_state(&self.merge);
                 encoder.set_buffer(0, Some(&self.scratch.result_distances), 0);
                 encoder.set_buffer(1, Some(&self.scratch.result_indices), 0);
@@ -973,15 +892,11 @@ impl MetalIndex {
                         depth: 1,
                     },
                 );
-                drop(encoder);
+                encoder.end_encoding();
             }
         }
-        gpu.resolve(command_buffer);
         command_buffer.commit();
         command_buffer.wait_until_completed();
-        let gpu_elapsed = gpu.duration()?;
-        gpu.upload()?;
-        span.emit_value(gpu_elapsed.as_nanos().min(u128::from(u64::MAX)) as u64);
         Ok(start.elapsed())
     }
 

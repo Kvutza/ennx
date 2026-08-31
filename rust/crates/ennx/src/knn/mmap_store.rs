@@ -1,7 +1,7 @@
-use std::fs::{File, OpenOptions};
-use std::path::PathBuf;
 use memmap2::MmapMut;
 use ndarray::{Array2, ArrayView2};
+use std::fs::{File, OpenOptions};
+use std::path::PathBuf;
 
 use crate::error::ENNError;
 
@@ -290,5 +290,4 @@ mod mmap_store_tests {
         let mid = store.mmap_row_range(1, 2).unwrap();
         assert_eq!(mid[[0, 0]], 3.0);
     }
-
 }

@@ -45,7 +45,6 @@ pub(crate) struct Runtime {
     info: DeviceInfo,
     pipelines: Mutex<HashMap<(u64, String), ComputePipelineState>>,
     schedules: Mutex<HashMap<u64, usize>>,
-    tracy: Mutex<crate::tracy_metal::Pool>,
 }
 
 impl Runtime {
@@ -65,14 +64,12 @@ impl Runtime {
             name,
         };
         let queue = device.new_command_queue();
-        let tracy = crate::tracy_metal::Pool::new(&device)?;
         Ok(Self {
             device,
             queue,
             info,
             pipelines: Mutex::new(HashMap::new()),
             schedules: Mutex::new(HashMap::new()),
-            tracy: Mutex::new(tracy),
         })
     }
 
@@ -205,13 +202,6 @@ impl Runtime {
             std::mem::size_of_val(values) as u64,
             MTLResourceOptions::StorageModeShared | MTLResourceOptions::HazardTrackingModeTracked,
         )
-    }
-
-    pub(crate) fn trace(&self, passes: usize) -> Result<crate::tracy_metal::Batch, String> {
-        self.tracy
-            .lock()
-            .map_err(|_| "Tracy Metal pool poisoned".to_string())?
-            .batch(&self.device, passes)
     }
 
     pub(crate) fn schedule<F>(

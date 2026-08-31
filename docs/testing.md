@@ -11,25 +11,21 @@ must be reproducible from a seed, workload shape, and backend selection.
 
 | Tier | Purpose | Typical command |
 | --- | --- | --- |
-| Working copy | Formatting, file hygiene, Ruff, and KISS checks for files changed in the current JJ working copy. | `./ennx check`; use `./ennx check --all` for a repository-wide audit |
-| Rust fast | Pure Rust logic, no-default integration coverage, and no-default example compile checks. Run while editing core Rust. | `./ennx rust fast` |
-| Rust full | Rust core tests with default crate features and example compile checks. Run before pushing Rust/native changes. | `./ennx rust full` |
-| Python fast | Python API and optimizer smoke coverage. | `./ennx python fast` |
-| Project test | Buck2 smoke tests for Rust/native accelerator surfaces. | `./ennx test` |
-| Python wheel/API | Python tests that require the compiled PyO3 extension. | `./ennx verify`; `pixi run -e ennx-py312 buck2-verify-py312` for CPython 3.12 |
+| Working copy | Repair and check the current JJ diff with KISS coverage. | `./ennx dev`; use `./ennx dev --full` for the current-platform full pass |
+| Rust core | Targeted Buck2 checks for the dev CLI or ENNX core crate. | `./buck2w test //rust/crates/dev-cli:ennx-test`; `./buck2w test //rust/crates/ennx:ennx-unit` |
+| Wheel/API | Tests that require the built wheel or native extension. | `./ennx wheel`; the GitHub Actions matrix covers every supported CPython version |
 | Python optional | Tests requiring optional packages such as Torch/Gpytorch/click or source-tree extension setup. | Install the optional dependencies and built extension, then run the selected pytest group. |
-| Project CI | Default project build, Buck2 tests, wheel build, and wheel/API verification. | `./ennx ci` |
-| Bazel graph | Bazel release/audit path. | `bazel test //:check //:audit --config=release --config=constrained` |
-| Hardware | Metal/OpenCL/FAISS behavior and CPU parity. Run when touching accelerator, KNN, dense, BF16, or native build code. | platform-specific Rust, Bazel, or Buck2 tests; `./ennx cuda parity` on Linux x86_64 with NVIDIA CUDA |
-| Benchmark | Speed and numerical-regression checks. Run before performance claims. | benchmark scripts plus Tracy captures |
+| Project CI | Full source verification plus Buck2 build/test on the current platform. | `./ennx ci` |
+| Wheel build | Build and verify the current platform wheel. | `./ennx wheel` |
+| Hardware | Metal/OpenCL behavior and CPU parity. Run when touching accelerator, KNN, dense, BF16, or native build code. | platform-specific Rust, Bazel, or Buck2 tests |
+| Benchmark | Speed and numerical-regression checks. Run before performance claims. | benchmark scripts plus platform profiler captures |
 
 Use the smallest tier that can catch the bug while iterating. Before merging,
 run every tier affected by the files changed.
 
 Prefer `./ennx` for normal testing. It is the repo-owned entrypoint and wraps
-the Pixi/Buck2 environment. Use raw `pixi run`, `cargo test`, or `pytest` only
-when diagnosing the CLI itself or narrowing a failure to one specific package,
-test file, or feature set.
+the Buck2 workflow. Use raw `cargo test`, `pytest`, or `buck2w`
+only when diagnosing one specific package, test file, or feature set.
 
 Do not use `cargo test --manifest-path Cargo.toml --workspace` as the
 canonical Rust gate. `ennx-py` is a PyO3 `cdylib`; generic Cargo test linking

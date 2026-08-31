@@ -27,8 +27,6 @@ ENNX_CRATES = [
     "sobol",
     "thiserror",
     "toml",
-    "tracy-client",
-    "tracy-client-sys",
 ]
 
 ENNX_TEST_CRATES = ENNX_CRATES + [

@@ -25,6 +25,11 @@ cxx_library(
         "-Wno-unknown-pragmas",
     ],
     deps = ["//buck2/native:usearch"],
+    exported_linker_flags = select({
+        "//:linux-arm64": ["-lstdc++"],
+        "//:linux-x86_64": ["-lstdc++"],
+        "//:macos-arm64": ["-lc++"],
+    }),
     visibility = ["PUBLIC"],
 )
 
@@ -57,8 +62,6 @@ app_rust_library(
         "//rust:sobol",
         "//rust:thiserror",
         "//rust:toml",
-        "//rust:tracy-client",
-        "//rust:tracy-client-sys",
     ] + select({
         "//:linux-arm64": ["//rust:opencl3"],
         "//:linux-x86_64": ["//rust:opencl3"],
@@ -97,8 +100,6 @@ rust_test(
         "//rust:tempfile",
         "//rust:thiserror",
         "//rust:toml",
-        "//rust:tracy-client",
-        "//rust:tracy-client-sys",
     ] + select({
         "//:linux-arm64": ["//rust:opencl3"],
         "//:linux-x86_64": ["//rust:opencl3"],
@@ -144,8 +145,6 @@ app_rust_library(
         "//rust:sobol",
         "//rust:thiserror",
         "//rust:toml",
-        "//rust:tracy-client",
-        "//rust:tracy-client-sys",
         "//rust:metal",
     ],
     target_compatible_with = ["prelude//os/constraints:macos"],

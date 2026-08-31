@@ -216,8 +216,7 @@ impl Engine {
         };
 
         let command = self.runtime.queue.new_command_buffer();
-        let mut gpu = self.runtime.trace(3 + usize::from(materialize_row))?;
-        let encoder = gpu.encoder(command, "trials.distance")?;
+        let encoder = command.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&self.distance);
         encoder.set_buffer(0, Some(&self.rows), 0);
         encoder.set_buffer(1, Some(&self.scratch.history_slots), 0);
@@ -229,9 +228,9 @@ impl Engine {
         encoder.set_buffer(7, Some(&self.scratch.candidate_centers), 0);
         set_params(&encoder, 8, &params);
         encoder.dispatch_thread_groups(thread_group(distance_groups), thread_group(THREADS));
-        drop(encoder);
+        encoder.end_encoding();
 
-        let encoder = gpu.encoder(command, "trials.score")?;
+        let encoder = command.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&self.score);
         encoder.set_buffer(0, Some(&self.scratch.partials), 0);
         encoder.set_buffer(1, Some(&self.scratch.outcomes), 0);
@@ -246,9 +245,9 @@ impl Engine {
             },
             thread_group(THREADS),
         );
-        drop(encoder);
+        encoder.end_encoding();
 
-        let encoder = gpu.encoder(command, "trials.pick")?;
+        let encoder = command.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&self.pick);
         encoder.set_buffer(0, Some(&self.scratch.scores), 0);
         encoder.set_buffer(1, Some(&self.scratch.choice), 0);
@@ -257,10 +256,10 @@ impl Engine {
             thread_group(1),
             thread_group(selection_threads(seeds.len())),
         );
-        drop(encoder);
+        encoder.end_encoding();
 
         if materialize_row {
-            let encoder = gpu.encoder(command, "trials.write")?;
+            let encoder = command.new_compute_command_encoder();
             encoder.set_compute_pipeline_state(&self.write);
             encoder.set_buffer(0, Some(&self.rows), 0);
             encoder.set_buffer(1, Some(&self.scratch.seeds), 0);
@@ -276,13 +275,10 @@ impl Engine {
                 },
                 thread_group(THREADS),
             );
-            drop(encoder);
+            encoder.end_encoding();
         }
-        gpu.resolve(command);
         command.commit();
         command.wait_until_completed();
-        gpu.upload()?;
-
         let index = read_one::<u32>(&self.scratch.choice) as usize;
         let scores = read_slice::<f32>(&self.scratch.scores, seeds.len());
         Ok((index, scores[index]))
@@ -318,8 +314,7 @@ impl Engine {
         };
 
         let command = self.runtime.queue.new_command_buffer();
-        let mut gpu = self.runtime.trace(1)?;
-        let encoder = gpu.encoder(command, "trials.write")?;
+        let encoder = command.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&self.write);
         encoder.set_buffer(0, Some(&self.rows), 0);
         encoder.set_buffer(1, Some(&self.scratch.seeds), 0);
@@ -335,11 +330,9 @@ impl Engine {
             },
             thread_group(THREADS),
         );
-        drop(encoder);
-        gpu.resolve(command);
+        encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
-        gpu.upload()?;
         Ok(())
     }
 
@@ -441,8 +434,7 @@ impl Engine {
         };
 
         let command = self.runtime.queue.new_command_buffer();
-        let mut gpu = self.runtime.trace(3)?;
-        let encoder = gpu.encoder(command, "trials.distance")?;
+        let encoder = command.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&self.distance);
         encoder.set_buffer(0, Some(&self.rows), 0);
         encoder.set_buffer(1, Some(&self.scratch.history_slots), 0);
@@ -454,9 +446,9 @@ impl Engine {
         encoder.set_buffer(7, Some(&self.scratch.candidate_centers), 0);
         set_params(&encoder, 8, &params);
         encoder.dispatch_thread_groups(thread_group(distance_groups), thread_group(THREADS));
-        drop(encoder);
+        encoder.end_encoding();
 
-        let encoder = gpu.encoder(command, "trials.score")?;
+        let encoder = command.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&self.score);
         encoder.set_buffer(0, Some(&self.scratch.partials), 0);
         encoder.set_buffer(1, Some(&self.scratch.outcomes), 0);
@@ -471,13 +463,13 @@ impl Engine {
             },
             thread_group(THREADS),
         );
-        drop(encoder);
+        encoder.end_encoding();
 
         let multi_tr_params = MultiTrParams {
             num_regions: to_u32(num_regions, "region count")?,
             candidates_per_region: to_u32(seeds_per_region, "candidates per region")?,
         };
-        let encoder = gpu.encoder(command, "trials.pick")?;
+        let encoder = command.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&self.multi_tr_pick);
         encoder.set_buffer(0, Some(&self.scratch.scores), 0);
         encoder.set_buffer(1, Some(&self.scratch.choice), 0);
@@ -491,12 +483,9 @@ impl Engine {
             thread_group(num_regions as u64),
             thread_group(selection_threads(seeds_per_region)),
         );
-        drop(encoder);
-        gpu.resolve(command);
+        encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
-        gpu.upload()?;
-
         let choices = read_slice::<u32>(&self.scratch.choice, num_regions);
         let scores = read_slice::<f32>(&self.scratch.selected_scores, num_regions);
         Ok(choices

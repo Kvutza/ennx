@@ -1,5 +1,8 @@
-# Repository checks run by `./ennx check`.
+# Canonical repair and verification hooks used by `./ennx dev` and `./ennx ci`.
+# Repair hooks may edit files; check hooks must be read-only.
 #:schema https://www.schemastore.org/prek.json
+
+minimum_prek_version = "0.4.11"
 
 [[repos]]
 repo = "builtin"
@@ -19,31 +22,64 @@ hooks = [
 
 [[repos]]
 repo = "local"
-hooks = [
-  {
-    id = "forbid-binary",
-    name = "Forbid committing binary files",
-    entry = "Binary files are not allowed in this repository.",
-    language = "fail",
-    types = ["binary"],
-    exclude = '(?i)\.pdf$'
-  },
-  {
-    id = "kiss-check",
-    name = "kiss check",
-    entry = "kiss check .",
-    language = "system",
-    pass_filenames = false
-  }
-]
 
-[[repos]]
-repo = "https://github.com/astral-sh/ruff-pre-commit"
-rev = "v0.14.14"
-hooks = [
-  {
-    id = "ruff",
-    args = ["--fix"]
-  },
-  { id = "ruff-format" }
-]
+[[repos.hooks]]
+id = "repair-rust"
+name = "Rust formatting repair"
+entry = "cargo fmt --all"
+language = "system"
+pass_filenames = false
+
+[[repos.hooks]]
+id = "check-rust"
+name = "Rust formatting check"
+entry = "cargo fmt --all -- --check"
+language = "system"
+pass_filenames = false
+
+[[repos.hooks]]
+id = "repair-python"
+name = "Python lint repair"
+entry = "ruff check --fix"
+language = "python"
+additional_dependencies = ["ruff==0.14.14"]
+types = ["python"]
+
+[[repos.hooks]]
+id = "repair-python-format"
+name = "Python formatting repair"
+entry = "ruff format"
+language = "python"
+additional_dependencies = ["ruff==0.14.14"]
+types = ["python"]
+
+[[repos.hooks]]
+id = "check-python"
+name = "Python lint check"
+entry = "ruff check"
+language = "python"
+additional_dependencies = ["ruff==0.14.14"]
+types = ["python"]
+
+[[repos.hooks]]
+id = "check-python-format"
+name = "Python formatting check"
+entry = "ruff format --check"
+language = "python"
+additional_dependencies = ["ruff==0.14.14"]
+types = ["python"]
+
+[[repos.hooks]]
+id = "forbid-binary"
+name = "Forbid committing binary files"
+entry = "Binary files are not allowed in this repository."
+language = "fail"
+types = ["binary"]
+exclude = '(?i)\.pdf$'
+
+[[repos.hooks]]
+id = "kiss-check"
+name = "KISS architecture"
+entry = "kiss check ."
+language = "system"
+pass_filenames = false

@@ -527,10 +527,6 @@ impl Bf16SearchEngine {
         config: Ask,
     ) -> CudaResult<Vec<Selection>> {
         self.last_profile = None;
-        let client = TRACY.get_or_init(tracy_client::Client::start);
-        let _zone = client
-            .clone()
-            .span(tracy_client::span_location!("ennx.cuda.bf16.ask"), 0);
         let input = AskInput {
             base_slot,
             history,
@@ -548,7 +544,6 @@ impl Bf16SearchEngine {
         let selections = self.collect(&input, shape)?;
         if let Some(events) = events {
             let profile = events.profile()?;
-            publish_profile(client, profile);
             self.last_profile = Some(profile);
         }
         Ok(selections)
@@ -567,10 +562,6 @@ impl Bf16SearchEngine {
         config: Ask,
     ) -> CudaResult<()> {
         self.last_profile = None;
-        let client = TRACY.get_or_init(tracy_client::Client::start);
-        let _zone = client
-            .clone()
-            .span(tracy_client::span_location!("ennx.cuda.bf16.round"), 0);
         let input = AskInput {
             base_slot,
             history,
@@ -587,7 +578,6 @@ impl Bf16SearchEngine {
         let events = self.launch(&input, shape)?;
         if let Some(events) = events {
             let profile = events.profile()?;
-            publish_profile(client, profile);
             self.last_profile = Some(profile);
         }
         Ok(())
@@ -749,9 +739,7 @@ impl Bf16SearchEngine {
                 0,
             ))
             .map_err(cuda_error)?;
-        let profile = self.profiling
-            || tracy_client::Client::is_connected()
-            || std::env::var_os("ENNX_CUDA_PROFILE").is_some();
+        let profile = self.profiling || std::env::var_os("ENNX_CUDA_PROFILE").is_some();
         let score_start = profile
             .then(|| timing_event(&self.runtime.stream))
             .transpose()?;

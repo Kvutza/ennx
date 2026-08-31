@@ -168,10 +168,6 @@ impl Optimizer {
 
     /// Ask for candidates.
     pub fn ask(&mut self, num_arms: usize, rng: &mut dyn RngCore) -> Result<Array2<f64>, ENNError> {
-        let _frame = crate::tracy::client()
-            .non_continuous_frame(tracy_client::frame_name!("ennx.optimizer.ask"));
-        let span = crate::tracy::zone(tracy_client::span_location!("optimizer.ask"));
-        span.emit_value(num_arms as u64);
         let start = std::time::Instant::now();
 
         let mut strategy = std::mem::replace(&mut self.strategy, Strategy::turbo());
@@ -186,7 +182,6 @@ impl Optimizer {
                 surrogate.schedule_background_flush()?;
             }
         }
-        crate::tracy::stats(self.obs_count(), self.telemetry.num_candidates, num_arms);
         result
     }
 
@@ -208,10 +203,6 @@ impl Optimizer {
         yvar: Option<&ArrayView2<f64>>,
         rng: &mut dyn RngCore,
     ) -> Result<(), ENNError> {
-        let _frame = crate::tracy::client()
-            .non_continuous_frame(tracy_client::frame_name!("ennx.optimizer.tell"));
-        let span = crate::tracy::zone(tracy_client::span_location!("optimizer.tell"));
-        span.emit_value(x.nrows() as u64);
         let start = std::time::Instant::now();
 
         if let Some(surrogate) = self.surrogate.as_ref() {
@@ -236,7 +227,6 @@ impl Optimizer {
                 }
             }
         }
-        crate::tracy::stats(self.obs_count(), self.telemetry.num_candidates, x.nrows());
         result
     }
 

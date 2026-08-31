@@ -146,7 +146,7 @@ its deployment target.
 ## Wheel
 
 ```sh
-./ennx verify
+./ennx wheel
 ```
 
 ```text

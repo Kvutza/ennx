@@ -28,8 +28,6 @@ pyo3 = { version = "0.29", features = ["extension-module"] }
 rand = "0.8"
 rand_distr = "0.4"
 thiserror = "1.0"
-tracy-client = "=0.18.4"
-tracy-client-sys = { version = "=0.28.0", default-features = false, features = ["enable"] }
 cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
 cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
 cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }

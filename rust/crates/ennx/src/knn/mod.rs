@@ -33,7 +33,7 @@ use exact_backend::ExactBackend;
 /// KNN execution diagram used by the experimental parity surface.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KnnPlan {
-    /// Validate equivalent diagrams and retain the fastest Tracy-measured plan.
+    /// Validate equivalent diagrams and retain the fastest measured plan.
     Measured,
     /// Materialize tile distances before selecting local neighbors.
     Split,
@@ -503,8 +503,6 @@ impl KnnBackend {
         k_eff: usize,
         search_k: usize,
     ) -> Result<(Array2<f64>, Array2<i64>), IndexError> {
-        let span = crate::tracy::zone(tracy_client::span_location!("knn.search"));
-        span.emit_value(queries_scaled.nrows() as u64);
         match self {
             Self::Exact(inner) => {
                 inner

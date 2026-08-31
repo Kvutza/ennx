@@ -149,8 +149,6 @@ pub(crate) fn compute_posterior_light(
     params: &ENNParams,
     flags: &PosteriorFlags,
 ) -> Result<PosteriorLightOut, ENNError> {
-    let span = crate::tracy::zone(tracy_client::span_location!("posterior.light"));
-    span.emit_value(x.nrows() as u64);
     if x.ncols() != model.num_dim() {
         return Err(ENNError::InvalidShape {
             expected: vec![x.nrows(), model.num_dim()],
@@ -221,7 +219,6 @@ pub(crate) fn compute_posterior_light(
     }
 
     let (dist2s_full, idx_full) = {
-        let _span = crate::tracy::zone(tracy_client::span_location!("posterior.neighbors"));
         index_search(
             model,
             x,
@@ -237,7 +234,6 @@ pub(crate) fn compute_posterior_light(
     if let Some(output) = agx_posterior(model, &dist2s, &idx, params)? {
         return Ok(output);
     }
-    let _span = crate::tracy::zone(tracy_client::span_location!("posterior.aggregate"));
     Ok(fuse_neighbors_to_mu_se(model, &dist2s, &idx, params))
 }
 

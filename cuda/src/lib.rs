@@ -27,8 +27,6 @@ pub use knn::{
 };
 
 static TRIAL_BUNDLE: OnceLock<Result<OwnedArtifactBundle, String>> = OnceLock::new();
-static TRACY: OnceLock<tracy_client::Client> = OnceLock::new();
-
 #[repr(C)]
 struct DlInfo {
     filename: *const c_char,
@@ -629,10 +627,6 @@ impl TrialEngine {
         read_scores: bool,
     ) -> CudaResult<(Vec<Selection>, Vec<f32>)> {
         self.last_profile = None;
-        let client = TRACY.get_or_init(tracy_client::Client::start);
-        let _zone = client
-            .clone()
-            .span(tracy_client::span_location!("ennx.cuda.trial.ask"), 0);
         self.check_slot(base_slot)?;
         self.check_slot(trial_slot)?;
         if materialize_row && base_slot == trial_slot {
@@ -740,9 +734,7 @@ impl TrialEngine {
                 0,
             ))
             .map_err(cuda_error)?;
-        let profile = self.profiling
-            || tracy_client::Client::is_connected()
-            || std::env::var_os("ENNX_CUDA_PROFILE").is_some();
+        let profile = self.profiling || std::env::var_os("ENNX_CUDA_PROFILE").is_some();
         let score_start = profile
             .then(|| timing_event(&self.runtime.stream))
             .transpose()?;
@@ -828,7 +820,6 @@ impl TrialEngine {
                     materialize_end,
                 };
                 let profile = events.profile()?;
-                publish_profile(client, profile);
                 Some(profile)
             }
             _ => None,
@@ -1029,29 +1020,6 @@ fn sync_stream(runtime: &Runtime, stream: Option<i64>) -> CudaResult<()> {
         )
         .result()
         .map_err(cuda_error)
-    }
-}
-
-fn publish_profile(client: &tracy_client::Client, profile: AskProfile) {
-    for (name, milliseconds) in [
-        (
-            tracy_client::plot_name!("ennx.cuda.trial.score_ns"),
-            profile.score_ms,
-        ),
-        (
-            tracy_client::plot_name!("ennx.cuda.trial.pick_ns"),
-            profile.pick_ms,
-        ),
-        (
-            tracy_client::plot_name!("ennx.cuda.trial.materialize_ns"),
-            profile.materialize_ms,
-        ),
-        (
-            tracy_client::plot_name!("ennx.cuda.trial.total_ns"),
-            profile.total_ms,
-        ),
-    ] {
-        client.plot(name, f64::from(milliseconds) * 1_000_000.0);
     }
 }
 

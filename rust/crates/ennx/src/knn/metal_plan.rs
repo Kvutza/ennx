@@ -1,5 +1,3 @@
-const TILE_ROWS: usize = 1024;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Plan {
     Split,
@@ -173,33 +171,9 @@ impl Plan {
             Self::Wide => "wide",
         }
     }
-
-    pub(super) fn id(self) -> u64 {
-        match self {
-            Self::Split => 0,
-            Self::Fused => 1,
-            Self::Tree => 2,
-            Self::Tiled => 3,
-            Self::Simd => 4,
-            Self::Gram => 5,
-            Self::Wide => 6,
-        }
-    }
 }
 
 impl Graph {
-    pub(super) fn passes(&self, tiles: usize, k: usize) -> usize {
-        self.0
-            .iter()
-            .map(|step| match step.op {
-                Op::Init | Op::Batch | Op::Tile | Op::Simd | Op::Gram => 1,
-                Op::L2 | Op::Topk | Op::Fuse | Op::Merge => tiles,
-                Op::Reduce => levels(tiles, k),
-                Op::Fold => fold_levels(tiles),
-            })
-            .sum()
-    }
-
     pub(super) fn valid(&self) -> bool {
         !self.0.is_empty()
             && self.0.iter().all(|step| {
@@ -222,24 +196,6 @@ impl Graph {
     }
 }
 
-fn levels(mut lists: usize, k: usize) -> usize {
-    let mut levels = 0;
-    while lists > 1 {
-        lists = lists.div_ceil(TILE_ROWS / k);
-        levels += 1;
-    }
-    levels
-}
-
-fn fold_levels(mut lists: usize) -> usize {
-    let mut levels = 0;
-    while lists > 1 {
-        lists = lists.div_ceil(2);
-        levels += 1;
-    }
-    levels
-}
-
 #[cfg(test)]
 mod tests {
     use super::Plan;
@@ -257,10 +213,5 @@ mod tests {
         ] {
             assert!(plan.graph().valid());
         }
-        assert_eq!(Plan::Split.graph().passes(8, 16), 25);
-        assert_eq!(Plan::Fused.graph().passes(8, 16), 17);
-        assert_eq!(Plan::Tree.graph().passes(8, 16), 2);
-        assert_eq!(Plan::Tree.graph().passes(65, 16), 3);
-        assert_eq!(Plan::Wide.graph().passes(8, 2048), 4);
     }
 }

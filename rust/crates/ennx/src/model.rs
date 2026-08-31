@@ -152,8 +152,6 @@ impl EpistemicNearestNeighbors {
         train_yvar: Option<Array2<f64>>,
         options: ModelOptions,
     ) -> Result<Self, ENNError> {
-        let span = crate::tracy::zone(tracy_client::span_location!("model.new"));
-        span.emit_value(train_x.nrows() as u64);
         let ModelOptions {
             scale_x,
             driver,
@@ -343,8 +341,6 @@ impl EpistemicNearestNeighbors {
         y: &ArrayView2<f64>,
         yvar: Option<&ArrayView2<f64>>,
     ) -> Result<(), ENNError> {
-        let span = crate::tracy::zone(tracy_client::span_location!("model.add"));
-        span.emit_value(x.nrows() as u64);
         if let Some(err) = self.validate_add(x, y, yvar) {
             return Err(err);
         }
