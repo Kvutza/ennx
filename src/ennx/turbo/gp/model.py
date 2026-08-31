@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -7,7 +8,15 @@ if TYPE_CHECKING:
 
 
 def _base():
-    from gpytorch.models import ExactGP
+    with warnings.catch_warnings():
+        # linear-operator 0.6.1 still compiles two helpers with TorchScript.
+        warnings.filterwarnings(
+            "ignore",
+            message=r"`torch\.jit\.script` is deprecated\..*",
+            category=DeprecationWarning,
+            module=r"torch\.jit\._script",
+        )
+        from gpytorch.models import ExactGP
 
     return ExactGP
 
