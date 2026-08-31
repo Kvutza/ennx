@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-zig build
+tools/zigw build
 
 out_dir="$(mktemp -d "${TMPDIR:-/tmp}/ennx-zig-abi.XXXXXX")"
 trap 'rm -rf "$out_dir"' EXIT
 
-zig cc \
+tools/zigw cc \
     zig/tests/abi.c \
     -Izig-out/include \
     -Lzig-out/lib \

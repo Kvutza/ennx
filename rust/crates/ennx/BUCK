@@ -5,28 +5,15 @@ filegroup(
     srcs = glob([
         "examples/**/*.rs",
         "src/**/*.cl",
-        "src/**/*.cpp",
         "src/**/*.h",
         "src/**/*.metal",
         "src/**/*.rs",
     ]) + [
-        "build.rs",
         "Cargo.toml",
         "LICENSE",
         "NOTICE",
         "README.md",
     ],
-    visibility = ["PUBLIC"],
-)
-
-cxx_library(
-    name = "faiss-bridge",
-    srcs = ["src/faiss_bridge.cpp"],
-    compiler_flags = [
-        "-std=c++20",
-        "-Wno-deprecated-declarations",
-    ],
-    deps = ["//buck2/native:faiss"],
     visibility = ["PUBLIC"],
 )
 
@@ -58,7 +45,6 @@ app_rust_library(
     }),
     visibility = ["PUBLIC"],
     deps = [
-        ":faiss-bridge",
         ":usearch-bridge",
         "//zig:dense",
         "//rust/crates/bpann:bpann",
@@ -97,7 +83,6 @@ rust_test(
     }),
     visibility = ["//buck2/tests:all"],
     deps = [
-        ":faiss-bridge",
         ":usearch-bridge",
         "//zig:dense",
         "//rust/crates/bpann:bpann",
@@ -127,7 +112,7 @@ rust_test(
     runtime_dependency_handling = "symlink",
     rustc_flags = select({
         "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/openmp/lib",
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
         ],
         "DEFAULT": [],
     }),
@@ -148,7 +133,6 @@ app_rust_library(
         "usearch-native",
     ],
     deps = [
-        ":faiss-bridge",
         ":usearch-bridge",
         "//rust/crates/bpann:bpann",
         "//rust:memmap2",
@@ -184,7 +168,7 @@ app_rust_binary(
     runtime_dependency_handling = "symlink",
     rustc_flags = select({
         "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/out",
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
         ],
         "DEFAULT": [],
     }),
@@ -204,7 +188,7 @@ app_rust_binary(
     runtime_dependency_handling = "symlink",
     rustc_flags = select({
         "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/out",
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
         ],
         "DEFAULT": [],
     }),
@@ -227,7 +211,7 @@ app_rust_binary(
     runtime_dependency_handling = "symlink",
     rustc_flags = select({
         "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/openmp/lib",
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
         ],
         "DEFAULT": [],
     }),
@@ -247,7 +231,7 @@ rust_test(
     rpath = True,
     runtime_dependency_handling = "symlink",
     rustc_flags = [
-        "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__faiss-build__/openmp/lib",
+        "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
     ],
     target_compatible_with = ["prelude//os/constraints:macos"],
 )

@@ -7,12 +7,3 @@ extra_deps = ["//rust:metal"]
 ['cfg(target_os = "linux")']
 features = ["opencl"]
 extra_deps = ["//rust:opencl3"]
-
-[[cxx_library]]
-name = "faiss_bridge"
-srcs = ["src/faiss_bridge.cpp"]
-compiler_flags = [
-  "-std=c++17",
-  "-Wno-deprecated-declarations",
-]
-deps = ["//buck2/native:faiss"]

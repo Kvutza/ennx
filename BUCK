@@ -100,7 +100,7 @@ python_wheel(
     python_requires = PYTHON_REQUIRES,
     python_srcs = glob(["src/ennx/**/*.py"]),
     readme = "README.md",
-    runtime_libraries = ["//buck2/native:linux-native"],
+    runtime_libraries = [],
     target_compatible_with = [
         "prelude//cpu/constraints:arm64",
         "prelude//os/constraints:linux",
@@ -120,7 +120,7 @@ python_wheel(
     python_requires = PYTHON_REQUIRES,
     python_srcs = glob(["src/ennx/**/*.py"]),
     readme = "README.md",
-    runtime_libraries = ["//buck2/native:linux-native"],
+    runtime_libraries = [],
     target_compatible_with = [
         "prelude//cpu/constraints:x86_64",
         "prelude//os/constraints:linux",
@@ -140,7 +140,7 @@ python_wheel(
     python_requires = PYTHON_REQUIRES,
     python_srcs = glob(["src/ennx/**/*.py"]),
     readme = "README.md",
-    runtime_libraries = ["//buck2/native:faiss-build[openmp]"],
+    runtime_libraries = ["//buck2/native:openmp-build[lib]"],
     target_compatible_with = [
         "prelude//cpu/constraints:arm64",
         "prelude//os/constraints:macos",

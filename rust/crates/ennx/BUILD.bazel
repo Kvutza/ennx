@@ -45,13 +45,6 @@ ENNX_TEST_DEPS = ennx_crate_deps(ENNX_TEST_CRATES) + [
 ]
 
 cc_library(
-    name = "faiss_bridge",
-    srcs = ["src/faiss_bridge.cpp"],
-    copts = ["-std=c++20"],
-    deps = ["@faiss_src//:faiss"],
-)
-
-cc_library(
     name = "usearch_bridge",
     srcs = ["src/usearch_bridge.cpp"],
     hdrs = ["src/usearch_bridge.h"],
@@ -73,7 +66,6 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = crate_edition(),
     link_deps = [
-        ":faiss_bridge",
         ":usearch_bridge",
     ],
     deps = ENNX_DEPS,
@@ -92,7 +84,6 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = crate_edition(),
     link_deps = [
-        ":faiss_bridge",
         ":usearch_bridge",
     ],
     target_compatible_with = ["@platforms//os:macos"],
@@ -114,7 +105,6 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = crate_edition(),
     link_deps = [
-        ":faiss_bridge",
         ":usearch_bridge",
     ],
     deps = ENNX_DEPS + [

@@ -30,7 +30,6 @@ app_rust_library(
     }),
     visibility = ["PUBLIC"],
     deps = [
-        "//rust/crates/ennx:faiss-bridge",
         "//rust/crates/ennx:usearch-bridge",
         "//rust/crates/ennx:ennx",
         "//rust:ndarray",

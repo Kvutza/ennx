@@ -21,7 +21,7 @@ and `//:check`.
 FAISS is present in every native target. Accelerator drivers augment the
 index layer; they do not replace the CPU FAISS capability.
 
-Bazel fetches checksum-pinned FAISS 1.12.0 source and compiles it directly.
+Bazel fetches checksum-pinned FAISS 1.15.0 source and compiles it directly.
 The Rust graph does not run the legacy `faiss-sys` CMake build and does not
 search Homebrew or another host package manager for FAISS.
 

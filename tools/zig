@@ -1,0 +1,55 @@
+#!/usr/bin/env dotslash
+
+{
+  "name": "zig",
+  "platforms": {
+    "macos-aarch64": {
+      "size": 52238004,
+      "hash": "blake3",
+      "digest": "c121bdcd8b1e7f010af8e65fd720634bb18e3d135fa429e6d8ca496bb44d2af7",
+      "format": "tar.xz",
+      "path": "zig-aarch64-macos-0.16.0/zig",
+      "providers": [
+        {
+          "url": "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz"
+        }
+      ]
+    },
+    "macos-x86_64": {
+      "size": 57396836,
+      "hash": "blake3",
+      "digest": "659192f01e1000549938c1a91fcb9f1ae9b9f39937c6f9813a66757da608b05a",
+      "format": "tar.xz",
+      "path": "zig-x86_64-macos-0.16.0/zig",
+      "providers": [
+        {
+          "url": "https://ziglang.org/download/0.16.0/zig-x86_64-macos-0.16.0.tar.xz"
+        }
+      ]
+    },
+    "linux-aarch64": {
+      "size": 51211944,
+      "hash": "blake3",
+      "digest": "d9a132c528f69ba9e6174cc6cfd3ad082376cb6738999e56bf8975d8977e7492",
+      "format": "tar.xz",
+      "path": "zig-aarch64-linux-0.16.0/zig",
+      "providers": [
+        {
+          "url": "https://ziglang.org/download/0.16.0/zig-aarch64-linux-0.16.0.tar.xz"
+        }
+      ]
+    },
+    "linux-x86_64": {
+      "size": 55478392,
+      "hash": "blake3",
+      "digest": "9badfa00469949ac17c681ce80a9b872781a6eb272b51435f8903855ccd9a35e",
+      "format": "tar.xz",
+      "path": "zig-x86_64-linux-0.16.0/zig",
+      "providers": [
+        {
+          "url": "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz"
+        }
+      ]
+    }
+  }
+}

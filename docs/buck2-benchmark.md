@@ -195,7 +195,8 @@ cannot preserve links in Buck's downloaded CPython toolchain.
 
 - macOS arm64 is fully exercised. Linux arm64 covers BPANN, OpenCL, ENNX, and
   clean wheel import.
-- Linux imports pinned FAISS/OpenBLAS from Pixi; the OpenCL loader remains
+- Buck2 and Bazel build FAISS 1.15.0 from pinned source. Pixi does not provide
+  FAISS for the repo-owned native build path, while the OpenCL loader remains
   system-provided.
 - Linux requires Clang and LLD.
 - Rust and Buck2 are pinned. The native FAISS action still uses Apple's

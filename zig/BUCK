@@ -1,11 +1,12 @@
-genrule(
+load(":defs.bzl", "zig_static_library")
+
+zig_static_library(
     name = "dense-static",
     srcs = [
         "src/dense.zig",
-        "src/root.zig",
     ],
+    root = "src/root.zig",
     out = "ennx_dense.lib",
-    cmd = "zig build-lib $SRCDIR/src/root.zig -OReleaseFast -fPIC -fno-emit-h -femit-bin=$OUT",
 )
 
 prebuilt_cxx_library(

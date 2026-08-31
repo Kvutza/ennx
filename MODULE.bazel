@@ -23,22 +23,6 @@ http_archive = use_repo_rule(
 )
 
 http_archive(
-    name = "faiss_src",
-    build_file = "//bazel/faiss:BUILD.faiss.bazel",
-    sha256 = "7f3c4ed9aec3bd7524382862f5fcbd4d8984e2a8979ff3bdb2c0bcea5144149e",
-    strip_prefix = "faiss-1.14.3",
-    urls = ["https://github.com/facebookresearch/faiss/archive/refs/tags/v1.14.3.tar.gz"],
-)
-
-http_archive(
-    name = "openblas_src",
-    build_file = "//bazel/openblas:BUILD.openblas.bazel",
-    sha256 = "f8a1138e01fddca9e4c29f9684fd570ba39dedc9ca76055e1425d5d4b1a4a766",
-    strip_prefix = "OpenBLAS-0.3.32",
-    urls = ["https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.32/OpenBLAS-0.3.32.tar.gz"],
-)
-
-http_archive(
     name = "usearch_src",
     build_file = "//bazel/usearch:BUILD.usearch.bazel",
     sha256 = "1cd7f672d20412962c457b11c858c6c5aecb949808a5345a95e1d671112bcf72",

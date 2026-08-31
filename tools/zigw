@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+"$repo_dir/tools/bootstrap-dotslash" >/dev/null
+dotslash="$repo_dir/.buck2-tools/bin/dotslash"
+if [ ! -x "$dotslash" ] && [ -x "$repo_dir/.buck2-tools/bin/dotslash.exe" ]; then
+    dotslash="$repo_dir/.buck2-tools/bin/dotslash.exe"
+fi
+exec "$dotslash" "$repo_dir/tools/zig" "$@"

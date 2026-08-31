@@ -12,11 +12,6 @@ exports_files([
     "NOTICE",
 ])
 
-filegroup(
-    name = "faiss_metal_test",
-    srcs = ["buck2/native/faiss_metal_test.cpp"],
-)
-
 alias(
     name = "cpu",
     actual = "//rust/crates/ennx:ennx_cpu",
@@ -91,7 +86,6 @@ alias(
 test_suite(
     name = "check",
     tests = [
-        "//bazel/faiss:faiss_index_smoke",
         "//rust/crates/bpann:bpann_test",
         "//rust/crates/ennx:ennx_test",
         "//rust/crates/ennx:trial_search_metal_test",

@@ -1,7 +1,8 @@
 //! Index implementations behind [`crate::index::ENNIndex`].
 
-pub(crate) mod faiss_backend;
-pub use faiss_backend::MmapColumnStore;
+mod exact_backend;
+mod mmap_store;
+pub use mmap_store::MmapColumnStore;
 
 #[cfg(any(feature = "usearch", feature = "usearch-native"))]
 mod usearch_backend;
@@ -27,7 +28,7 @@ use std::time::Instant;
 
 use crate::index::{IndexDriver, IndexError};
 
-pub(crate) use faiss_backend::FaissBackend;
+use exact_backend::ExactBackend;
 
 /// KNN execution diagram used by the experimental parity surface.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -144,7 +145,7 @@ use opencl_index::OpenClIndex;
 
 /// In-memory exact and accelerator-backed index implementations.
 pub(crate) enum KnnBackend {
-    Faiss(Mutex<FaissBackend>),
+    Exact(Mutex<ExactBackend>),
     #[cfg(all(target_os = "macos", feature = "metal"))]
     Auto(Mutex<AutoIndex>),
     #[cfg(any(feature = "usearch", feature = "usearch-native"))]
@@ -159,7 +160,7 @@ pub(crate) enum KnnBackend {
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub(crate) struct AutoIndex {
-    cpu: FaissBackend,
+    cpu: ExactBackend,
     gpu: MetalIndex,
     decisions: HashMap<u32, bool>,
     num_dim: usize,
@@ -169,7 +170,7 @@ pub(crate) struct AutoIndex {
 impl AutoIndex {
     fn new(num_dim: usize, train: &ArrayView2<f64>) -> Result<Self, IndexError> {
         Ok(Self {
-            cpu: FaissBackend::new(num_dim, IndexDriver::Exact, train)?,
+            cpu: ExactBackend::new(num_dim, train)?,
             gpu: MetalIndex::new_agx(num_dim, train)
                 .or_else(|_| MetalIndex::new(num_dim, train))?,
             decisions: HashMap::new(),
@@ -234,9 +235,8 @@ impl KnnBackend {
             ));
         }
         match driver {
-            IndexDriver::Exact => Ok(Self::Faiss(Mutex::new(FaissBackend::new(
+            IndexDriver::Exact => Ok(Self::Exact(Mutex::new(ExactBackend::new(
                 num_dim,
-                driver,
                 train_scaled,
             )?))),
             IndexDriver::Auto => {
@@ -249,9 +249,8 @@ impl KnnBackend {
                 }
                 #[cfg(not(all(target_os = "macos", feature = "metal")))]
                 {
-                    Ok(Self::Faiss(Mutex::new(FaissBackend::new(
+                    Ok(Self::Exact(Mutex::new(ExactBackend::new(
                         num_dim,
-                        IndexDriver::Exact,
                         train_scaled,
                     )?)))
                 }
@@ -344,7 +343,7 @@ impl KnnBackend {
 
     pub(crate) fn len(&self) -> usize {
         match self {
-            Self::Faiss(inner) => inner.lock().expect("knn mutex poisoned").len(),
+            Self::Exact(inner) => inner.lock().expect("knn mutex poisoned").len(),
             #[cfg(all(target_os = "macos", feature = "metal"))]
             Self::Auto(inner) => inner.lock().expect("knn mutex poisoned").cpu.len(),
             #[cfg(any(feature = "usearch", feature = "usearch-native"))]
@@ -360,7 +359,7 @@ impl KnnBackend {
 
     fn plan(&self) -> &'static str {
         match self {
-            Self::Faiss(_) => "exact",
+            Self::Exact(_) => "exact",
             #[cfg(all(target_os = "macos", feature = "metal"))]
             Self::Auto(_) => "auto",
             #[cfg(any(feature = "usearch", feature = "usearch-native"))]
@@ -392,7 +391,7 @@ impl KnnBackend {
 
     pub(crate) fn memory_usage_bytes(&self) -> usize {
         match self {
-            Self::Faiss(inner) => inner
+            Self::Exact(inner) => inner
                 .lock()
                 .expect("knn mutex poisoned")
                 .memory_usage_bytes(),
@@ -423,7 +422,7 @@ impl KnnBackend {
 
     pub(crate) fn rebuild(&self, train_scaled: &ArrayView2<f64>) -> Result<(), IndexError> {
         match self {
-            Self::Faiss(inner) => inner
+            Self::Exact(inner) => inner
                 .lock()
                 .expect("knn mutex poisoned")
                 .rebuild(train_scaled),
@@ -464,7 +463,7 @@ impl KnnBackend {
         start_key: u64,
     ) -> Result<(), IndexError> {
         match self {
-            Self::Faiss(inner) => inner
+            Self::Exact(inner) => inner
                 .lock()
                 .expect("knn mutex poisoned")
                 .add(rows_scaled, start_key),
@@ -507,7 +506,7 @@ impl KnnBackend {
         let span = crate::tracy::zone(tracy_client::span_location!("knn.search"));
         span.emit_value(queries_scaled.nrows() as u64);
         match self {
-            Self::Faiss(inner) => {
+            Self::Exact(inner) => {
                 inner
                     .lock()
                     .expect("knn mutex poisoned")
@@ -815,7 +814,7 @@ mod knn_backend_tests {
     use ndarray::array;
 
     #[test]
-    fn knn_backend_faiss_exact() {
+    fn knn_backend_exact() {
         let train = array![[0.0, 0.0], [1.0, 1.0]];
         let backend = KnnBackend::new(2, IndexDriver::Exact, &train.view()).unwrap();
         assert_eq!(backend.len(), 2);

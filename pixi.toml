@@ -13,8 +13,6 @@ pandas = "*"
 matplotlib = "*"
 llvm-openmp = "22.1.8.*"
 lld = "20.*"
-libfaiss = { version = "1.10.*", build = "cpu_openblas_*" }
-zig = ">=0.16.0,<0.17"
 
 [feature.py312.dependencies]
 python = "3.12.*"
@@ -38,10 +36,10 @@ buck2-verify = "tools/buck2-wheel-verify"
 buck2-verify-py312 = "ENNX_PYTHON_VERSION=3.12 ENNX_PYTHON=.pixi/envs/ennx-py312/bin/python tools/buck2-wheel-verify"
 buck2-verify-py314 = "ENNX_PYTHON_VERSION=3.14 ENNX_PYTHON=.pixi/envs/ennx-py314/bin/python tools/buck2-wheel-verify"
 buck2-gates = "tools/buck2-gates"
-zig-build = "zig build"
-zig-test = "zig build test"
+zig-build = "tools/zigw build"
+zig-test = "tools/zigw build test"
 zig-abi = "tools/zig-abi"
-zig-check = "zig fmt --check build.zig zig/src zig/tests && zig build test && tools/zig-abi"
+zig-check = "tools/zigw fmt --check build.zig zig/src zig/tests && tools/zigw build test && tools/zig-abi"
 
 [environments]
 ennx = { features = ["ennx", "py313"], no-default-feature = true }

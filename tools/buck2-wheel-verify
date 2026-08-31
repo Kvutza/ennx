@@ -88,8 +88,6 @@ case $(uname -s) in
         fi
         ;;
     Linux)
-        test -f "$verify_dir/ennx/.dylibs/libfaiss.so"
-        test -f "$verify_dir/ennx/.dylibs/libopenblas.so.0"
         test -f "$verify_dir/ennx/.dylibs/libstdc++.so.6"
         test ! -e "$verify_dir/ennx/.dylibs/librust_crates_ennx-py_ennx-py.so"
         readelf -d "$extension" | grep -F '$ORIGIN/.dylibs'
