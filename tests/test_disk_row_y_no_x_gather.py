@@ -27,7 +27,7 @@ def _live_rss_bytes() -> int:
 def test_disk_row_y_iteration_does_not_fault_full_train_x():
     """Iterating row_y over all rows must not charge ~N·D·8 bytes of train_x."""
     n = 100_000
-    d = 10
+    d = 128
     train_x_mib = n * d * 8 / (1024 * 1024)
     with tempfile.TemporaryDirectory(prefix="_enn_row_y_") as work:
         model = EpistemicNearestNeighbors(

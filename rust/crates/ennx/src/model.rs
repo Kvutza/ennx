@@ -420,8 +420,14 @@ impl EpistemicNearestNeighbors {
     }
 
     pub fn natural_y(&self, index: usize) -> Result<Array1<f64>, ENNError> {
-        let (_, y, _) = self.natural_rows(&[index])?;
-        Ok(y.row(0).to_owned())
+        let y_z = self.rows().row_y(index)?;
+        if !self.bounded_outputs {
+            return Ok(y_z);
+        }
+        let y_z_row = y_z.insert_axis(ndarray::Axis(0));
+        Ok(crate::y_bounds::inv_y(y_z_row.view(), &self.y_bounds)
+            .row(0)
+            .to_owned())
     }
 
     pub(crate) fn persist_y_bounds_metadata(&self) -> Result<(), ENNError> {

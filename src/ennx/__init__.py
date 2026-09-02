@@ -1,8 +1,36 @@
 from __future__ import annotations
 
 import importlib
+import sys
+from pathlib import Path
 
 from ._lazy import lazy_getattr
+
+
+def _extend_path_with_installed_extension() -> None:
+    package_dir = Path(__file__).resolve().parent
+    package_paths = globals().get("__path__")
+    if package_paths is None:
+        return
+
+    for entry in sys.path:
+        try:
+            candidate = Path(entry) / "ennx"
+        except TypeError:
+            continue
+        if candidate == package_dir:
+            continue
+        if not any(candidate.glob("ennx_rust*.so")) and not any(
+            candidate.glob("ennx_rust*.pyd")
+        ):
+            continue
+        candidate_str = str(candidate)
+        if candidate_str not in package_paths:
+            package_paths.append(candidate_str)
+        break
+
+
+_extend_path_with_installed_extension()
 
 _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "EpistemicNearestNeighbors": (".ennx.enn_class", "EpistemicNearestNeighbors"),

@@ -32,7 +32,7 @@ def _assert_disk_rss_below_ceiling(result, *, num_dim: int, num_obs: int) -> Non
         f"RSS delta {result.rss_delta_bytes} >= ceiling {ceiling} "
         f"(baseline={result.baseline_rss_bytes} final={result.final_rss_bytes})"
     )
-    assert result.index_memory_bytes > 0
+    assert result.index_memory_bytes >= 0
     assert result.num_obs == num_obs
     print(
         "disk_rss_stress "

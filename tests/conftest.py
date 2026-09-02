@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).parent.parent
+_SRC = _ROOT / "src"
+for path in (str(_SRC), str(_ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
 _NATIVE_FP_CACHE = _ROOT / ".pytest_cache" / "enn_native_extension_fingerprint"
 _TESTMON_DB = (
     _ROOT / ".testmondata",
