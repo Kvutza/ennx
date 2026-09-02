@@ -5,7 +5,6 @@
 ./ennx dev --full
 ./ennx ci
 ./ennx wheel
-./ennx tune CONFIG.toml
 ```
 
 `tools/buck2-deps` regenerates both `BUCK` dependency graphs from the checked-in

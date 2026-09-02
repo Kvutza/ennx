@@ -4,14 +4,12 @@ mod incumbent;
 pub mod multi_tr;
 pub mod obs_access;
 mod observation_delta;
-mod program;
 mod tr_state;
 
 pub use multi_tr::{
     MultiTrustRegionConfig, MultiTrustRegionState, RegionBatch, RegionCandidate, SharingPolicy,
 };
 pub use observation_delta::ObservationDelta;
-pub use program::ProgramTrial;
 
 use ndarray::{Array1, Array2, ArrayView2};
 use rand::RngCore;
@@ -54,7 +52,6 @@ pub struct Optimizer {
     sobol_seed_base: u64,
     telemetry: Telemetry,
     incumbent_tracker: IncrementalIncumbentTracker,
-    program: Option<program::ProgramState>,
 }
 
 impl Optimizer {
@@ -162,7 +159,6 @@ impl Optimizer {
             sobol_seed_base,
             telemetry: Telemetry::default(),
             incumbent_tracker,
-            program: None,
         })
     }
 

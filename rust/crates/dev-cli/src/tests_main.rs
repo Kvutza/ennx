@@ -12,10 +12,6 @@ fn parses_only_supported_commands() {
     );
     assert_eq!(parse_mode(&["ci".into()]).unwrap(), Mode::Ci);
     assert_eq!(parse_mode(&["wheel".into()]).unwrap(), Mode::Wheel);
-    assert_eq!(
-        parse_mode(&["tune".into(), "config.toml".into()]).unwrap(),
-        Mode::Tune(PathBuf::from("config.toml"))
-    );
     assert!(parse_mode(&["build".into()]).is_err());
     assert!(parse_mode(&["check".into()]).is_err());
     assert!(parse_mode(&["python".into()]).is_err());

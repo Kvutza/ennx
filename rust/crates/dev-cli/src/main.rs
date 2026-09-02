@@ -4,8 +4,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Output};
 
-mod tune;
-
 const VERSION: &str = "0.1.1";
 
 const REPAIR_HOOKS: &[&str] = &[
@@ -43,7 +41,6 @@ enum Mode {
     Dev { full: bool },
     Ci,
     Wheel,
-    Tune(PathBuf),
     Help,
     Version,
 }
@@ -69,7 +66,6 @@ fn run() -> Result<u8, String> {
             println!("ennx {VERSION}");
             Ok(0)
         }
-        Mode::Tune(path) => tune::run(&root, &[path.to_string_lossy().into_owned()]),
         Mode::Wheel => run_wheel(&root),
         Mode::Ci => run_ci(&root),
         Mode::Dev { full } => run_dev(&root, full),
@@ -86,7 +82,6 @@ fn parse_mode(args: &[String]) -> Result<Mode, String> {
         "dev" => parse_dev(args),
         "ci" if args.len() == 1 => Ok(Mode::Ci),
         "wheel" if args.len() == 1 => Ok(Mode::Wheel),
-        "tune" => parse_tune(args),
         legacy => Err(format!(
             "unknown ennx command {legacy:?}\n\n{}",
             help_text()
@@ -113,13 +108,6 @@ fn parse_dev(args: &[String]) -> Result<Mode, String> {
         }
     }
     Ok(Mode::Dev { full })
-}
-
-fn parse_tune(args: &[String]) -> Result<Mode, String> {
-    if args.len() != 2 {
-        return Err("usage: ennx tune CONFIG.toml".to_string());
-    }
-    Ok(Mode::Tune(PathBuf::from(&args[1])))
 }
 
 fn run_dev(root: &Path, full: bool) -> Result<u8, String> {
@@ -489,7 +477,7 @@ fn normalize_target(target: &str) -> String {
 }
 
 fn help_text() -> &'static str {
-    "Usage: ennx <COMMAND>\n\nCommands:\n  dev [--full]   Repair and verify the current jj diff, including affected Buck2 and Python tests.\n  ci             Run full source, Buck2, wheel, and Python verification without repair.\n  wheel          Build the current platform wheel and verify the installed artifact.\n  tune CONFIG.toml\n                 Run the tuning workflow described by CONFIG.toml.\n  help           Show this help text.\n  version        Print the CLI version."
+    "Usage: ennx <COMMAND>\n\nCommands:\n  dev [--full]   Repair and verify the current jj diff, including affected Buck2 and Python tests.\n  ci             Run full source, Buck2, wheel, and Python verification without repair.\n  wheel          Build the current platform wheel and verify the installed artifact.\n  help           Show this help text.\n  version        Print the CLI version."
 }
 
 fn print_help() {

@@ -6,23 +6,7 @@ app_rust_binary(
     crate = "dev_cli",
     crate_root = "src/main.rs",
     edition = "2021",
-    deps = [
-        "//rust/crates/ennx:ennx",
-        "//rust:ndarray",
-        "//rust:rand",
-        "//rust:toml",
-    ] + select({
-        "//:macos-arm64": ["//buck2/native:openmp-macos"],
-        "DEFAULT": [],
-    }),
-    rpath = True,
-    runtime_dependency_handling = "symlink",
-    rustc_flags = select({
-        "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
-        ],
-        "DEFAULT": [],
-    }),
+    deps = [],
     visibility = ["PUBLIC"],
 )
 
@@ -32,21 +16,5 @@ rust_test(
     crate = "dev_cli_test",
     crate_root = "src/main.rs",
     edition = "2021",
-    deps = [
-        "//rust/crates/ennx:ennx",
-        "//rust:ndarray",
-        "//rust:rand",
-        "//rust:toml",
-    ] + select({
-        "//:macos-arm64": ["//buck2/native:openmp-macos"],
-        "DEFAULT": [],
-    }),
-    rpath = True,
-    runtime_dependency_handling = "symlink",
-    rustc_flags = select({
-        "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
-        ],
-        "DEFAULT": [],
-    }),
+    deps = [],
 )

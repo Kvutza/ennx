@@ -25,8 +25,8 @@ pub use crate::forward_program::{
 pub use crate::forward_weights::PackedModel;
 pub use crate::knn::{KnnIndex, KnnPlan, KnnProfile};
 pub use crate::optimizer::{
-    MultiTrustRegionConfig, MultiTrustRegionState, ObservationDelta, Optimizer, ProgramTrial,
-    RegionBatch, RegionCandidate, SharingPolicy, Telemetry,
+    MultiTrustRegionConfig, MultiTrustRegionState, ObservationDelta, Optimizer, RegionBatch,
+    RegionCandidate, SharingPolicy, Telemetry,
 };
 pub use crate::optimizer_factory::create_optimizer_enn_multi_tr;
 pub use crate::quantization::{quantize_fp4_e2m1, quantize_int4, FP4_E2M1_LUT};
