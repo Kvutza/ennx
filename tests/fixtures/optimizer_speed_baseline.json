@@ -1,3 +1,14 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:d6708bcaedeb7e48f2dcf5ef3f608491a2d0f059e1f3969614ec9f01b1a0036d
-size 286
+{
+  "description": "CI speed baseline for ask() wall time after seeded history",
+  "ci_ask_limits": [
+    {
+      "operation": "ask",
+      "n": 100,
+      "d": 2,
+      "arms": 1,
+      "max_p95_ratio": 1.25,
+      "max_abs_p95_ms": 5000.0,
+      "reference_p95_ms": 100.0
+    }
+  ]
+}

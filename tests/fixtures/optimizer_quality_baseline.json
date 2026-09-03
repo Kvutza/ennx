@@ -1,3 +1,580 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:bbf62bf487c82ce6f06c790febfe34110f3c87b9c885583188d780eb0478aa9c
-size 12886
+{
+  "y_range": 1.0,
+  "ci": {
+    "dims": [
+      2,
+      8
+    ],
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "cells": [
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 0,
+      "acquisition": "ucb",
+      "python_best_y": -1.3628966042566417e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 1,
+      "acquisition": "ucb",
+      "python_best_y": -5.603147967915122e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 2,
+      "acquisition": "ucb",
+      "python_best_y": -1.2303244980819578e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 3,
+      "acquisition": "ucb",
+      "python_best_y": -2.0689609905151944e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 4,
+      "acquisition": "ucb",
+      "python_best_y": -5.8074457291594555e-06
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 0,
+      "acquisition": "ucb",
+      "python_best_y": -0.05468008897438284
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 1,
+      "acquisition": "ucb",
+      "python_best_y": -0.014432852510778556
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 2,
+      "acquisition": "ucb",
+      "python_best_y": -0.0042030958039526965
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 3,
+      "acquisition": "ucb",
+      "python_best_y": -0.026715846551912364
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 4,
+      "acquisition": "ucb",
+      "python_best_y": -0.0047599272506465935
+    }
+  ],
+  "full_cells": [
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 0,
+      "acquisition": "ucb",
+      "python_best_y": -1.3628966042566417e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 1,
+      "acquisition": "ucb",
+      "python_best_y": -5.603147967915122e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 2,
+      "acquisition": "ucb",
+      "python_best_y": -1.2303244980819578e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 3,
+      "acquisition": "ucb",
+      "python_best_y": -2.0689609905151944e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 4,
+      "acquisition": "ucb",
+      "python_best_y": -5.8074457291594555e-06
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 5,
+      "acquisition": "ucb",
+      "python_best_y": -5.2946911623246205e-06
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 6,
+      "acquisition": "ucb",
+      "python_best_y": -5.964390128061954e-06
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 7,
+      "acquisition": "ucb",
+      "python_best_y": -7.408093065183143e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 8,
+      "acquisition": "ucb",
+      "python_best_y": -4.662344287013348e-06
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 9,
+      "acquisition": "ucb",
+      "python_best_y": -1.4308566851238214e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 10,
+      "acquisition": "ucb",
+      "python_best_y": -3.129984518121794e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 11,
+      "acquisition": "ucb",
+      "python_best_y": -4.243510449224453e-06
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 12,
+      "acquisition": "ucb",
+      "python_best_y": -2.8328117717293064e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 13,
+      "acquisition": "ucb",
+      "python_best_y": -1.86210531174321e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 14,
+      "acquisition": "ucb",
+      "python_best_y": -5.360778497767037e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 15,
+      "acquisition": "ucb",
+      "python_best_y": -1.853429647813515e-06
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 16,
+      "acquisition": "ucb",
+      "python_best_y": -1.542916958038527e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 17,
+      "acquisition": "ucb",
+      "python_best_y": -9.326894148401906e-06
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 18,
+      "acquisition": "ucb",
+      "python_best_y": -1.9693232292797752e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 2,
+      "budget": 64,
+      "seed": 19,
+      "acquisition": "ucb",
+      "python_best_y": -5.624004426772304e-05
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 0,
+      "acquisition": "ucb",
+      "python_best_y": -0.05468008897438284
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 1,
+      "acquisition": "ucb",
+      "python_best_y": -0.014432852510778556
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 2,
+      "acquisition": "ucb",
+      "python_best_y": -0.0042030958039526965
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 3,
+      "acquisition": "ucb",
+      "python_best_y": -0.026715846551912364
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 4,
+      "acquisition": "ucb",
+      "python_best_y": -0.0047599272506465935
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 5,
+      "acquisition": "ucb",
+      "python_best_y": -0.00801191415757559
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 6,
+      "acquisition": "ucb",
+      "python_best_y": -0.026463368506648283
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 7,
+      "acquisition": "ucb",
+      "python_best_y": -0.003043560942100834
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 8,
+      "acquisition": "ucb",
+      "python_best_y": -0.01069714924659266
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 9,
+      "acquisition": "ucb",
+      "python_best_y": -0.009402397259958117
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 10,
+      "acquisition": "ucb",
+      "python_best_y": -0.020346869917371998
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 11,
+      "acquisition": "ucb",
+      "python_best_y": -0.008422005596837857
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 12,
+      "acquisition": "ucb",
+      "python_best_y": -0.02364303868769356
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 13,
+      "acquisition": "ucb",
+      "python_best_y": -0.015860169886414442
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 14,
+      "acquisition": "ucb",
+      "python_best_y": -0.0172315796317984
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 15,
+      "acquisition": "ucb",
+      "python_best_y": -0.018918127048903718
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 16,
+      "acquisition": "ucb",
+      "python_best_y": -0.00912770085885357
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 17,
+      "acquisition": "ucb",
+      "python_best_y": -0.009441796636288823
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 18,
+      "acquisition": "ucb",
+      "python_best_y": -0.02362700159274938
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 8,
+      "budget": 64,
+      "seed": 19,
+      "acquisition": "ucb",
+      "python_best_y": -0.024730911853033076
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 0,
+      "acquisition": "ucb",
+      "python_best_y": -1.1280887923791254
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 1,
+      "acquisition": "ucb",
+      "python_best_y": -0.9549003592660391
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 2,
+      "acquisition": "ucb",
+      "python_best_y": -1.135513173728496
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 3,
+      "acquisition": "ucb",
+      "python_best_y": -0.8518761271537385
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 4,
+      "acquisition": "ucb",
+      "python_best_y": -1.0599087256522313
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 5,
+      "acquisition": "ucb",
+      "python_best_y": -1.1619124629999842
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 6,
+      "acquisition": "ucb",
+      "python_best_y": -1.0103978343270912
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 7,
+      "acquisition": "ucb",
+      "python_best_y": -0.8836078883925256
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 8,
+      "acquisition": "ucb",
+      "python_best_y": -1.0516187285352219
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 9,
+      "acquisition": "ucb",
+      "python_best_y": -0.9769560226964633
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 10,
+      "acquisition": "ucb",
+      "python_best_y": -0.707141644169949
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 11,
+      "acquisition": "ucb",
+      "python_best_y": -1.3254220684399511
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 12,
+      "acquisition": "ucb",
+      "python_best_y": -0.667628958939035
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 13,
+      "acquisition": "ucb",
+      "python_best_y": -1.3214949230490396
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 14,
+      "acquisition": "ucb",
+      "python_best_y": -0.8663885730780714
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 15,
+      "acquisition": "ucb",
+      "python_best_y": -0.9470048229080695
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 16,
+      "acquisition": "ucb",
+      "python_best_y": -0.7723165955830502
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 17,
+      "acquisition": "ucb",
+      "python_best_y": -1.3688338005286589
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 18,
+      "acquisition": "ucb",
+      "python_best_y": -0.8359278285820718
+    },
+    {
+      "objective": "sphere_centered_0.5",
+      "dim": 32,
+      "budget": 64,
+      "seed": 19,
+      "acquisition": "ucb",
+      "python_best_y": -0.8872033627130009
+    }
+  ]
+}

@@ -1,3 +1,33 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:e9b6fe18b5056f53427e7a978038f0e4c70870b59e297eeefc0b125cb119e4ae
-size 920
+{
+  "description": "posterior(train_x) self-search: index_search vs FAISS and posterior stats overhead must stay bounded",
+  "baseline_revision": "9eaa27e78a9b2a11aee15d95761b51857a43fe02",
+  "scenarios": [
+    {
+      "name": "random_self_search_512",
+      "n": 512,
+      "d": 10,
+      "m": 5,
+      "k": 10,
+      "seed": 0,
+      "reference_index_vs_faiss": 1.05,
+      "max_index_vs_faiss": 1.28,
+      "max_index_vs_faiss_tie_break": 1.35,
+      "reference_posterior_vs_index": 1.05,
+      "max_posterior_vs_index": 1.12
+    },
+    {
+      "name": "random_self_search_1024",
+      "n": 1024,
+      "d": 10,
+      "m": 5,
+      "k": 10,
+      "seed": 0,
+      "reference_index_vs_faiss": 1.03,
+      "max_index_vs_faiss": 1.25,
+      "max_index_vs_faiss_tie_break": 1.42,
+      "reference_posterior_vs_index": 1.05,
+      "max_posterior_vs_index": 1.22,
+      "max_posterior_vs_index_tie_break": 1.25
+    }
+  ]
+}
