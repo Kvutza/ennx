@@ -66,5 +66,18 @@ fn metal_region() {
 #[cfg(feature = "opencl")]
 #[test]
 fn opencl_region() {
+    let mut region = TrustRegion::new(4, 2, 0.0, TRLengthConfig::default()).unwrap();
+    match region.attach(ComputeDevice::OpenCl) {
+        Ok(()) => {}
+        Err(error) if opencl_unavailable(&error) => return,
+        Err(error) => panic!("{error}"),
+    }
     compare(ComputeDevice::OpenCl);
+}
+
+#[cfg(feature = "opencl")]
+fn opencl_unavailable(error: &str) -> bool {
+    error.contains("OpenCL platform")
+        || error.contains("OpenCL GPU")
+        || error.contains("failed to enumerate OpenCL")
 }
