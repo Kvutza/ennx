@@ -1,0 +1,52 @@
+module(
+    name = "ennx",
+    version = "0.2.0",
+)
+
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "openmp", version = "21.1.5.bcr.2")
+bazel_dep(name = "apple_support", version = "1.24.2")
+bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+bazel_dep(name = "rules_python", version = "2.2.0")
+bazel_dep(name = "rules_rust", version = "0.71.3")
+bazel_dep(name = "buildifier_prebuilt", version = "8.5.1.2")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.defaults(python_version = "3.13")
+python.toolchain(python_version = "3.13")
+use_repo(python, "python_3_13")
+
+http_archive = use_repo_rule(
+    "@bazel_tools//tools/build_defs/repo:http.bzl",
+    "http_archive",
+)
+
+http_archive(
+    name = "usearch_src",
+    build_file = "//bazel/usearch:BUILD.usearch.bazel",
+    sha256 = "1cd7f672d20412962c457b11c858c6c5aecb949808a5345a95e1d671112bcf72",
+    strip_prefix = "usearch-2.26.0",
+    type = "tar.gz",
+    urls = ["https://static.crates.io/crates/usearch/2.26.0/download"],
+)
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2021",
+    versions = ["1.96.0"],
+)
+use_repo(rust, "rust_toolchains")
+
+register_toolchains("@rust_toolchains//:all")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    manifests = ["//:Cargo.toml"],
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+    ],
+)
+use_repo(crate, "crates")

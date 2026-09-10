@@ -1,0 +1,25 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps", "crate_edition")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+rust_library(
+    name = "bpann",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_root = "src/lib.rs",
+    edition = crate_edition(),
+    deps = all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "bpann_test",
+    crate = ":bpann",
+    aliases = aliases(normal_dev = True, proc_macro_dev = True),
+    deps = all_crate_deps(normal_dev = True, proc_macro_dev = True),
+    rustc_env = {
+        "CARGO_MANIFEST_DIR": "rust/crates/bpann",
+    },
+)

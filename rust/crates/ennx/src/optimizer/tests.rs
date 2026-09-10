@@ -1,0 +1,217 @@
+use super::{Optimizer, Telemetry};
+use crate::config::{lhd_only, turbo_zero, ConfigOverrides};
+use crate::error::ENNError;
+use crate::optimizer_factory::{create_overrides, enn_overrides, lhd_overrides};
+use ndarray::array;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+#[test]
+fn test_optimizercreation() {
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(42);
+
+    let optimizer = Optimizer::new(bounds, turbo_zero(), &mut rng).unwrap();
+
+    assert_eq!(optimizer.num_dim(), 2);
+    assert!(optimizer.surrogate().is_none());
+}
+
+#[test]
+fn test_optimizerask() {
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(42);
+
+    let mut optimizer = Optimizer::new(bounds, lhd_only(), &mut rng).unwrap();
+
+    let candidates = optimizer.ask(5, &mut rng).unwrap();
+    assert_eq!(candidates.nrows(), 5);
+    assert_eq!(candidates.ncols(), 2);
+}
+
+#[test]
+fn test_003() {
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(42);
+    let mut optimizer = Optimizer::new(bounds, turbo_zero(), &mut rng).unwrap();
+    let x = array![[0.1, 0.2]];
+    let y = array![[1.0]];
+    let delta = optimizer.add_observations(&x.view(), &y.view()).unwrap();
+    assert_eq!(delta.old_n, 0);
+    assert_eq!(delta.new_n, 1);
+    assert_eq!(delta.x_view().nrows(), 1);
+    assert_eq!(delta.y_view().nrows(), 1);
+}
+
+#[test]
+fn test_addobservations() {
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(42);
+
+    let mut optimizer = Optimizer::new(bounds, turbo_zero(), &mut rng).unwrap();
+
+    let x = array![[0.5, 0.5], [0.3, 0.7]];
+    let y = array![[1.0], [2.0]];
+
+    optimizer.add_observations(&x.view(), &y.view()).unwrap();
+
+    assert_eq!(optimizer.x_obs().unwrap().nrows(), 2);
+    assert_eq!(optimizer.y_obs().unwrap().nrows(), 2);
+}
+
+#[test]
+fn test_005() {
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(42);
+
+    let mut optimizer = Optimizer::new(bounds, turbo_zero(), &mut rng).unwrap();
+
+    let x = array![[0.5, 0.5], [0.3, 0.7], [0.1, 0.9]];
+    let y = array![[1.0], [2.0]];
+
+    let err = optimizer
+        .add_observations(&x.view(), &y.view())
+        .expect_err("expected InvalidShape for mismatched row counts");
+    assert!(matches!(err, ENNError::InvalidShape { .. }));
+}
+
+#[test]
+fn test_tell() {
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(42);
+
+    let mut optimizer = Optimizer::new(bounds, lhd_only(), &mut rng).unwrap();
+
+    let candidates = optimizer.ask(5, &mut rng).unwrap();
+    let y = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+
+    optimizer
+        .tell(&candidates.view(), &y.view(), &mut rng)
+        .unwrap();
+
+    assert!(optimizer.telemetry().dt_tell > 0.0);
+}
+
+#[test]
+fn test_007() {
+    let t = Telemetry::default();
+    assert_eq!(t.dt_fit, 0.0);
+    assert_eq!(t.dt_gen, 0.0);
+    assert_eq!(t.dt_sel, 0.0);
+    assert_eq!(t.dt_tell, 0.0);
+
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(123);
+
+    let mut enn = enn_overrides(bounds.clone(), 3, 2, &mut rng, None).unwrap();
+    let mut zero = create_overrides(bounds.clone(), 2, &mut rng, None).unwrap();
+    let mut lhd = lhd_overrides(bounds, 2, &mut rng, None).unwrap();
+
+    assert_eq!(enn.telemetry().dt_fit, 0.0);
+    assert_eq!(zero.telemetry().dt_sel, 0.0);
+    assert_eq!(lhd.telemetry().dt_gen, 0.0);
+
+    let x0 = enn.ask(1, &mut rng).unwrap();
+    let y0 = array![[0.1]];
+    enn.tell(&x0.view(), &y0.view(), &mut rng).unwrap();
+
+    let x1 = zero.ask(1, &mut rng).unwrap();
+    let y1 = array![[0.2]];
+    zero.tell(&x1.view(), &y1.view(), &mut rng).unwrap();
+
+    let x2 = lhd.ask(1, &mut rng).unwrap();
+    let y2 = array![[0.3]];
+    lhd.tell(&x2.view(), &y2.view(), &mut rng).unwrap();
+}
+
+#[test]
+fn fallback_surrogate() {
+    let bounds = array![[0.0, 1.0], [0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(99);
+    let mut optimizer = Optimizer::new(bounds, turbo_zero(), &mut rng).unwrap();
+    let x1 = array![[1.0, 2.0, 3.0]];
+    let y1 = array![[0.5, 1.5]];
+    optimizer.add_observations(&x1.view(), &y1.view()).unwrap();
+    assert_eq!(optimizer.obs_count(), 1);
+    let xa = optimizer.x_obs().unwrap();
+    assert_eq!(xa.shape(), &[1, 3]);
+    let ya = optimizer.y_obs().unwrap();
+    assert_eq!(ya.shape(), &[1, 2]);
+    assert!((optimizer.obs_access().x_row(0).unwrap()[[0]] - 1.0).abs() < 1e-12);
+}
+
+#[test]
+fn test_009() {
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(55);
+    let overrides = ConfigOverrides {
+        noise_aware: Some(true),
+        ..Default::default()
+    };
+    let mut opt = enn_overrides(bounds, 3, 0, &mut rng, Some(&overrides)).unwrap();
+    assert!(opt.config().noise_aware);
+
+    let x = array![[0.2, 0.3], [0.4, 0.5], [0.6, 0.7], [0.8, 0.9],];
+    let y = array![[0.0], [1.0], [2.0], [0.5]];
+    opt.tell(&x.view(), &y.view(), &mut rng).unwrap();
+    assert!(opt.unit_incumbent().is_some());
+    assert_eq!(opt.incumbent_tracker.observation_count(), 4);
+}
+
+#[test]
+fn reset_obs() {
+    // Regression lock: tell_turbo must not reset the tracker on TR restart, because
+    // a zeroed observation_count forces update_incumbent to load full y_obs (Θ(N)).
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(56);
+    let overrides = ConfigOverrides {
+        noise_aware: Some(true),
+        ..Default::default()
+    };
+    let mut opt = enn_overrides(bounds, 3, 0, &mut rng, Some(&overrides)).unwrap();
+    let x = array![[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]];
+    let y = array![[0.0], [1.0], [0.5]];
+    opt.tell(&x.view(), &y.view(), &mut rng).unwrap();
+    assert_eq!(opt.incumbent_tracker.observation_count(), opt.obs_count());
+    opt.reset_tracker();
+    assert_eq!(opt.incumbent_tracker.observation_count(), 0);
+    assert!(opt.obs_count() > 0);
+}
+
+#[test]
+fn turbo_synced() {
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(57);
+    let overrides = ConfigOverrides {
+        noise_aware: Some(true),
+        ..Default::default()
+    };
+    let mut opt = enn_overrides(bounds, 3, 0, &mut rng, Some(&overrides)).unwrap();
+    // Drive failure counter to force a turbo length restart.
+    for i in 0..64 {
+        let x = array![[0.1 + 0.01 * (i as f64), 0.2]];
+        let y = array![[-(i as f64)]]; // never improve incumbent
+        opt.tell(&x.view(), &y.view(), &mut rng).unwrap();
+        assert_eq!(
+            opt.incumbent_tracker.observation_count(),
+            opt.obs_count(),
+            "tracker must stay synced after tell (incl. post-restart)"
+        );
+    }
+    assert!(
+        opt.restart_generation() >= 1,
+        "expected at least one TR restart"
+    );
+}
+
+#[test]
+fn optimizer_reports() {
+    let bounds = array![[0.0, 1.0], [0.0, 1.0]];
+    let mut rng = StdRng::seed_from_u64(1);
+    let mut opt = Optimizer::new(bounds, turbo_zero(), &mut rng).unwrap();
+    assert_eq!(opt.bounds().nrows(), 2);
+    assert_eq!(opt.restart_generation(), 0);
+    let _ = opt.sobol_base();
+    opt.increment_generation();
+    assert_eq!(opt.restart_generation(), 1);
+}

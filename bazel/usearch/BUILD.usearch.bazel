@@ -1,0 +1,14 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "usearch",
+    hdrs = glob(["include/usearch/**/*.hpp"]),
+    defines = [
+        "USEARCH_USE_OPENMP=0",
+        "USEARCH_USE_NUMKONG=0",
+    ],
+    includes = ["include"],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$repo_dir"
+
+cleanup() {
+    rm -f Cargo.lock Cargo.Bazel.lock MODULE.bazel.lock pixi.lock
+}
+trap cleanup EXIT HUP INT TERM
+
+cargo generate-lockfile
+./tools/reindeerw --cargo-options=--locked buckify
+cleanup

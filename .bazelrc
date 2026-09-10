@@ -1,0 +1,18 @@
+common --enable_bzlmod
+build --experimental_convenience_symlinks=ignore
+
+test --test_output=errors
+
+# Optional laptop-friendly limits. Public builds and downstream consumers do
+# not inherit machine-specific paths or resource caps.
+build:constrained --jobs=3
+build:constrained --local_resources=cpu=4
+build:constrained --local_resources=memory=6144
+test:constrained --test_arg=--test-threads=1
+
+# Optimized native release build.
+build:release --compilation_mode=opt
+
+# macOS deployment target pin (hermeticity fix)
+build:macos --macos_minimum_os=11.0
+build --macos_minimum_os=11.0

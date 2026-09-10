@@ -1,0 +1,636 @@
+//! Configuration types for the optimizer.
+
+use crate::backend::EnnStorage;
+use crate::candidates::CandidateRV;
+use crate::index::IndexDriver;
+use crate::mbtrregn::{MorboTRSettings, Rescalarize};
+use crate::surrogate::ENNSurrogateConfig;
+use crate::trregncfg::TrustRegionConfig;
+use crate::trust_region::TRLengthConfig;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+/// Optimizer configuration.
+#[derive(Debug, Clone)]
+pub struct OptimizerConfig {
+    /// Surrogate configuration.
+    pub surrogate: SurrogateConfig,
+    /// Trust region configuration.
+    pub trust_region: TrustRegionConfig,
+    /// Candidate generation configuration.
+    pub candidates: CandidateConfig,
+    /// Acquisition function configuration.
+    pub acquisition: AcquisitionConfig,
+    /// Use surrogate posterior mean for incumbent selection among candidates.
+    pub noise_aware: bool,
+    pub failure_tolerance_dim: Option<f64>,
+}
+
+impl Default for OptimizerConfig {
+    fn default() -> Self {
+        Self {
+            surrogate: SurrogateConfig::ENN(ENNSurrogateConfig::default()),
+            trust_region: TrustRegionConfig::default(),
+            candidates: CandidateConfig::default(),
+            acquisition: AcquisitionConfig::default(),
+            noise_aware: false,
+            failure_tolerance_dim: None,
+        }
+    }
+}
+
+/// Surrogate type configuration.
+#[derive(Debug, Clone)]
+pub enum SurrogateConfig {
+    /// ENN surrogate.
+    ENN(ENNSurrogateConfig),
+    /// No surrogate (for LHD/random).
+    None,
+}
+
+impl Default for SurrogateConfig {
+    fn default() -> Self {
+        SurrogateConfig::ENN(ENNSurrogateConfig::default())
+    }
+}
+
+/// Candidate generation configuration.
+#[derive(Debug, Clone)]
+pub struct CandidateConfig {
+    /// Base multiplier for number of candidates.
+    pub num_candidates_factor: f64,
+    /// Minimum number of candidates.
+    pub min_candidates: usize,
+    /// Maximum number of candidates (None = no cap). Matches Python default_candidates cap.
+    pub max_candidates: Option<usize>,
+    /// Optional per-arm multiplier: pool is at least num_arms * this value.
+    pub num_candidates_per_arm: Option<usize>,
+    /// Number of coordinates to perturb for RAASP-style candidates.
+    pub num_pert: usize,
+    /// Random variable type for candidates.
+    pub candidate_rv: CandidateRV,
+}
+
+impl Default for CandidateConfig {
+    fn default() -> Self {
+        Self {
+            num_candidates_factor: 1000.0,
+            min_candidates: 100,
+            max_candidates: None,
+            num_candidates_per_arm: None,
+            num_pert: 20,
+            candidate_rv: CandidateRV::Uniform,
+        }
+    }
+}
+
+impl CandidateConfig {
+    /// Compute number of candidates based on dimension and arms.
+    ///
+    /// Matches Python `CandidateGenConfig.resolve_candidates`: default base
+    /// `min(max_candidates, factor * dim)` when set, optional `max(fixed, per_arm * arms)`,
+    /// no `num_arms` multiplier. `max_candidates` caps the formula base only when
+    /// `num_candidates_per_arm` is set; otherwise exact-fixed mode uses min=max as pool size.
+    pub fn num_candidates(&self, num_dim: usize, num_arms: usize) -> usize {
+        let is_exact_fixed = self.num_candidates_factor == 1.0
+            && self.max_candidates == Some(self.min_candidates)
+            && self.num_candidates_per_arm.is_none();
+
+        let mut base = if is_exact_fixed {
+            self.min_candidates
+        } else {
+            let raw = (self.num_candidates_factor * num_dim as f64) as usize;
+            let formula = match self.max_candidates {
+                Some(cap) if self.num_candidates_per_arm.is_some() => raw.min(cap),
+                Some(cap) if (self.num_candidates_factor - 100.0).abs() < f64::EPSILON => {
+                    raw.min(cap)
+                }
+                _ => raw,
+            };
+            formula.max(self.min_candidates)
+        };
+
+        if let Some(m) = self.num_candidates_per_arm {
+            base = base.max(num_arms * m);
+        }
+
+        base
+    }
+}
+
+/// Optional overrides to apply on top of factory default config.
+/// Used by configuration frontends without duplicating ENNX's schema.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ConfigOverrides {
+    pub acquisition: Option<AcquisitionConfig>,
+    pub candidate_rv: Option<CandidateRV>,
+    pub num_candidates_factor: Option<f64>,
+    pub min_candidates: Option<usize>,
+    pub max_candidates: Option<usize>,
+    pub num_candidates_per_arm: Option<usize>,
+    pub num_pert: Option<usize>,
+    pub length_init: Option<f64>,
+    pub length_min: Option<f64>,
+    pub length_max: Option<f64>,
+    pub index_driver: Option<IndexDriver>,
+    pub num_samples: Option<usize>,
+    pub num_candidates: Option<usize>,
+    pub scale_x: Option<bool>,
+    pub noise_aware: Option<bool>,
+    pub failure_tolerance_dim: Option<f64>,
+    pub enn_storage: Option<EnnStorage>,
+    pub work_dir: Option<PathBuf>,
+    pub y_bounds: Option<Vec<[f64; 2]>>,
+    pub trust_region_kind: Option<TrustRegionKind>,
+    pub num_metrics: Option<usize>,
+    pub alpha: Option<f64>,
+    pub rescalarize: Option<Rescalarize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustRegionKind {
+    Turbo,
+    Morbo,
+}
+
+fn apply_enn(config: &mut OptimizerConfig, overrides: &ConfigOverrides) {
+    let SurrogateConfig::ENN(enn_cfg) = &config.surrogate else {
+        return;
+    };
+    let mut enn = enn_cfg.clone();
+    if let Some(driver) = overrides.index_driver {
+        enn.index_driver = driver;
+    }
+    if let Some(nfs) = overrides.num_samples {
+        enn.num_samples = nfs;
+    }
+    if let Some(nfc) = overrides.num_candidates {
+        enn.num_candidates = nfc;
+    }
+    if let Some(sx) = overrides.scale_x {
+        enn.scale_x = sx;
+    }
+    if let Some(storage) = overrides.enn_storage {
+        enn.storage = storage;
+    }
+    if let Some(dir) = overrides.work_dir.clone() {
+        enn.work_dir = Some(dir);
+    }
+    if let Some(rows) = overrides.y_bounds.as_ref() {
+        let flat = rows.iter().flatten().copied().collect::<Vec<_>>();
+        enn.y_bounds = Some(
+            ndarray::Array2::from_shape_vec((rows.len(), 2), flat)
+                .expect("fixed-width y_bounds rows"),
+        );
+    }
+    config.surrogate = SurrogateConfig::ENN(enn);
+}
+
+fn apply_region(overrides: &ConfigOverrides, config: &mut OptimizerConfig) {
+    if let Some(kind) = overrides.trust_region_kind {
+        if kind == TrustRegionKind::Morbo {
+            let num_metrics = overrides.num_metrics.unwrap_or(2);
+            let alpha = overrides.alpha.unwrap_or(0.05);
+            let length = TRLengthConfig {
+                length_init: overrides.length_init.unwrap_or(0.8),
+                length_min: overrides.length_min.unwrap_or(0.5f64.powi(7)),
+                length_max: overrides.length_max.unwrap_or(1.6),
+            };
+            let rescalarize = overrides.rescalarize.unwrap_or(Rescalarize::OnPropose);
+            config.trust_region = TrustRegionConfig::Morbo(MorboTRSettings {
+                num_metrics,
+                alpha,
+                length,
+                rescalarize,
+                noise_aware: overrides.noise_aware.unwrap_or(false),
+            });
+        }
+        return;
+    }
+    if overrides.length_init.is_none()
+        && overrides.length_min.is_none()
+        && overrides.length_max.is_none()
+    {
+        return;
+    }
+    let TRLengthConfig {
+        length_init,
+        length_min,
+        length_max,
+    } = match &config.trust_region {
+        TrustRegionConfig::Turbo(cfg) => *cfg,
+        TrustRegionConfig::Morbo(m) => m.length,
+    };
+    let updated = TRLengthConfig {
+        length_init: overrides.length_init.unwrap_or(length_init),
+        length_min: overrides.length_min.unwrap_or(length_min),
+        length_max: overrides.length_max.unwrap_or(length_max),
+    };
+    config.trust_region = match &config.trust_region {
+        TrustRegionConfig::Turbo(_) => TrustRegionConfig::Turbo(updated),
+        TrustRegionConfig::Morbo(m) => {
+            let mut morbo = m.clone();
+            morbo.length = updated;
+            TrustRegionConfig::Morbo(morbo)
+        }
+    };
+}
+
+impl ConfigOverrides {
+    /// Apply overrides to an existing config.
+    pub fn apply_to(&self, mut config: OptimizerConfig) -> OptimizerConfig {
+        if let Some(acq) = self.acquisition {
+            config.acquisition = acq;
+        }
+        if let Some(rv) = self.candidate_rv {
+            config.candidates.candidate_rv = rv;
+        }
+        if let Some(f) = self.num_candidates_factor {
+            config.candidates.num_candidates_factor = f;
+        }
+        if let Some(m) = self.min_candidates {
+            config.candidates.min_candidates = m;
+        }
+        if let Some(cap) = self.max_candidates {
+            config.candidates.max_candidates = Some(cap);
+        }
+        if let Some(m) = self.num_candidates_per_arm {
+            config.candidates.num_candidates_per_arm = Some(m);
+        }
+        if let Some(n) = self.num_pert {
+            config.candidates.num_pert = n.max(1);
+        }
+        apply_region(self, &mut config);
+        if self.index_driver.is_some()
+            || self.num_samples.is_some()
+            || self.num_candidates.is_some()
+            || self.scale_x.is_some()
+            || self.enn_storage.is_some()
+            || self.work_dir.is_some()
+            || self.y_bounds.is_some()
+        {
+            apply_enn(&mut config, self);
+        }
+        if let Some(na) = self.noise_aware {
+            config.noise_aware = na;
+        }
+        if let Some(d) = self.failure_tolerance_dim {
+            config.failure_tolerance_dim = Some(d);
+        }
+        config
+    }
+}
+
+/// Acquisition function configuration.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcquisitionConfig {
+    /// Upper Confidence Bound.
+    #[serde(rename = "ucb")]
+    UCB { beta: f64 },
+    /// Thompson sampling.
+    Thompson,
+    /// Random acquisition.
+    Random,
+    /// Pareto front acquisition (multi-objective).
+    Pareto,
+}
+
+#[cfg(test)]
+mod serde_tests {
+    use super::{AcquisitionConfig, ConfigOverrides, TrustRegionKind};
+    use crate::{CandidateRV, Rescalarize};
+
+    #[test]
+    fn config_names() {
+        let parsed: ConfigOverrides = toml::from_str(
+            r#"
+            acquisition = { ucb = { beta = 3.5 } }
+            candidate_rv = "sobol"
+            num_samples = 14
+            trust_region_kind = "morbo"
+            rescalarize = "on_propose"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            parsed.acquisition,
+            Some(AcquisitionConfig::UCB { beta: 3.5 })
+        ));
+        assert_eq!(parsed.candidate_rv, Some(CandidateRV::Sobol));
+        assert_eq!(parsed.num_samples, Some(14));
+        assert_eq!(parsed.trust_region_kind, Some(TrustRegionKind::Morbo));
+        assert_eq!(parsed.rescalarize, Some(Rescalarize::OnPropose));
+    }
+
+    #[test]
+    fn config_fields() {
+        let error = toml::from_str::<ConfigOverrides>("fit_samples = 10").unwrap_err();
+        assert!(error.to_string().contains("unknown field"));
+    }
+}
+
+impl Default for AcquisitionConfig {
+    fn default() -> Self {
+        AcquisitionConfig::UCB { beta: 2.0 }
+    }
+}
+
+/// Initialization strategy type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InitStrategy {
+    /// Latin Hypercube Design.
+    #[default]
+    LHD,
+    /// Random uniform.
+    Random,
+}
+
+/// Create a TuRBO-ENN configuration.
+pub fn turbo_enn() -> OptimizerConfig {
+    OptimizerConfig {
+        surrogate: SurrogateConfig::ENN(ENNSurrogateConfig {
+            k: 10,
+            num_candidates: 30,
+            num_samples: 10,
+            ..Default::default()
+        }),
+        trust_region: TrustRegionConfig::default(),
+        candidates: CandidateConfig {
+            num_candidates_factor: 1000.0,
+            min_candidates: 100,
+            max_candidates: None,
+            num_candidates_per_arm: None,
+            num_pert: 20,
+            candidate_rv: CandidateRV::Uniform,
+        },
+        acquisition: AcquisitionConfig::UCB { beta: 2.0 },
+        noise_aware: false,
+        failure_tolerance_dim: None,
+    }
+}
+
+/// Create a TuRBO-ZERO configuration.
+pub fn turbo_zero() -> OptimizerConfig {
+    OptimizerConfig {
+        surrogate: SurrogateConfig::None,
+        trust_region: TrustRegionConfig::default(),
+        candidates: CandidateConfig {
+            num_candidates_factor: 1000.0,
+            min_candidates: 100,
+            max_candidates: None,
+            num_candidates_per_arm: None,
+            num_pert: 20,
+            candidate_rv: CandidateRV::Uniform,
+        },
+        acquisition: AcquisitionConfig::Random,
+        noise_aware: false,
+        failure_tolerance_dim: None,
+    }
+}
+
+/// Create an LHD-only configuration.
+pub fn lhd_only() -> OptimizerConfig {
+    OptimizerConfig {
+        surrogate: SurrogateConfig::None,
+        trust_region: TrustRegionConfig::default(),
+        candidates: CandidateConfig {
+            num_candidates_factor: 1.0,
+            min_candidates: 1,
+            max_candidates: None,
+            num_candidates_per_arm: None,
+            num_pert: 20,
+            candidate_rv: CandidateRV::Uniform,
+        },
+        acquisition: AcquisitionConfig::Random,
+        noise_aware: false,
+        failure_tolerance_dim: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::EnnStorage;
+    use crate::candidates::CandidateRV;
+    use std::path::Path;
+
+    #[test]
+    fn test_003() {
+        let config = CandidateConfig::default();
+
+        // Basic case: 2D, 1 arm
+        let n = config.num_candidates(2, 1);
+        assert!(n >= 100); // At least min_candidates
+
+        // Larger dimension
+        let n_large = config.num_candidates(10, 1);
+        assert!(n_large >= 1000);
+
+        // More arms
+        let n_arms = config.num_candidates(2, 10);
+        assert!(n_arms >= 100); // 10 * 10 = 100
+    }
+
+    #[test]
+    fn test_004() {
+        // Python default: min(5000, 100*num_dim). Cap at 5000 for high dim.
+        let config = CandidateConfig {
+            num_candidates_factor: 100.0,
+            min_candidates: 100,
+            max_candidates: Some(5000),
+            num_candidates_per_arm: None,
+            num_pert: 20,
+            candidate_rv: CandidateRV::Uniform,
+        };
+        assert_eq!(config.num_candidates(60, 1), 5000);
+        assert_eq!(config.num_candidates(100, 1), 5000);
+        assert_eq!(config.num_candidates(10, 1), 1000);
+    }
+
+    #[test]
+    fn test_configdefaults() {
+        let config = OptimizerConfig::default();
+        assert!(matches!(config.acquisition, AcquisitionConfig::UCB { .. }));
+    }
+
+    #[test]
+    fn test_turboennconfig() {
+        let config = turbo_enn();
+        assert!(matches!(config.surrogate, SurrogateConfig::ENN(_)));
+        assert!(matches!(config.acquisition, AcquisitionConfig::UCB { .. }));
+    }
+
+    #[test]
+    fn test_turbozeroconfig() {
+        let config = turbo_zero();
+        assert!(matches!(config.surrogate, SurrogateConfig::None));
+        assert!(matches!(config.acquisition, AcquisitionConfig::Random));
+    }
+
+    #[test]
+    fn test_lhdonlyconfig() {
+        let config = lhd_only();
+        assert!(matches!(config.surrogate, SurrogateConfig::None));
+        let n = config.candidates.num_candidates(10, 1);
+        assert_eq!(n, 10);
+    }
+
+    #[test]
+    fn test_initstrategyenum() {
+        let init_default = InitStrategy::default();
+        assert_eq!(init_default, InitStrategy::LHD);
+        assert_eq!(InitStrategy::Random as u8, 1);
+    }
+
+    #[test]
+    fn test_010() {
+        use crate::index::IndexDriver;
+
+        let overrides = ConfigOverrides {
+            acquisition: Some(AcquisitionConfig::Thompson),
+            candidate_rv: Some(CandidateRV::Sobol),
+            index_driver: Some(IndexDriver::Exact),
+            num_samples: Some(123),
+            num_candidates: Some(456),
+            scale_x: Some(true),
+            ..Default::default()
+        };
+
+        let config = turbo_enn();
+        let applied = overrides.apply_to(config);
+
+        assert!(matches!(applied.acquisition, AcquisitionConfig::Thompson));
+        assert_eq!(applied.candidates.candidate_rv, CandidateRV::Sobol);
+        if let SurrogateConfig::ENN(enn) = &applied.surrogate {
+            assert_eq!(enn.index_driver, IndexDriver::Exact);
+            assert_eq!(enn.num_samples, 123);
+            assert_eq!(enn.num_candidates, 456);
+            assert!(enn.scale_x);
+        } else {
+            panic!("expected ENN surrogate");
+        }
+    }
+
+    #[test]
+    fn test_011() {
+        let overrides = ConfigOverrides {
+            scale_x: Some(true),
+            ..Default::default()
+        };
+        let applied = overrides.apply_to(turbo_enn());
+        let SurrogateConfig::ENN(enn) = applied.surrogate else {
+            panic!("expected ENN surrogate");
+        };
+        assert!(enn.scale_x);
+    }
+
+    #[test]
+    fn morbo_metrics() {
+        use crate::mbtrregn::MorboTrustRegion;
+        use crate::trregncfg::TrustRegionConfig;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let overrides = ConfigOverrides {
+            trust_region_kind: Some(TrustRegionKind::Morbo),
+            num_metrics: Some(1),
+            ..Default::default()
+        };
+        let applied = overrides.apply_to(turbo_enn());
+        let TrustRegionConfig::Morbo(settings) = applied.trust_region else {
+            panic!("expected Morbo trust region");
+        };
+        let mut rng = StdRng::seed_from_u64(8);
+        let result = MorboTrustRegion::new(2, settings, &mut rng);
+        assert!(
+            result.is_err(),
+            "PyO3/override path must reject num_metrics=1 like Python Morbo config"
+        );
+    }
+
+    #[test]
+    fn candidate_arms() {
+        let cfg = CandidateConfig {
+            num_candidates_factor: 1.0,
+            min_candidates: 10,
+            max_candidates: None,
+            num_candidates_per_arm: Some(25),
+            num_pert: 20,
+            candidate_rv: CandidateRV::Uniform,
+        };
+        assert_eq!(cfg.num_candidates(2, 3), 75);
+        assert_eq!(cfg.num_candidates(2, 8), 200);
+    }
+
+    #[test]
+    fn config_pool() {
+        let overrides = ConfigOverrides {
+            num_candidates_factor: Some(1.0),
+            min_candidates: Some(10),
+            num_candidates_per_arm: Some(40),
+            ..Default::default()
+        };
+        let applied = overrides.apply_to(turbo_zero());
+        assert_eq!(applied.candidates.num_candidates(2, 3), 120);
+        assert_eq!(applied.candidates.num_candidates(2, 8), 320);
+    }
+
+    #[test]
+    fn enn_fields() {
+        let overrides = ConfigOverrides {
+            num_samples: Some(7),
+            num_candidates: Some(11),
+            scale_x: Some(true),
+            ..Default::default()
+        };
+        let applied = overrides.apply_to(turbo_enn());
+        let SurrogateConfig::ENN(enn) = applied.surrogate else {
+            panic!("expected ENN surrogate");
+        };
+        assert_eq!(enn.num_samples, 7);
+        assert_eq!(enn.num_candidates, 11);
+        assert!(enn.scale_x);
+    }
+
+    #[test]
+    fn enn_dir() {
+        use crate::index::IndexDriver;
+        use std::path::PathBuf;
+
+        let overrides = ConfigOverrides {
+            index_driver: Some(IndexDriver::BpAnnDisk),
+            enn_storage: Some(EnnStorage::Disk),
+            work_dir: Some(PathBuf::from("/tmp/enn_work")),
+            ..Default::default()
+        };
+        let applied = overrides.apply_to(turbo_enn());
+        let SurrogateConfig::ENN(enn) = applied.surrogate else {
+            panic!("expected ENN surrogate");
+        };
+        assert_eq!(enn.index_driver, IndexDriver::BpAnnDisk);
+        assert_eq!(enn.storage, EnnStorage::Disk);
+        assert_eq!(enn.work_dir.as_deref(), Some(Path::new("/tmp/enn_work")));
+    }
+
+    #[test]
+    fn morbo_propose() {
+        let overrides = ConfigOverrides {
+            trust_region_kind: Some(TrustRegionKind::Morbo),
+            num_metrics: Some(2),
+            ..Default::default()
+        };
+        let applied = overrides.apply_to(turbo_enn());
+        let TrustRegionConfig::Morbo(settings) = applied.trust_region else {
+            panic!("expected Morbo trust region");
+        };
+        assert_eq!(
+            settings.rescalarize,
+            Rescalarize::OnPropose,
+            "missing rescalarize should match Python MorboTRConfig default ON_PROPOSE"
+        );
+    }
+}

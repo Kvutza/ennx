@@ -1,0 +1,309 @@
+//! Integration tests for BPANN indexing and search behavior.
+
+use bpann::backend::open_stride;
+use bpann::index::kmeans::PartitionTree;
+use bpann::index::page::closest_child;
+use bpann::index::{BpannIndex, LEAF_CAPACITY};
+use bpann::mmap_store::MmapColumnStore;
+use bpann::BpannBackend;
+use ndarray::array;
+use std::sync::Mutex;
+use tempfile::TempDir;
+
+#[test]
+fn observation_called2() {
+    let dir = TempDir::new().unwrap();
+    bpann::observation::check_dims(4).unwrap();
+    bpann::observation::check_rows(10).unwrap();
+    bpann::observation::write_metadata(dir.path(), 0, 4, 1, false, 0).unwrap();
+    bpann::observation::write_obs(dir.path(), 0).unwrap();
+    bpann::observation::write_rows(dir.path(), 0).unwrap();
+    let mut counter = bpann::observation::NumObsCounter::open(dir.path()).unwrap();
+    counter.set(0);
+    assert_eq!(bpann::observation::bpann_obs(dir.path()), Some(0));
+    bpann::observation::check_backend(dir.path(), bpann::observation::INDEX_BACKEND).unwrap();
+    let yv = array![[0.1]];
+    let mut yvar = bpann::observation::open_yvar(dir.path(), 1, Some(&yv)).unwrap();
+    bpann::observation::append_yvar(dir.path(), 1, &mut yvar, Some(&array![[0.2]].view())).unwrap();
+    let dirty = Mutex::new(false);
+    bpann::observation::mark_dirty(&dirty);
+    bpann::observation::load_rows(dir.path());
+    bpann::observation::load_backend(dir.path());
+    bpann::observation::parse_string(r#"{"index_backend":"bpann_disk"}"#, "index_backend");
+    let mut x = MmapColumnStore::open_mmap(dir.path().join("x.bin"), 2, None).unwrap();
+    let mut y = MmapColumnStore::open_mmap(dir.path().join("y.bin"), 1, None).unwrap();
+    x.mmap_append(&array![[0.0, 0.0]].view()).unwrap();
+    y.mmap_append(&array![[0.0]].view()).unwrap();
+    bpann::observation::train_rows(1, &x, &y, None, &[0]).unwrap();
+    open_stride(4).unwrap();
+}
+
+#[test]
+fn search_called() {
+    let vectors = vec![vec![0.0f32, 0.0], vec![1.0, 0.0]];
+    let dir = TempDir::new().unwrap();
+    let index =
+        BpannIndex::build_vectors(&vectors, 2, LEAF_CAPACITY, 0, dir.path().join("index")).unwrap();
+    let _ = bpann::index::search::search_leaves(&index, &[0.0, 0.0], 1);
+    let _ = bpann::index::search::search_only(&index, &[0.0, 0.0], 1, 2);
+    let mut log = Vec::new();
+    let _ = bpann::index::search::search_refinement(&index, &[0.0, 0.0], 1, 2, &mut log);
+    let _ = bpann::index::search::bpann_k(&vectors, &[vec![0.0, 0.0]], 1, &index);
+    let _ = bpann::index::search::bpann_topk(&vectors, &[0.0, 0.0], 1);
+}
+
+#[test]
+fn merge_called() {
+    let dir = TempDir::new().unwrap();
+    let mut store = MmapColumnStore::open_mmap(dir.path().join("x.bin"), 2, None).unwrap();
+    store
+        .mmap_append(&array![[0.0, 0.0], [1.0, 0.0]].view())
+        .unwrap();
+    let mut buf = Vec::new();
+    bpann::distance::bpann_f32(&[1.0, 0.0], false, &[1.0, 1.0], &mut buf);
+    let _ = bpann::distance::sq_rows(&[0.0, 0.0], &store, &[0, 1], false, &[1.0, 1.0]).unwrap();
+    let _ = bpann::distance::sq_l2(
+        array![0.0, 0.0].view(),
+        array![1.0, 0.0].view(),
+        false,
+        array![1.0, 1.0].view(),
+    );
+    let _ = bpann::merge::merge_candidates(
+        &store,
+        &[0.0, 0.0],
+        &[(0, 0.0)],
+        &[(1, 1.0)],
+        1,
+        2,
+        false,
+        false,
+        &[1.0, 1.0],
+    )
+    .unwrap();
+    let _ =
+        bpann::index::search::bpann_mmap(&store, 0, 2, &[0.0, 0.0], 1, false, &[1.0, 1.0]).unwrap();
+}
+
+#[test]
+fn kmeans_called() {
+    let vectors = vec![vec![0.0f32, 0.0], vec![1.0, 0.0], vec![0.0, 1.0]];
+    let row_ids = vec![0, 1, 2];
+    let tree = PartitionTree::build(&row_ids, &vectors, 2, 0);
+    assert!(!tree.all_leaves().is_empty());
+    let child = closest_child(&[0.0, 0.0], &[vec![1.0, 0.0], vec![0.0, 1.0]]);
+    assert_eq!(child, 0);
+    let dir = TempDir::new().unwrap();
+    let mut b = BpannBackend::new_empty(dir.path().to_path_buf(), 2, 1).unwrap();
+    b.append_rows(
+        &array![[0.0, 0.0], [1.0, 0.0]].view(),
+        &array![[0.0], [1.0]].view(),
+        None,
+    )
+    .unwrap();
+    let _ = b.train_rows(&[1]).unwrap();
+}
+
+#[test]
+fn backend_accessors() {
+    let dir = TempDir::new().unwrap();
+    let mut b = BpannBackend::new_empty(dir.path().to_path_buf(), 2, 1).unwrap();
+    assert!(b.index_deferred());
+    b.append_rows(
+        &array![[0.0, 0.0], [1.0, 0.0]].view(),
+        &array![[0.0], [1.0]].view(),
+        None,
+    )
+    .unwrap();
+    let (x, y, yvar) = b.train_rows(&[0, 1]).unwrap();
+    assert!((x[[0, 0]] - 0.0).abs() < 1e-12);
+    assert!((y[[1, 0]] - 1.0).abs() < 1e-12);
+    assert!(yvar.is_none());
+    let (y0, yv0) = b.y_yvar(0).unwrap();
+    assert!((y0[0] - 0.0).abs() < 1e-12);
+    assert!(yv0.is_none());
+    // Small-N in-core path: repeated search must agree (cache reuse).
+    let (_d1, idx1) = b.search(&array![[0.1, 0.1]].view(), 1, false).unwrap();
+    let (_d2, idx2) = b.search(&array![[0.1, 0.1]].view(), 1, false).unwrap();
+    assert_eq!(idx1[[0, 0]], idx2[[0, 0]]);
+    assert_eq!(idx1[[0, 0]], 0);
+    assert_eq!(bpann::N_LIMIT, 8192);
+    let flat = bpann::load_or_build_small_n_cache(&b, b.len()).unwrap();
+    assert_eq!(flat.len(), b.len() * 2);
+    let hits = bpann::topk_flat_sq_l2(&[0.0, 0.0], &flat, 2, 2, 1);
+    assert_eq!(hits[0].0, 0);
+    assert!(bpann::OrderedF32(1.0) > bpann::OrderedF32(0.0));
+    assert!(bpann::topk_flat_sq_l2(&[0.0, 0.0], &[], 0, 2, 1).is_empty());
+    let scored = bpann::score_queries_flat(
+        &[vec![0.1, 0.1]],
+        &bpann::ScoreQueriesFlat {
+            flat: &flat,
+            total: 2,
+            num_dim: 2,
+            scale_x: false,
+            x_scale: &[1.0, 1.0],
+            k_eff: 1,
+            pool_k: 1,
+            exclude_nearest: false,
+        },
+    );
+    assert_eq!(scored.len(), 1);
+    assert_eq!(scored[0].1[0], 0);
+    // Append must invalidate the small-N cache (next search still correct).
+    b.append_rows(&array![[2.0, 0.0]].view(), &array![[2.0]].view(), None)
+        .unwrap();
+    let (_, idx3) = b.search(&array![[2.0, 0.0]].view(), 1, false).unwrap();
+    assert_eq!(idx3[[0, 0]], 2);
+    b.mark_stale();
+    b.ensure_scale(true, &array![1.0, 1.0]).unwrap();
+    b.ensure_scale(false, &array![1.0, 1.0]).unwrap();
+    let (_, idx) = b.search(&array![[0.1, 0.1]].view(), 1, false).unwrap();
+    assert_eq!(idx[[0, 0]], 0);
+}
+
+#[test]
+fn n_nearest() {
+    use ndarray::Array2;
+    let dir = TempDir::new().unwrap();
+    let mut b = BpannBackend::new_empty(dir.path().to_path_buf(), 2, 1).unwrap();
+    // N > N_LIMIT forces the indexed+pending path.
+    let n = bpann::N_LIMIT + 50;
+    let mut xs = Array2::<f64>::zeros((n, 2));
+    let mut ys = Array2::<f64>::zeros((n, 1));
+    for i in 0..n {
+        xs[[i, 0]] = i as f64;
+        ys[[i, 0]] = i as f64;
+    }
+    b.append_rows(&xs.view(), &ys.view(), None).unwrap();
+    b.ensure_sync().unwrap();
+    let mut dist2s = Array2::zeros((1, 1));
+    let mut indices = Array2::zeros((1, 1));
+    let x_scale = [1.0f64, 1.0];
+    bpann::search_pending(
+        &b,
+        &[vec![10.0, 0.0]],
+        &mut dist2s,
+        &mut indices,
+        bpann::SearchPendingArgs {
+            total: n,
+            k_eff: 1,
+            pool_k: 1,
+            exclude_nearest: false,
+            scale_x: false,
+            x_scale: &x_scale,
+            num_dim: 2,
+        },
+    )
+    .unwrap();
+    assert_eq!(indices[[0, 0]], 10);
+}
+
+#[test]
+fn incremental_merge() {
+    let dir = TempDir::new().unwrap();
+    let mut b = BpannBackend::new_empty(dir.path().to_path_buf(), 4, 1)
+        .unwrap()
+        .with_soft(2)
+        .defer_indexing(false);
+    for i in 0..20 {
+        b.append_row(&array![i as f64, 0.0, 0.0, 0.0], &array![i as f64], None)
+            .unwrap();
+    }
+    assert_eq!(b.indexed_rows(), 20);
+    let (_, idx) = b
+        .search(&array![[5.0, 0.0, 0.0, 0.0]].view(), 3, false)
+        .unwrap();
+    assert_eq!(idx[[0, 0]], 5);
+    let reopened = BpannBackend::reopen(dir.path().to_path_buf()).unwrap();
+    assert_eq!(reopened.indexed_rows(), 20);
+    let merged = bpann::merge::merge_dist(&[(0, 0.0), (1, 4.0)], &[(2, 1.0)], 2, 3, false);
+    assert_eq!(merged.len(), 2);
+    assert_eq!(merged[0].0, 0);
+}
+
+#[test]
+fn multi_count() {
+    use std::fs;
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().to_path_buf();
+    let rows = 2500usize;
+    let dim = 4usize;
+    {
+        let mut b = BpannBackend::new_empty(path.clone(), dim, 1)
+            .unwrap()
+            .with_soft(1000)
+            .defer_indexing(true);
+        for (start, count) in [(0, 1000usize), (1000, 1000usize), (2000, 500usize)] {
+            let x = ndarray::Array2::from_shape_fn((count, dim), |(i, j)| (start + i + j) as f64);
+            let y = ndarray::Array2::from_shape_fn((count, 1), |(i, _)| (start + i) as f64);
+            b.append_rows(&x.view(), &y.view(), None).unwrap();
+            b.ensure_sync().unwrap();
+        }
+        assert_eq!(b.indexed_rows(), rows);
+        b.persist_index().unwrap();
+    }
+    let header_text = fs::read_to_string(path.join("index/header.json")).expect("header.json");
+    assert!(
+        header_text.contains("\"indexed_rows\": 2500"),
+        "header: {header_text}"
+    );
+    let b2 = BpannBackend::reopen(path.clone()).unwrap();
+    assert_eq!(b2.indexed_rows(), rows);
+    let pages_first = fs::read(path.join("index/pages.bin")).unwrap();
+    let b3 = BpannBackend::reopen(path.clone()).unwrap();
+    assert_eq!(b3.indexed_rows(), rows);
+    let pages_second = fs::read(path.join("index/pages.bin")).unwrap();
+    assert_eq!(pages_first, pages_second);
+}
+
+#[test]
+fn ensure_persist() {
+    let dir = TempDir::new().unwrap();
+    let mut b = BpannBackend::new_empty(dir.path().to_path_buf(), 2, 1).unwrap();
+    b.ensure_sync().unwrap();
+    b.append_rows(
+        &array![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]].view(),
+        &array![[0.0], [1.0], [2.0]].view(),
+        None,
+    )
+    .unwrap();
+    b.ensure_sync().unwrap();
+    assert_eq!(b.indexed_rows(), 3);
+    assert!(!dir.path().join("index/header.json").exists());
+    assert!(!dir.path().join("index/pages.bin").exists());
+    b.persist_index().unwrap();
+    assert!(dir.path().join("index/header.json").exists());
+}
+
+#[test]
+fn multi_threshold() {
+    let dir = TempDir::new().unwrap();
+    let mut b = BpannBackend::new_empty(dir.path().to_path_buf(), 4, 1)
+        .unwrap()
+        .with_soft(400)
+        .defer_indexing(false);
+    let x0 = ndarray::Array2::from_shape_fn((700, 4), |(i, j)| (i + j) as f64);
+    let y0 = ndarray::Array2::from_shape_fn((700, 1), |(i, _)| i as f64);
+    b.append_rows(&x0.view(), &y0.view(), None).unwrap();
+    let x1 = ndarray::Array2::from_shape_fn((400, 4), |(i, j)| (700 + i + j) as f64);
+    let y1 = ndarray::Array2::from_shape_fn((400, 1), |(i, _)| (700 + i) as f64);
+    b.append_rows(&x1.view(), &y1.view(), None).unwrap();
+    assert_eq!(b.indexed_rows(), 1100);
+    assert!(b.indexed_rows() > 1000);
+    let (_, idx) = b
+        .search(&array![[50.0, 0.0, 0.0, 0.0]].view(), 5, false)
+        .unwrap();
+    assert!(idx[[0, 0]] >= 0);
+}
+
+#[test]
+fn search_index() {
+    let dir = TempDir::new().unwrap();
+    let mut b = BpannBackend::new_empty(dir.path().to_path_buf(), 2, 1).unwrap();
+    let rows = 2501usize;
+    let x = ndarray::Array2::from_shape_fn((rows, 2), |(i, j)| (i + j) as f64);
+    let y = ndarray::Array2::from_shape_fn((rows, 1), |(i, _)| i as f64);
+    b.append_rows(&x.view(), &y.view(), None).unwrap();
+    b.ensure_sync().unwrap();
+    let (_, idx) = b.search(&x.slice(ndarray::s![0..1, ..]), 5, false).unwrap();
+    assert!(idx[[0, 0]] >= 0 && (idx[[0, 0]] as usize) < rows);
+}

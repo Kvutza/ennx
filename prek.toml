@@ -1,0 +1,92 @@
+# Source formatting and checks used by `./ennx fmt`, `./ennx test`, and `./ennx dev`.
+# Repair hooks may edit files; check hooks must be read-only.
+#:schema https://www.schemastore.org/prek.json
+
+minimum_prek_version = "0.4.11"
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+  { id = "check-yaml" },
+  {
+    id = "check-json",
+    exclude = "^tests/fixtures/"
+  },
+  {
+    id = "check-added-large-files",
+    args = ["--maxkb=500"]
+  }
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "repair-rust"
+name = "Rust formatting repair"
+entry = "cargo fmt --all"
+language = "system"
+pass_filenames = false
+
+[[repos.hooks]]
+id = "check-rust"
+name = "Rust formatting check"
+entry = "cargo fmt --all -- --check"
+language = "system"
+pass_filenames = false
+
+[[repos.hooks]]
+id = "repair-python"
+name = "Python lint repair"
+entry = "ruff check --fix"
+language = "python"
+additional_dependencies = ["ruff==0.14.14"]
+types = ["python"]
+
+[[repos.hooks]]
+id = "repair-python-format"
+name = "Python formatting repair"
+entry = "ruff format"
+language = "python"
+additional_dependencies = ["ruff==0.14.14"]
+types = ["python"]
+
+[[repos.hooks]]
+id = "check-python"
+name = "Python lint check"
+entry = "ruff check"
+language = "python"
+additional_dependencies = ["ruff==0.14.14"]
+types = ["python"]
+
+[[repos.hooks]]
+id = "check-python-format"
+name = "Python formatting check"
+entry = "ruff format --check"
+language = "python"
+additional_dependencies = ["ruff==0.14.14"]
+types = ["python"]
+
+[[repos.hooks]]
+id = "forbid-binary"
+name = "Forbid committing binary files"
+entry = "Binary files are not allowed in this repository."
+language = "fail"
+types = ["binary"]
+exclude = '(?i)\.pdf$'
+
+[[repos.hooks]]
+id = "semantic-name"
+name = "Compact code names"
+entry = "python3 scripts/check_names.py"
+language = "system"
+pass_filenames = false
+
+[[repos.hooks]]
+id = "kiss-check"
+name = "KISS architecture"
+entry = "kiss check ."
+language = "system"
+pass_filenames = false

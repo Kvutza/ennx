@@ -1,0 +1,43 @@
+load("//buck2:reindeer_rules.bzl", "app_rust_library")
+
+filegroup(
+    name = "python-source",
+    srcs = glob(["src/**/*.rs"]) + ["Cargo.toml"],
+    visibility = ["PUBLIC"],
+)
+
+app_rust_library(
+    name = "ennx-py",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "ennx_rust",
+    crate_root = "src/lib.rs",
+    dlopen_enable = True,
+    edition = "2021",
+    features = ["default", "usearch-native"] + select({
+        "//:linux-arm64": ["opencl"],
+        "//:linux-x86_64": ["opencl"],
+        "//:macos-arm64": ["metal"],
+    }),
+    rustc_flags = select({
+        "//:linux-arm64": ["-Clink-arg=-Wl,-rpath,$ORIGIN/.dylibs"],
+        "//:linux-x86_64": ["-Clink-arg=-Wl,-rpath,$ORIGIN/.dylibs"],
+        "//:macos-arm64": [
+            "-Clink-arg=-undefined",
+            "-Clink-arg=dynamic_lookup",
+            "-Clink-arg=-Wl,-rpath,@loader_path/.dylibs",
+        ],
+        "DEFAULT": [],
+    }),
+    visibility = ["PUBLIC"],
+    deps = [
+        "//rust/crates/ennx:usearch-bridge",
+        "//rust/crates/ennx:ennx",
+        "//rust:ndarray",
+        "//rust:numpy",
+        "//rust:pyo3",
+        "//rust:rand",
+    ] + select({
+        "//:macos-arm64": ["//buck2/native:openmp-macos"],
+        "DEFAULT": [],
+    }),
+)

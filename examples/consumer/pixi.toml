@@ -1,0 +1,11 @@
+[workspace]
+name = "ennx-consumer"
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[dependencies]
+python = "3.13.*"
+numpy = "*"
+
+[target.osx-arm64.pypi-dependencies]
+ennx = { url = "https://github.com/Kvutza/ennx/releases/download/v0.3.14/ennx-0.3.14-cp313-cp313-macosx_11_0_arm64.whl" }

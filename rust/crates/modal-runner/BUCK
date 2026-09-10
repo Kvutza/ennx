@@ -1,0 +1,5 @@
+filegroup(
+    name = "modal-source",
+    srcs = glob(["src/**/*.rs"]) + ["Cargo.toml"],
+    visibility = ["PUBLIC"],
+)

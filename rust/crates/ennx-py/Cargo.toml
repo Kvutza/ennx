@@ -1,0 +1,36 @@
+[package]
+name = "ennx-py"
+version.workspace = true
+publish = false
+edition.workspace = true
+build = "src/xpybld.rs"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Python bindings for ENN core algorithms"
+readme = "../../../README.md"
+
+[lib]
+name = "ennx_rust"
+crate-type = ["cdylib", "rlib"]
+
+[build-dependencies]
+ennx = { workspace = true, default-features = false }
+
+[dependencies]
+ennx = { workspace = true, default-features = false }
+ndarray = { workspace = true }
+numpy = { workspace = true }
+pyo3 = { workspace = true }
+rand = { workspace = true }
+
+[features]
+default = []
+cuda = ["ennx/cuda"]
+metal = ["ennx/metal"]
+opencl = ["ennx/opencl"]
+usearch = ["ennx/usearch"]
+usearch-native = ["ennx/usearch-native"]
+usearch-numkong = ["ennx/usearch-numkong"]

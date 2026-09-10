@@ -1,0 +1,58 @@
+# Structural thresholds for repository-wide review. Behavioral coverage belongs to
+# the Rust and Python test runners, not KISS's lexical name matcher.
+
+[global]
+docs_allowed = ["./"]
+duplication_enabled = true
+min_similarity = 0.9
+orphan_module_enabled = false
+
+[test]
+test_coverage_threshold = 0
+
+[python]
+boolean_parameters = 1
+branches_per_function = 10
+calls_per_function = 31
+concrete_types_per_file = 4
+cycle_size = 0
+decorators_per_function = 1
+dependency_depth = 11
+functions_per_file = 65
+imported_names_per_file = 48
+indirect_dependencies = 110
+interface_types_per_file = 3
+keyword_only_args = 6
+lines_per_file = 594
+local_variables = 18
+max_indentation = 4
+methods_per_class = 28
+nested_function_depth = 1
+positional_args = 7
+return_values_per_function = 7
+returns_per_function = 6
+statements_per_file = 204
+statements_per_function = 34
+statements_per_try_block = 2
+
+[rust]
+arguments = 16
+attributes_per_function = 3
+boolean_parameters = 2
+branches_per_function = 15
+calls_per_function = 75
+concrete_types_per_file = 11
+cycle_size = 0
+dependency_depth = 2
+functions_per_file = 39
+imported_names_per_file = 28
+indirect_dependencies = 2
+interface_types_per_file = 1
+lines_per_file = 1163
+local_variables = 29
+max_indentation = 6
+methods_per_class = 31
+nested_function_depth = 4
+returns_per_function = 9
+statements_per_file = 289
+statements_per_function = 65

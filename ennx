@@ -1,0 +1,308 @@
+#!/bin/sh
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$repo_dir"
+export BUCK_ISOLATION_DIR=${BUCK_ISOLATION_DIR:-dev}
+
+fail() {
+    echo "ennx: $*" >&2
+    exit 1
+}
+
+dotslash() {
+    tools/bootstrap-dotslash >/dev/null
+    tool="$repo_dir/.buck2-tools/bin/dotslash"
+    if [ ! -x "$tool" ] && [ -x "$repo_dir/.buck2-tools/bin/dotslash.exe" ]; then
+        tool="$repo_dir/.buck2-tools/bin/dotslash.exe"
+    fi
+    "$tool" "$@"
+}
+
+hooks() {
+    dotslash tools/prek run "$@" \
+        --config prek.toml \
+        --all-files \
+        --show-diff-on-failure
+}
+
+check_deps() {
+    echo "Checking dependencies..."
+    sh tools/check-build-deps
+}
+
+run_format() {
+    check=$1
+    if [ "$check" = 1 ]; then
+        echo "Checking formatting..."
+        hooks check-rust check-python-format
+    else
+        echo "Formatting..."
+        hooks trailing-whitespace end-of-file-fixer repair-rust repair-python-format ||
+            hooks trailing-whitespace end-of-file-fixer repair-rust repair-python-format
+    fi
+}
+
+run_formal() {
+    if [ ! -d formal ]; then
+        return 0
+    fi
+    echo "Testing formal contracts..."
+    (cd formal && lake build)
+    if rg -n '\b(sorry|admit)\b|^[[:space:]]*axiom\b' formal --glob '*.lean'; then
+        fail "formal proof holes are not allowed"
+    fi
+}
+
+run_build() {
+    verification=$1
+    shift
+    out=dist
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --tests)
+                [ "$verification" = smoke ] || fail "build received --tests more than once"
+                verification=full
+                shift
+                ;;
+            --out)
+                [ "$out" = dist ] || fail "build received --out more than once"
+                [ "$#" -ge 2 ] || fail "build --out requires a directory"
+                case "$2" in
+                    "" | -*) fail "build --out requires a directory" ;;
+                esac
+                out=$2
+                shift 2
+                ;;
+            *)
+                fail "invalid build option: $1"
+                ;;
+        esac
+    done
+    echo "Preparing Python environments..."
+    pixi install --all
+    if [ "${ENNX_DEPS_CHECKED:-0}" != 1 ]; then
+        check_deps
+    fi
+    echo "Building native code, tests, and all Python wheels..."
+    bash tools/build-wheels "$out" "$verification"
+}
+
+run_test() {
+    python=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --python)
+                [ "$python" = 0 ] || fail "test received --python more than once"
+                python=1
+                shift
+                ;;
+            *)
+                fail "invalid test option: $1"
+                ;;
+        esac
+    done
+    if [ "${ENNX_DEPS_CHECKED:-0}" != 1 ]; then
+        check_deps
+    fi
+    if [ "$python" = 1 ]; then
+        tools/buck2-wheel-verify --tests
+        return 0
+    fi
+    run_formal
+    echo "Testing native code..."
+    ./buck2w test //buck2/tests:all --local-only
+    echo "All checks passed."
+}
+
+case "${1:-}" in
+    "" | -h | --help | help)
+        if [ "$#" -le 1 ]; then
+            cat <<'EOF'
+Build, verify, and tune ENNX through Buck2
+
+Usage: ./ennx <COMMAND>
+
+Commands:
+  build  Build native code, tests, and all supported Python wheels
+  test   Run formal contracts and native tests
+  fmt    Format the repository or check formatting without edits
+  tune   Run a configured experiment
+  dev    Format, build, and test
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+EOF
+            exit 0
+        fi
+        if [ "${1:-}" = help ]; then
+            shift
+            case "${1:-}" in
+                build | test | fmt | tune)
+                    exec "$0" "$1" --help
+                    ;;
+                dev)
+                    cat <<'EOF'
+Format, build, and test
+
+Usage: ./ennx dev
+
+Options:
+  -h, --help  Print help
+EOF
+                    exit 0
+                    ;;
+                *)
+                    fail "invalid help command: ${1:-}"
+                    ;;
+            esac
+        fi
+        ;;
+    -V | --version | version)
+        if [ "$#" -eq 1 ]; then
+            echo "ennx 0.2.0"
+            exit 0
+        fi
+        ;;
+    build)
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ]; then
+            cat <<'EOF'
+Build native code, tests, and all supported Python wheels
+
+Usage: ./ennx build [OPTIONS]
+
+Options:
+      --tests      Run full Python verification instead of smoke tests
+      --out <DIR>  Write wheels into this directory [default: dist]
+  -h, --help       Print help
+EOF
+            exit 0
+        fi
+        shift
+        run_build smoke "$@"
+        exit 0
+        ;;
+    test)
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ]; then
+            cat <<'EOF'
+Run formal contracts and native tests
+
+Usage: ./ennx test [OPTIONS]
+
+Options:
+      --python  Run installed-wheel Python tests; requires ENNX_WHEEL_PATH
+  -h, --help    Print help
+EOF
+            exit 0
+        fi
+        shift
+        run_test "$@"
+        exit 0
+        ;;
+    fmt)
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ]; then
+            cat <<'EOF'
+Format the repository or check formatting without edits
+
+Usage: ./ennx fmt [OPTIONS]
+
+Options:
+      --check  Check formatting without changing files
+  -h, --help   Print help
+EOF
+            exit 0
+        fi
+        shift
+        case "${1:-}" in
+            "")
+                run_format 0
+                exit 0
+                ;;
+            --check)
+                shift
+                [ "$#" -eq 0 ] || fail "invalid fmt option: $1"
+                run_format 1
+                exit 0
+                ;;
+            *)
+                fail "invalid fmt option: $1"
+                ;;
+        esac
+        ;;
+    tune)
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ] || [ "${2:-}" = help ]; then
+            cat <<'EOF'
+Run a configured experiment
+
+Usage: ./ennx tune <COMMAND>
+
+Commands:
+  knn       Run a KNN frontier experiment
+  proposal  Run a resident proposal experiment
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+EOF
+            exit 0
+        fi
+        if [ "${3:-}" = -h ] || [ "${3:-}" = --help ]; then
+            case "${2:-}" in
+                knn)
+                    cat <<'EOF'
+Run a KNN frontier experiment
+
+Usage: ./ennx tune knn <CONFIG>
+
+Arguments:
+  <CONFIG>  TOML config path
+
+Options:
+  -h, --help  Print help
+EOF
+                    exit 0
+                    ;;
+                proposal)
+                    cat <<'EOF'
+Run a resident proposal experiment
+
+Usage: ./ennx tune proposal <CONFIG>
+
+Arguments:
+  <CONFIG>  TOML config path
+
+Options:
+  -h, --help  Print help
+EOF
+                    exit 0
+                    ;;
+            esac
+        fi
+        ;;
+    dev)
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ]; then
+            cat <<'EOF'
+Format, build, and test
+
+Usage: ./ennx dev
+
+Options:
+  -h, --help  Print help
+EOF
+            exit 0
+        fi
+        shift
+        [ "$#" -eq 0 ] || fail "invalid dev option: $1"
+        run_format 0
+        run_build full
+        ENNX_DEPS_CHECKED=1 run_test
+        exit 0
+        ;;
+    *)
+        fail "invalid command: ${1:-}"
+        ;;
+esac
+
+exec ./buck2w run //rust/crates/dev-cli:ennx -- "$@"

@@ -1,0 +1,219 @@
+load("@crates//:defs.bzl", "aliases", "crate_edition")
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("//rust/crates/ennx:defs.bzl", "ennx_crate_deps")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+ENNX_SRCS = glob(
+    ["src/**/*.rs"],
+    exclude = ["src/ennx_build.rs"],
+)
+
+ENNX_SHADER_SRCS = glob([
+    "src/**/*.cl",
+    "src/**/*.metal",
+])
+
+ENNX_CRATES = [
+    "memmap2",
+    "ndarray",
+    "rand",
+    "rand_distr",
+    "rayon",
+    "serde",
+    "sobol",
+    "thiserror",
+    "toml",
+]
+
+ENNX_TEST_CRATES = ENNX_CRATES + [
+    "rand_chacha",
+    "tempfile",
+]
+
+ENNX_DEPS = ennx_crate_deps(ENNX_CRATES) + [
+    "//rust/crates/bpann",
+]
+
+ENNX_TEST_DEPS = ennx_crate_deps(ENNX_TEST_CRATES) + [
+    "//rust/crates/bpann",
+]
+
+cc_library(
+    name = "usearch_bridge",
+    srcs = ["src/usearch_bridge.cpp"],
+    hdrs = ["src/usearch_bridge.h"],
+    copts = [
+        "-std=c++17",
+        "-Wno-unknown-pragmas",
+    ],
+    includes = ["src"],
+    deps = ["@usearch_src//:usearch"],
+)
+
+rust_library(
+    name = "ennx_cpu",
+    srcs = ENNX_SRCS,
+    aliases = aliases(),
+    compile_data = ENNX_SHADER_SRCS,
+    crate_features = ["usearch-native"],
+    crate_name = "ennx",
+    crate_root = "src/lib.rs",
+    edition = crate_edition(),
+    link_deps = [
+        ":usearch_bridge",
+    ],
+    deps = ENNX_DEPS,
+)
+
+rust_library(
+    name = "ennx_metal",
+    srcs = ENNX_SRCS,
+    aliases = aliases(),
+    compile_data = ENNX_SHADER_SRCS,
+    crate_features = [
+        "metal",
+        "usearch-native",
+    ],
+    crate_name = "ennx",
+    crate_root = "src/lib.rs",
+    edition = crate_edition(),
+    link_deps = [
+        ":usearch_bridge",
+    ],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ENNX_DEPS + [
+        "@crates//:metal",
+    ],
+)
+
+rust_library(
+    name = "ennx_opencl",
+    srcs = ENNX_SRCS,
+    aliases = aliases(),
+    compile_data = ENNX_SHADER_SRCS,
+    crate_features = [
+        "opencl",
+        "usearch-native",
+    ],
+    crate_name = "ennx",
+    crate_root = "src/lib.rs",
+    edition = crate_edition(),
+    link_deps = [
+        ":usearch_bridge",
+    ],
+    deps = ENNX_DEPS + [
+        "@crates//:opencl3",
+    ],
+)
+
+alias(
+    name = "ennx",
+    actual = ":ennx_cpu",
+)
+
+alias(
+    name = "ennx_accelerators",
+    actual = select({
+        "@platforms//os:linux": ":ennx_opencl",
+        "@platforms//os:macos": ":ennx_metal",
+        "//conditions:default": ":ennx_cpu",
+    }),
+)
+
+rust_test(
+    name = "ennx_test",
+    aliases = aliases(
+        normal_dev = True,
+        proc_macro_dev = True,
+    ),
+    crate = ":ennx_cpu",
+    deps = ENNX_TEST_DEPS,
+)
+
+rust_binary(
+    name = "trial_bench_metal",
+    srcs = ["examples/trial_bench.rs"],
+    aliases = aliases(normal_dev = True),
+    crate_name = "trial_bench_metal",
+    crate_root = "examples/trial_bench.rs",
+    edition = crate_edition(),
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":ennx_metal",
+    ],
+)
+
+rust_binary(
+    name = "trial_bench_opencl",
+    srcs = ["examples/trial_bench.rs"],
+    aliases = aliases(normal_dev = True),
+    crate_name = "trial_bench_opencl",
+    crate_root = "examples/trial_bench.rs",
+    edition = crate_edition(),
+    deps = [
+        ":ennx_opencl",
+    ],
+)
+
+rust_binary(
+    name = "knn_frontier_metal",
+    srcs = ["examples/knn_frontier.rs"],
+    aliases = aliases(normal_dev = True),
+    crate_name = "knn_frontier_metal",
+    crate_root = "examples/knn_frontier.rs",
+    edition = crate_edition(),
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":ennx_metal",
+    ] + ennx_crate_deps(["ndarray"]),
+)
+
+rust_test(
+    name = "knn_metal_test",
+    srcs = ["tests/knn_metal.rs"],
+    aliases = aliases(normal_dev = True),
+    crate_name = "knn_metal_test",
+    crate_root = "tests/knn_metal.rs",
+    edition = crate_edition(),
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":ennx_metal",
+    ] + ennx_crate_deps(["ndarray"]),
+)
+
+rust_test(
+    name = "trial_search_metal_test",
+    srcs = ["tests/trial_search.rs"],
+    aliases = aliases(
+        normal_dev = True,
+        proc_macro_dev = True,
+    ),
+    crate_features = ["metal"],
+    crate_name = "trial_search_metal_test",
+    crate_root = "tests/trial_search.rs",
+    edition = crate_edition(),
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ENNX_TEST_DEPS + [
+        ":ennx_metal",
+    ],
+)
+
+rust_test(
+    name = "trial_search_opencl_test",
+    srcs = ["tests/trial_search.rs"],
+    aliases = aliases(
+        normal_dev = True,
+        proc_macro_dev = True,
+    ),
+    crate_features = ["opencl"],
+    crate_name = "trial_search_opencl_test",
+    crate_root = "tests/trial_search.rs",
+    edition = crate_edition(),
+    deps = ENNX_TEST_DEPS + [
+        ":ennx_opencl",
+    ],
+)
