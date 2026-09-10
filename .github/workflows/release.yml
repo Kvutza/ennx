@@ -60,7 +60,13 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.commit }}
           fetch-depth: 0
+          fetch-tags: true
           lfs: true
+
+      - name: Fetch release tag
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
 
       - name: Install Rust toolchain
         run: |
@@ -129,6 +135,12 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.commit }}
           fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch release tag
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
 
       - name: Download artifacts
         uses: actions/download-artifact@v4

@@ -74,5 +74,26 @@ fn metal_views() {
 #[cfg(feature = "opencl")]
 #[test]
 fn opencl_views() {
+    match Optimizer::new_batch(
+        &[8; 4],
+        0.0,
+        vec![Parameter::new(0, 4, 8, 0.1, 1.0, 0.3).unwrap()],
+        2,
+        ComputeDevice::OpenCl,
+        2,
+        TRLengthConfig::new(0.5, 0.25, 2.0),
+        2,
+    ) {
+        Ok(_) => {}
+        Err(error) if opencl_unavailable(&error) => return,
+        Err(error) => panic!("{error}"),
+    }
     recycled_views(ComputeDevice::OpenCl);
+}
+
+#[cfg(feature = "opencl")]
+fn opencl_unavailable(error: &str) -> bool {
+    error.contains("OpenCL platform")
+        || error.contains("OpenCL GPU")
+        || error.contains("failed to enumerate OpenCL")
 }
