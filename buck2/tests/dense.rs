@@ -17,7 +17,7 @@ fn input() -> (Vec<f32>, Vec<DenseLeaf>, Vec<DenseTerm>) {
 }
 
 #[test]
-fn dense_apply() {
+fn zig_pytree() {
     let (base, leaves, terms) = input();
     let result = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu).unwrap();
     assert_eq!(result.changed, base.len());
@@ -47,23 +47,23 @@ fn linear(device: ComputeDevice) -> Vec<f32> {
 }
 
 #[test]
-fn dense_weights() {
+fn zig_weights() {
     assert_eq!(linear(ComputeDevice::Cpu).len(), 2);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
-fn gpu_dense() {
+fn gpu_zig() {
     let (base, leaves, terms) = input();
-    let cpu = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu).unwrap();
-    let cpu_linear = linear(ComputeDevice::Cpu);
+    let zig = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu).unwrap();
+    let zig_linear = linear(ComputeDevice::Cpu);
     let device = ComputeDevice::Metal;
     let gpu = apply_dense(&base, &leaves, &terms, device).unwrap();
-    assert_eq!(gpu.changed, cpu.changed);
-    for (left, right) in gpu.values.iter().zip(&cpu.values) {
+    assert_eq!(gpu.changed, zig.changed);
+    for (left, right) in gpu.values.iter().zip(&zig.values) {
         assert!((left - right).abs() <= f32::EPSILON);
     }
-    for (left, right) in linear(device).iter().zip(&cpu_linear) {
+    for (left, right) in linear(device).iter().zip(&zig_linear) {
         assert!((left - right).abs() <= 1.0e-5);
     }
 }
@@ -72,7 +72,7 @@ fn gpu_dense() {
 #[test]
 fn opencl_exists() {
     let (base, leaves, terms) = input();
-    let cpu = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu).unwrap();
+    let zig = apply_dense(&base, &leaves, &terms, ComputeDevice::Cpu).unwrap();
     let opencl = match apply_dense(&base, &leaves, &terms, ComputeDevice::OpenCl) {
         Ok(result) => result,
         Err(error)
@@ -83,8 +83,8 @@ fn opencl_exists() {
         }
         Err(error) => panic!("{error}"),
     };
-    assert_eq!(opencl.changed, cpu.changed);
-    for (left, right) in opencl.values.iter().zip(cpu.values) {
+    assert_eq!(opencl.changed, zig.changed);
+    for (left, right) in opencl.values.iter().zip(zig.values) {
         assert!((left - right).abs() <= f32::EPSILON);
     }
     for (left, right) in linear(ComputeDevice::OpenCl)

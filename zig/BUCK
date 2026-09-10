@@ -1,0 +1,19 @@
+load(":defs.bzl", "zig_static_library")
+
+zig_static_library(
+    name = "dense-static",
+    srcs = [
+        "src/dense.zig",
+    ],
+    root = "src/root.zig",
+    out = "ennx_dense.lib",
+)
+
+prebuilt_cxx_library(
+    name = "dense",
+    force_static = True,
+    preferred_linkage = "static",
+    static_lib = ":dense-static",
+    static_pic_lib = ":dense-static",
+    visibility = ["PUBLIC"],
+)

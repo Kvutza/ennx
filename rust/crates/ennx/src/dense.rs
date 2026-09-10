@@ -181,7 +181,7 @@ pub fn dist2(leaves: &[DenseLeaf], left: &[DenseTerm], right: &[DenseTerm]) -> R
     validate_leaves(leaves, None)?;
     validate_terms(left)?;
     validate_terms(right)?;
-    reference_dist2(leaves, left, right)
+    zig_dist2(leaves, left, right)
 }
 
 fn dense_validate(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<(), String> {
@@ -272,17 +272,64 @@ fn coefficient(terms: &[DenseTerm], seed: u64) -> f64 {
         .sum()
 }
 
+#[cfg(feature = "zig-dense")]
+fn dense_cpu(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<Vec<f32>, String> {
+    let mut values = vec![0.0; base.len()];
+    let mut changed = 0usize;
+    let status = unsafe {
+        ennx_f32(
+            base.as_ptr(),
+            base.len(),
+            leaves.as_ptr(),
+            leaves.len(),
+            terms.as_ptr(),
+            terms.len(),
+            values.as_mut_ptr(),
+            &mut changed,
+        )
+    };
+    if status != 0 {
+        return Err("Zig dense application rejected its inputs".into());
+    }
+    if changed != base.len() {
+        return Err(format!(
+            "Zig dense application changed {changed} of {} parameters",
+            base.len()
+        ));
+    }
+    Ok(values)
+}
+
+#[cfg(not(feature = "zig-dense"))]
 fn dense_cpu(base: &[f32], leaves: &[DenseLeaf], terms: &[DenseTerm]) -> Result<Vec<f32>, String> {
     let mut values = vec![0.0; base.len()];
     reference(base, leaves, terms, &mut values)?;
     Ok(values)
 }
 
-fn reference_dist2(
-    leaves: &[DenseLeaf],
-    left: &[DenseTerm],
-    right: &[DenseTerm],
-) -> Result<f64, String> {
+#[cfg(feature = "zig-dense")]
+fn zig_dist2(leaves: &[DenseLeaf], left: &[DenseTerm], right: &[DenseTerm]) -> Result<f64, String> {
+    let mut distance = 0.0;
+    let status = unsafe {
+        ennx_dist2(
+            leaves.as_ptr(),
+            leaves.len(),
+            left.as_ptr(),
+            left.len(),
+            right.as_ptr(),
+            right.len(),
+            &mut distance,
+        )
+    };
+    if status == 0 {
+        Ok(distance)
+    } else {
+        Err("Zig dense distance rejected its inputs".into())
+    }
+}
+
+#[cfg(not(feature = "zig-dense"))]
+fn zig_dist2(leaves: &[DenseLeaf], left: &[DenseTerm], right: &[DenseTerm]) -> Result<f64, String> {
     let energy: f64 = leaves
         .iter()
         .map(|leaf| leaf.len as f64 * f64::from(leaf.scale).powi(2))
@@ -374,6 +421,32 @@ fn mix64(input: u64) -> u64 {
     value ^ (value >> 31)
 }
 
+#[cfg(feature = "zig-dense")]
+extern "C" {
+    #[link_name = "ennx_dense_apply_f32"]
+    fn ennx_f32(
+        base: *const f32,
+        num_values: usize,
+        leaves: *const DenseLeaf,
+        num_leaves: usize,
+        terms: *const DenseTerm,
+        num_terms: usize,
+        out: *mut f32,
+        changed: *mut usize,
+    ) -> i32;
+
+    #[link_name = "ennx_dense_dist2"]
+    fn ennx_dist2(
+        leaves: *const DenseLeaf,
+        num_leaves: usize,
+        left: *const DenseTerm,
+        num_left: usize,
+        right: *const DenseTerm,
+        num_right: usize,
+        distance: *mut f64,
+    ) -> i32;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn dense_signs() {
+    fn zig_signs() {
         let expected = [
             1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0,
         ];

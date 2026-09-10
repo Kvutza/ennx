@@ -40,6 +40,7 @@ opencl = ["dep:opencl3"]
 usearch = ["dep:usearch"]
 usearch-native = []
 usearch-numkong = ["dep:usearch", "usearch/numkong"]
+zig-dense = []
 
 [dev-dependencies]
 numpy = { workspace = true }

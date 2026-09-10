@@ -381,6 +381,43 @@ fn validate_eval(input: &[f32], columns: usize, terms: &[DenseTerm]) -> Result<(
     Ok(())
 }
 
+#[cfg(feature = "zig-dense")]
+fn linear_cpu(
+    input: &[f32],
+    weight: &[f32],
+    bias: Option<&[f32]>,
+    weight_view: DenseView,
+    bias_view: Option<DenseView>,
+    terms: &[DenseTerm],
+    rows: usize,
+) -> Result<Vec<f32>, String> {
+    let mut out = vec![0.0; rows];
+    let status = unsafe {
+        ennx_f322(
+            input.as_ptr(),
+            input.len(),
+            weight.as_ptr(),
+            rows,
+            bias.map_or(std::ptr::null(), |values| values.as_ptr()),
+            weight_view,
+            bias_view.unwrap_or(DenseView {
+                key: 0,
+                start: 0,
+                scale: 1.0,
+            }),
+            terms.as_ptr(),
+            terms.len(),
+            out.as_mut_ptr(),
+        )
+    };
+    if status == 0 {
+        Ok(out)
+    } else {
+        Err("Zig dense linear rejected its inputs".into())
+    }
+}
+
+#[cfg(not(feature = "zig-dense"))]
 fn linear_cpu(
     input: &[f32],
     weight: &[f32],
@@ -444,6 +481,23 @@ fn perturbed(base: f32, view: DenseView, element: u64, terms: &[DenseTerm]) -> R
     } else {
         Err("dense perturbation overflowed FP32".into())
     }
+}
+
+#[cfg(feature = "zig-dense")]
+unsafe extern "C" {
+    #[link_name = "ennx_dense_linear_f32"]
+    fn ennx_f322(
+        input: *const f32,
+        columns: usize,
+        weight: *const f32,
+        rows: usize,
+        bias: *const f32,
+        weight_view: DenseView,
+        bias_view: DenseView,
+        terms: *const DenseTerm,
+        num_terms: usize,
+        out: *mut f32,
+    ) -> i32;
 }
 
 #[cfg(test)]
