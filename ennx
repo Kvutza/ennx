@@ -84,7 +84,7 @@ run_build() {
     if [ "${ENNX_DEPS_CHECKED:-0}" != 1 ]; then
         check_deps
     fi
-    echo "Building native code, tests, and all Python wheels..."
+    echo "Building the library, CLI, tests, and Python wheels..."
     bash tools/build-wheels "$out" "$verification"
 }
 
@@ -110,7 +110,7 @@ run_test() {
         return 0
     fi
     run_formal
-    echo "Testing native code..."
+    echo "Running Rust and kernel tests..."
     ./buck2w test //buck2/tests:all --local-only
     echo "All checks passed."
 }
@@ -124,8 +124,8 @@ Build, verify, and tune ENNX through Buck2
 Usage: ./ennx <COMMAND>
 
 Commands:
-  build  Build native code, tests, and all supported Python wheels
-  test   Run formal contracts and native tests
+  build  Build the library, CLI, tests, and Python wheels
+  test   Run Rust and kernel tests
   fmt    Format the repository or check formatting without edits
   tune   Run a configured experiment
   dev    Format, build, and test
@@ -169,7 +169,7 @@ EOF
     build)
         if [ "${2:-}" = -h ] || [ "${2:-}" = --help ]; then
             cat <<'EOF'
-Build native code, tests, and all supported Python wheels
+Build the library, CLI, tests, and Python wheels
 
 Usage: ./ennx build [OPTIONS]
 
@@ -187,7 +187,7 @@ EOF
     test)
         if [ "${2:-}" = -h ] || [ "${2:-}" = --help ]; then
             cat <<'EOF'
-Run formal contracts and native tests
+Run Rust and kernel tests
 
 Usage: ./ennx test [OPTIONS]
 

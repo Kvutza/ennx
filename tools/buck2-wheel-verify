@@ -248,7 +248,7 @@ assert np.max(
         - linear
     )
 ) == 0.0
-print(f"native verify: center={center}, scale={scale}")
+print("Wheel checks passed.")
 PY
 
 if [ "$run_tests" -eq 1 ]; then

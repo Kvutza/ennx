@@ -19,7 +19,7 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-# Finish with the default ABI so a following native test uses the same config.
+# Finish with the default ABI so ./ennx test uses the same config.
 for python_version in 3.12 3.14 3.13; do
     case "$python_version" in
         3.12) environment=ennx-py312 ;;
