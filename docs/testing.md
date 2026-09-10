@@ -6,22 +6,18 @@
 ENNX_WHEEL_PATH=dist/ennx-...whl ./ennx test --python
 ```
 
-Dev formats, builds all supported Python ABI wheels, verifies each against the
-Python suite, and runs native tests. Standalone Python tests require an existing
-wheel; set `ENNX_PYTHON_VERSION` for Python 3.12 or 3.14.
+`./ennx dev` formats, builds, and runs Rust and Python tests. Python tests run
+against each of the three built wheels, including the BoTorch, Optuna, and Ax
+integrations.
 
-Native tests cover Rust unit and integration tests, the CLI, and platform
-kernels. The Python suite runs against the built wheel, including BO adapters,
-with selection `not slow or gp`. Stress, performance, and additional hardware
-checks require explicit runs.
+`./ennx test` runs Rust unit tests, integration tests, CLI tests, and kernel
+tests. GPU checks require the corresponding hardware and driver.
 
-When local `formal/` exists, test also builds its Lean contracts and rejects
-proof holes. These contracts do not prove GPU kernels, compilers, or drivers.
+For `--python`, replace `ennx-...whl` with the wheel filename. Python 3.13 is the
+default; set `ENNX_PYTHON_VERSION=3.12` or `3.14` to test another wheel.
 
-Use fixed seeds and independent reference results. Test edge cases, errors,
-state transitions, and backend parity. State whether comparisons require
-bitwise equality or a numerical tolerance. Measure performance separately.
+The standard Python suite selects `not slow or gp`. Other stress and performance
+tests run separately. [Bazel checks](bazel.md) are also separate.
 
-Bazel consumer checks are separate. GitHub automation runs tagged releases,
-not push or pull-request CI. Passing dev does not establish complete backend
-parity or performance.
+If a local `formal/` directory exists, `./ennx test` also checks its Lean proofs.
+These cover the stated contracts, not GPU kernels or drivers.

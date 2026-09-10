@@ -1,9 +1,9 @@
 # CUDA-Oxide
 
-Rust CUDA kernels for ENNX. This workspace targets T4 `sm_75` through
-CUDA-Oxide and stays outside the normal local Metal/OpenCL build.
+ENNX CUDA kernels written in Rust with CUDA-Oxide. The current target is
+NVIDIA T4 (`sm_75`). CUDA is built separately from the CPU, Metal, and OpenCL code.
 
-From a prepared CUDA host:
+On a machine with the CUDA-Oxide toolchain installed:
 
 ```sh
 cd cuda
@@ -14,7 +14,8 @@ compute-sanitizer --tool memcheck --error-exitcode 99 \
   ../target/release/ennx-cuda resident
 ```
 
-From the repository root on Colab:
+To install the toolchain and run the checks on [Colab](../docs/colab.md), run
+these commands from the repository root on the VM:
 
 ```sh
 python ops/colab_cuda.py setup
@@ -27,8 +28,5 @@ python ops/colab_cuda.py bench
 python ops/colab_cuda.py python
 ```
 
-Checked on Colab T4 with CUDA 12.8 and Python 3.13.15:
-
-- `doctor`, `vecadd`, `ennx`, `resident`, `sanitize`, `bench`, `python` passed.
-- `sanitize` reported zero Compute Sanitizer errors.
-- `bench` reported 16,777,216 elements, 4-bit rows, 0.286112 ms, 54.611 GiB/s.
+The CUDA-Oxide revision is pinned in `Cargo.toml`; Rust and LLVM versions are in
+`ops/cuoxtool.py`.
