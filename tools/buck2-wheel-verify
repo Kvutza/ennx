@@ -147,13 +147,29 @@ case $(uname -s) in
             echo "wheel extension contains a host-specific library path" >&2
             exit 1
         fi
-        unset LD_LIBRARY_PATH
         ;;
     *)
         echo "wheel verify is unsupported on $(uname -s)" >&2
         exit 1
         ;;
 esac
+
+# Prove the extension loads without help from the Python environment's libraries.
+(
+    unset LD_LIBRARY_PATH LD_PRELOAD
+    PYTHONPATH="$verify_dir" "$python_bin" - <<'PY'
+import sys
+from ennx import _rust
+
+assert "numpy" not in sys.modules
+PY
+)
+
+if [ "$(uname -s)" = Linux ]; then
+    # Conda NumPy needs its own C++ runtime, even when ENNX is imported first.
+    LD_LIBRARY_PATH=$("$python_bin" -c 'import sys; print(sys.prefix + "/lib")')
+    export LD_LIBRARY_PATH
+fi
 
 ENNX_EXPECTED_PYTHON="$python_version" PYTHONPATH="$verify_dir" "$python_bin" - <<'PY'
 import os
