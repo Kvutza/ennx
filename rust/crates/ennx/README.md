@@ -1,9 +1,9 @@
 # ENNX
 
-Epistemic nearest-neighbor Bayesian optimization.
+Bayesian optimization with epistemic nearest-neighbor models.
 
 ```sh
 cargo add ennx
 ```
 
-The default build includes BPANN, Metal on macOS, and OpenCL.
+The default features enable Metal on macOS and OpenCL. BPANN is included.

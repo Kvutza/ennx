@@ -1,20 +1,14 @@
 # Changelog
 
-## 0.2.0 — Unreleased
+## 0.2.0 — 2026-09-10
 
-`0.2.0` is a breaking API release. It removes the compatibility aliases from
-`0.1.x`; callers must use the names below.
+Breaking release. Renamed APIs have no compatibility aliases.
 
 ### Python API
 
-BO integrations are available by default as `ennx.botorch.Model`,
-`ennx.botorch.Posterior`, `ennx.botorch.Sampler`, `ennx.optuna.Sampler`,
-and `ennx.ax.Node`. BoTorch, Optuna, and Ax are now required Python dependencies;
-no integration extras are needed. BoTorch
-uses ENNX's native joint draws without an autograd bridge; Optuna and Ax use
-the existing optimizer for fixed continuous, single-objective experiments.
-See [integration contracts and examples](docs/interop.md) for supported paths
-and restart limitations.
+Added BoTorch, Optuna, and Ax adapters. All three libraries are now required
+Python dependencies. See [Python integrations](docs/interop.md) for supported
+features and limitations.
 
 The primary model is now `ENN`:
 
@@ -29,9 +23,7 @@ The primary model is now `ENN`:
 | `turbo_enn_config` | `turbo_enn` |
 | `lhd_only_config` | `lhd_only` |
 
-The general Python optimizer entry point remains
-`create_optimizer(bounds, config, rng)`. Its `ask`, `tell`, and `telemetry`
-workflow is unchanged.
+`create_optimizer(bounds, config, rng)`, `ask`, `tell`, and `telemetry` are unchanged.
 
 `ENNParams` uses shorter field names:
 
@@ -45,9 +37,8 @@ workflow is unchanged.
 and `num_candidates`. `PosteriorFlags.tie_break_neighbors` is now
 `tie_neighbors`.
 
-The high-level `ENN.posterior`, `ENN.batch_posterior`,
-`ENN.conditional_posterior`, `ENN.neighbors`, and `ENN.add` workflows remain.
-The renamed model operations are:
+`ENN.posterior`, `ENN.batch_posterior`, `ENN.conditional_posterior`,
+`ENN.neighbors`, and `ENN.add` are unchanged. Renamed methods:
 
 | `0.1.x` | `0.2.0` |
 | --- | --- |
@@ -59,22 +50,19 @@ The renamed model operations are:
 | `train_rows_at` | `train_rows` |
 | `index_memory_bytes` | `index_bytes` |
 
-The `AGX` index choice was removed. Use `METAL`; `AUTO` may select Metal and
-falls back to the CPU implementation when the accelerated path is unavailable
-or unsupported for a query shape. The remaining choices are `FLAT`, `AUTO`,
+Removed `AGX`; use `METAL`. `AUTO` selects Metal when supported and falls back
+to CPU otherwise. Index choices are `FLAT`, `AUTO`,
 `USEARCH`, `BPANN_DISK`, `METAL`, `OPENCL`, and `CUDA`.
 
 ### Candidate search API
 
-`ennx.search` is the new Python API for encoded parameter search. It exports:
+Added `ennx.search` for low-bit parameter optimization:
 
-- `Parameter`: an immutable encoded parameter range. Supported encodings are
+- `Parameter`: a parameter range stored as
   `int4`, `int8`, `fp4_e2m1`, `fp8_e4m3`, and `fp8_e5m2`.
-- `Search`: candidate generation, scoring, history, and explicit
-  `ask`/`tell` coordination.
-- `Optimizer`: `Search` plus trust-region adaptation and batched pending trials.
-- `Trial`: the explicit handle returned by every ask operation, containing the
-  selected index, regeneration seed, and score.
+- `Search`: generates and scores candidates, and stores observations.
+- `Optimizer`: adds trust-region adaptation and pending trials.
+- `Trial`: identifies a proposed candidate by index, seed, and score.
 
 The old experimental search types map as follows:
 
@@ -85,17 +73,13 @@ The old experimental search types map as follows:
 | `ennx.experimental.TurboTrial` | `ennx.search.Trial` |
 | tuple-based packed leaves | `ennx.search.Parameter` |
 
-Search state no longer hides one implicit pending trial. `row`, `tell`, and
-device-row access take a `Trial`; the optimizer also supports `ask_batch`,
+`row`, `tell`, and GPU buffer access now take a `Trial`. Added `ask_batch`,
 `tell_batch`, `ask_stream`, and `batch_stream`. Stream methods generate
-candidates from a scalar seed so the candidate seed array does not need to be
-uploaded. CPU, Metal, and OpenCL use the same public lifecycle. Backend support
-for each operation is reported by the Rust capability API described below.
+candidates from one seed, avoiding an upload of candidate seeds.
 
 ### Experimental Python API
 
-Low-level quantization stays under `ennx.experimental`; the deprecated
-top-level quantization exports were removed.
+Quantization is now imported from `ennx.experimental`.
 
 | `0.1.x` | `0.2.0` |
 | --- | --- |
@@ -108,8 +92,7 @@ top-level quantization exports were removed.
 
 ### Rust API
 
-The curated Rust import surface remains `ennx::prelude`. Its principal
-migrations are:
+Use `ennx::prelude` for the main Rust types and functions. Renamed exports:
 
 | `0.1.x` | `0.2.0` |
 | --- | --- |
@@ -127,7 +110,7 @@ migrations are:
 | `pareto_front_2d_maximize` | `pareto2d_max` |
 | `calculate_sobol_indices` | `sobol_indices` |
 
-The main Rust method migrations are:
+Renamed methods:
 
 | Type | `0.1.x` | `0.2.0` |
 | --- | --- | --- |
@@ -141,24 +124,13 @@ The main Rust method migrations are:
 | `Optimizer` | `tell_with_yvar` | `tell_variance` |
 | `Optimizer` | `trust_region_mut` | `trust_mut` |
 
-The new `ennx::search` module provides `Parameter`, `Search`, `Trial`,
-`Optimizer`, `TrustRegion`, and borrowed `DeviceView` values. An evaluator can
-consume a `DeviceView` without materializing the selected encoded row on the
-CPU, then commit the result through `observe` or `tell`.
+Added `ennx::search` with `Parameter`, `Search`, `Trial`, `Optimizer`,
+`TrustRegion`, and `DeviceView`. Evaluators can read GPU buffers through
+`DeviceView` and record results with `observe` or `tell`.
 
-The new `ennx::capability` module exposes `Backend`, `Operation`, `Support`,
-and `Capability`, plus `backends()`, `operations()`, `support()`, and
-`matrix()`. `Support` distinguishes `Direct`, `Fallback`, and `Missing`; callers
-can therefore inspect the actual execution boundary instead of inferring it
-from a backend name.
+Added `ennx::capability` to report whether each backend implements an operation,
+uses a fallback, or lacks support. Query it with `support()` or `matrix()`.
 
-`IndexDriver::Agx` was removed and its supported behavior was consolidated
-under `IndexDriver::Metal`. Direct `apple_gpu` and `forward_metal` modules are
-no longer public; supported low-level exports remain available through
+Removed `IndexDriver::Agx`; use `IndexDriver::Metal`. The `apple_gpu` and
+`forward_metal` modules are private. Public GPU helpers are in
 `ennx::experimental`.
-
-### Compatibility
-
-No aliases are provided for the removed `0.1.x` names. This is intentional:
-stale imports and calls fail immediately instead of silently selecting an old
-path.

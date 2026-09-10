@@ -1,15 +1,14 @@
 # API
 
-| Surface | Purpose |
+| API | Use |
 | --- | --- |
-| Python `ennx` | `ENN` model and `create_optimizer` ask/tell workflow |
-| Rust `ennx::prelude` | Curated Rust API |
-| `ennx.search` / `ennx::search` | Encoded parameter search and optimization |
-| `ennx.experimental` / `ennx::experimental` | Experimental and accelerator APIs |
-| `ennx.botorch`, `ennx.optuna`, `ennx.ax` | Python framework adapters |
+| Python `ennx` | Fit an `ENN` model or optimize with `create_optimizer` |
+| Rust `ennx::prelude` | Models, optimizers, acquisition functions, and index types |
+| `ennx.search` / `ennx::search` | Generate and evaluate candidates stored as low-bit parameters |
+| `ennx.experimental` / `ennx::experimental` | Quantization, GPU buffers, and experimental model support |
+| `ennx.botorch`, `ennx.optuna`, `ennx.ax` | Use ENNX with Python optimization libraries |
 
-Keep implementation helpers private. Promote experimental APIs only with
-boundary, edge-case, and failure tests. Use matching concept names in Rust and
-Python; backend support depends on the operation.
+Optimizers use `ask` to propose a trial and `tell` to record its result.
+GPU support varies by operation; Rust callers can check `ennx::capability::matrix()`.
 
-[Migration](../CHANGELOG.md) · [Integration contracts](interop.md)
+[API changes](../CHANGELOG.md) · [Python integrations](interop.md)

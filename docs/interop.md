@@ -1,35 +1,28 @@
 # Python Integrations
 
-ENNX ships BoTorch, Optuna, and Ax adapters as default Python dependencies.
-Importing `ennx` does not import those frameworks; importing the adapter module
-does.
+BoTorch, Optuna, and Ax are installed with ENNX. They load when their adapters
+are imported.
 
-| Adapter | Import | Role |
-| --- | --- | --- |
-| BoTorch | `ennx.botorch.Model` | expose an existing `ENN` as a surrogate |
-| BoTorch | `ennx.botorch.Sampler` | produce ENNX function draws |
-| Optuna | `ennx.optuna.Sampler` | generate trials for a fixed continuous study |
-| Ax | `ennx.ax.Node` | generate candidates for an Ax experiment |
+| Import | Use |
+| --- | --- |
+| `ennx.botorch.Model` | Use an existing `ENN` as a BoTorch model |
+| `ennx.botorch.Sampler` | Sample joint function values from ENNX |
+| `ennx.optuna.Sampler` | Propose Optuna trials |
+| `ennx.ax.Node` | Propose Ax trials |
 
-Boundaries:
+BoTorch accepts CPU `float32` and `float64` tensors, query batches, and multiple
+outputs. It does not support input gradients, posterior transforms, bounded
+outputs, or fantasy conditioning. Evaluate acquisition functions on candidate
+sets; gradient-based optimization is unavailable.
 
-- Fixed continuous spaces are supported.
-- Integer, categorical, conditional, fidelity, and multiobjective adapter paths
-  are not supported unless the specific adapter rejects or handles them
-  explicitly.
-- Adapters do not provide Metal, OpenCL, or CUDA zero-copy interoperability.
-- Pending parameters are excluded from new proposals. This is not fantasy
-  conditioning.
-- Restarting an adapter from existing observations is a warm restart, not a
-  bitwise continuation of trust-region and RNG state.
-- No framework settings are inserted into the algorithm config.
+Optuna and Ax support a fixed continuous search space and one objective.
+Log-scaled parameters are supported; integers, categories, conditional spaces,
+and stepped parameters are not. Ax also rejects constraints and fidelity
+parameters. Use one process to generate trials, with `n_jobs=1` in Optuna.
 
-Run the installed-wheel integration checks with:
+Pending points are excluded from new proposals without assigning them outcomes.
+A new adapter can reuse completed observations, but it does not restore the
+previous random-number or trust-region state. The adapters do not share GPU
+buffers with the frameworks.
 
-```sh
-./ennx build
-ENNX_WHEEL_PATH=dist/ennx-...whl ./ennx test --python
-```
-
-`./ennx dev` builds each supported ABI wheel and runs the same Python test suite
-against each artifact.
+`./ennx dev` tests all three integrations against each Python wheel.

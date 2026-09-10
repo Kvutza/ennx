@@ -8,18 +8,18 @@ fn parse(args: &[&str]) -> Result<Action, clap::Error> {
 #[test]
 fn ordinary_options() {
     assert_eq!(
-        parse(&["tune", "knn", "tune/knn.toml"]).unwrap(),
+        parse(&["tune", "knn", "knn.toml"]).unwrap(),
         Action::Tune {
             target: TuneTarget::Knn {
-                config: "tune/knn.toml".into()
+                config: "knn.toml".into()
             }
         }
     );
     assert_eq!(
-        parse(&["tune", "proposal", "tune/proposal.toml"]).unwrap(),
+        parse(&["tune", "proposal", "proposal.toml"]).unwrap(),
         Action::Tune {
             target: TuneTarget::Proposal {
-                config: "tune/proposal.toml".into()
+                config: "proposal.toml".into()
             }
         }
     );
@@ -51,7 +51,7 @@ fn malformed_work() {
         vec!["tune", "knn"],
         vec!["tune", "proposal"],
         vec!["tune", "knn", "--config"],
-        vec!["tune", "other", "tune/knn.toml"],
+        vec!["tune", "other", "knn.toml"],
         vec!["tune", "knn", "a", "b"],
         vec!["tune", "proposal", "a", "b"],
         vec!["--help", "unexpected"],

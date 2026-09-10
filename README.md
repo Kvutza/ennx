@@ -1,16 +1,16 @@
 # ENNX
 
-Rust and Python APIs for nearest-neighbor models and Bayesian optimization.
-Includes BoTorch, Optuna, and Ax adapters.
+Bayesian optimization with epistemic nearest-neighbor models, in Rust and Python.
+Works with BoTorch, Optuna, and Ax.
 
 ```sh
-./ennx build   # Build native code, tests, and Python 3.12–3.14 wheels
-./ennx test    # Run native tests and local formal contracts
-./ennx dev     # Format, build, and run Python and native tests
+./ennx build   # Build the library, tests, CLI, and Python wheels
+./ennx test    # Run Rust and kernel tests
+./ennx dev     # Format, build, and run all standard tests
 ./ennx --help
 ```
 
-Wheels go to `dist/`. Install the wheel matching your Python version and platform.
+Python 3.12–3.14 wheels are written to `dist/`.
 
 [API](docs/api.md) · [Integrations](docs/interop.md) ·
 [Changelog](CHANGELOG.md) · [Build](docs/buck2.md) · [Tests](docs/testing.md) ·
