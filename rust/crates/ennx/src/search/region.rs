@@ -462,11 +462,11 @@ struct OpenClRegion {
 impl OpenClRegion {
     pub fn new(state: Snapshot) -> Result<Self, String> {
         let id = get_all_devices(CL_DEVICE_TYPE_GPU)
-            .map_err(|error| error.to_string())?
+            .map_err(|error| format!("failed to enumerate OpenCL GPU devices: {error}"))?
             .into_iter()
             .next()
             .or_else(|| get_all_devices(CL_DEVICE_TYPE_CPU).ok()?.into_iter().next())
-            .ok_or("no OpenCL device found for region adaptation")?;
+            .ok_or("no OpenCL GPU or CPU device found for region adaptation")?;
         let context = Context::from_device(&Device::new(id)).map_err(|error| error.to_string())?;
         Self::with_context(state, &context)
     }

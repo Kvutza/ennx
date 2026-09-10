@@ -96,5 +96,4 @@ fn opencl_unavailable(error: &str) -> bool {
     error.contains("OpenCL platform")
         || error.contains("OpenCL GPU")
         || error.contains("failed to enumerate OpenCL")
-        || error.contains("CL_INVALID_VALUE")
 }
