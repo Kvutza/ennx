@@ -1,0 +1,103 @@
+load("@crates//:defs.bzl", "aliases", "crate_edition")
+load("@rules_rust//rust:defs.bzl", "rust_shared_library")
+load("//:bazel/python_extension.bzl", "copy_extension")
+load("//rust/crates/ennx:defs.bzl", "ennx_crate_deps")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+ENNX_PY_SRCS = glob(
+    ["src/**/*.rs"],
+    exclude = ["src/ennx_py_build.rs"],
+)
+
+ENNX_PY_CRATES = [
+    "ndarray",
+    "numpy",
+    "pyo3",
+    "rand",
+]
+
+ENNX_PY_DEPS = ennx_crate_deps(ENNX_PY_CRATES)
+
+PYO3_LINK_FLAGS = select({
+    "@platforms//os:macos": [
+        "-Clink-arg=-undefined",
+        "-Clink-arg=dynamic_lookup",
+    ],
+    "//conditions:default": [],
+})
+
+rust_shared_library(
+    name = "ennx_rust_cpu",
+    srcs = ENNX_PY_SRCS,
+    aliases = aliases(),
+    crate_features = ["usearch-native"],
+    crate_name = "ennx_rust",
+    crate_root = "src/lib.rs",
+    edition = crate_edition(),
+    rustc_env = {
+        "CARGO_MANIFEST_DIR": "rust/crates/ennx-py",
+    },
+    rustc_flags = PYO3_LINK_FLAGS,
+    deps = ENNX_PY_DEPS + [
+        "//rust/crates/ennx:ennx_cpu",
+    ],
+)
+
+rust_shared_library(
+    name = "ennx_rust_metal",
+    srcs = ENNX_PY_SRCS,
+    aliases = aliases(),
+    crate_features = [
+        "metal",
+        "usearch-native",
+    ],
+    crate_name = "ennx_rust",
+    crate_root = "src/lib.rs",
+    edition = crate_edition(),
+    rustc_env = {
+        "CARGO_MANIFEST_DIR": "rust/crates/ennx-py",
+    },
+    rustc_flags = PYO3_LINK_FLAGS,
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ENNX_PY_DEPS + [
+        "//rust/crates/ennx:ennx_metal",
+    ],
+)
+
+rust_shared_library(
+    name = "ennx_rust_opencl",
+    srcs = ENNX_PY_SRCS,
+    aliases = aliases(),
+    crate_features = [
+        "opencl",
+        "usearch-native",
+    ],
+    crate_name = "ennx_rust",
+    crate_root = "src/lib.rs",
+    edition = crate_edition(),
+    rustc_env = {
+        "CARGO_MANIFEST_DIR": "rust/crates/ennx-py",
+    },
+    rustc_flags = PYO3_LINK_FLAGS,
+    deps = ENNX_PY_DEPS + [
+        "//rust/crates/ennx:ennx_opencl",
+    ],
+)
+
+alias(
+    name = "ennx_rust",
+    actual = select({
+        "@platforms//os:linux": ":ennx_rust_opencl",
+        "@platforms//os:macos": ":ennx_rust_metal",
+        "//conditions:default": ":ennx_rust_cpu",
+    }),
+)
+
+copy_extension(
+    name = "python_extension",
+    src = ":ennx_rust",
+    output = "ennx_rust.so",
+)

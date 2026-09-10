@@ -1,0 +1,68 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+export BUCK_ISOLATION_DIR=${BUCK_ISOLATION_DIR:-dev}
+destination=${1:?usage: bash tools/build-wheels OUTPUT_DIRECTORY}
+case ${2:-smoke} in
+    smoke) verification= ;;
+    full) verification=--tests ;;
+    *) echo "expected smoke or full verification" >&2; exit 2 ;;
+esac
+mkdir -p "$destination"
+build_report=
+
+cleanup() {
+    if [ -n "$build_report" ]; then
+        rm -f "$build_report"
+    fi
+}
+trap cleanup EXIT HUP INT TERM
+
+# Finish with the default ABI so a following native test uses the same config.
+for python_version in 3.12 3.14 3.13; do
+    case "$python_version" in
+        3.12) environment=ennx-py312 ;;
+        3.13) environment=ennx ;;
+        3.14) environment=ennx-py314 ;;
+        *) echo "unsupported Python version: $python_version" >&2; exit 2 ;;
+    esac
+    build_report=$(mktemp "${TMPDIR:-/tmp}/ennx-buck2-report.XXXXXX")
+    ./buck2w \
+        build //:wheel //buck2/tests:all //rust/crates/dev-cli:ennx \
+        --build-test-info \
+        --config "ennx.python_version=$python_version" \
+        --local-only \
+        --build-report "$build_report"
+    wheel=$(python3 - "$build_report" <<'PY'
+import json
+import sys
+
+report = json.load(open(sys.argv[1], encoding="utf-8"))
+target = report["results"]["root//:wheel"]
+print(target["outputs"]["DEFAULT"][0])
+PY
+)
+    rm -f "$build_report"
+    build_report=
+    test -f "$wheel"
+    if [ "$(uname -s)" = Linux ]; then
+        # repair rejects binaries requiring a newer glibc than the promised tag.
+        auditwheel repair --plat "manylinux_2_28_$(uname -m)" \
+            --only-plat --wheel-dir "$destination" "$wheel"
+        wheel="$destination/$(basename "$wheel")"
+        auditwheel show "$wheel"
+    else
+        cp "$wheel" "$destination/"
+        wheel="$destination/$(basename "$wheel")"
+    fi
+    # Verify the final artifact once; dev requests the full Python suite.
+    python_bin=".pixi/envs/$environment/bin/python"
+    if [ ! -x "$python_bin" ]; then
+        echo "missing CPython $python_version environment; run ./ennx build first" >&2
+        exit 1
+    fi
+    ENNX_PYTHON_VERSION="$python_version" \
+        ENNX_PYTHON="$python_bin" \
+        ENNX_WHEEL_PATH="$wheel" tools/buck2-wheel-verify ${verification:+"$verification"}
+done

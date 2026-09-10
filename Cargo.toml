@@ -1,0 +1,45 @@
+[workspace]
+members = [
+    "cuda",
+    "cuda/kernels",
+    "rust/crates/bpann",
+    "rust/crates/dev-cli",
+    "rust/crates/ennx",
+    "rust/crates/ennx-py",
+    "rust/crates/modal-runner",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+authors = ["ENNX Contributors"]
+repository = "https://github.com/Kvutza/ennx"
+keywords = ["bayesian", "optimization", "ENN", "turbo", "turbo-enn"]
+categories = ["science", "simulation"]
+
+[workspace.dependencies]
+bpann = { package = "ennx-bpann", path = "rust/crates/bpann", version = "=0.2.0" }
+clap = { version = "4.6", features = ["derive"] }
+ennx = { path = "rust/crates/ennx", version = "=0.2.0", default-features = false }
+ndarray = "0.17"
+numpy = "0.29"
+pyo3 = { version = "0.29", features = ["extension-module"] }
+rand = "0.8"
+rand_distr = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+toml = "0.8"
+cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
+cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16

@@ -1,0 +1,57 @@
+#!/bin/sh
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+bin_dir="$repo_dir/.buck2-tools/bin"
+dotslash="$bin_dir/dotslash"
+
+if [ -x "$dotslash" ]; then
+    exit 0
+fi
+
+mkdir -p "$bin_dir"
+
+os=$(uname -s)
+arch=$(uname -m)
+case "$os:$arch" in
+    Darwin:arm64|Darwin:x86_64)
+        archive=dotslash-macos.v0.5.9.tar.gz
+        checksum=67963df97f5ce512f900a85950add6e883722c3460ee5d752a6e62665fd2f986
+        ;;
+    Linux:aarch64|Linux:arm64)
+        archive=dotslash-linux-musl.arm64.v0.5.9.tar.gz
+        checksum=e58374446dacd4a228388cd275d974bbd8f946916b513cf0eb86bdff5d9d675e
+        ;;
+    Linux:x86_64)
+        archive=dotslash-linux-musl.x86_64.v0.5.9.tar.gz
+        checksum=4c75c6eb7890ae35993b962073f6d9bbe78b42b81a5691303ad70f63bfbf7196
+        ;;
+    *)
+        echo "unsupported DotSlash host: $os $arch" >&2
+        exit 1
+        ;;
+esac
+
+tmp_dir=$(mktemp -d)
+trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+url="https://github.com/facebook/dotslash/releases/download/v0.5.9/$archive"
+curl -fsSL "$url" -o "$tmp_dir/$archive"
+if command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$tmp_dir/$archive" | awk '{print $1}')
+elif command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$tmp_dir/$archive" | awk '{print $1}')
+else
+    echo "shasum or sha256sum is required" >&2
+    exit 1
+fi
+if [ "$actual" != "$checksum" ]; then
+    echo "DotSlash checksum mismatch" >&2
+    exit 1
+fi
+tar -xzf "$tmp_dir/$archive" -C "$tmp_dir"
+found=$(find "$tmp_dir" -type f -name dotslash -perm -u+x | head -n 1)
+if [ -z "$found" ]; then
+    echo "DotSlash archive did not contain an executable" >&2
+    exit 1
+fi
+mv "$found" "$dotslash"

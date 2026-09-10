@@ -1,0 +1,588 @@
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
+
+use crate::error::BpannError;
+use crate::index::kmeans::{PartitionNode, PartitionTree};
+use crate::index::page::{write_index, Page};
+use crate::index::persist_atomic::skip_bytes;
+use crate::tuning::current_tuning;
+
+pub const LEAF_CAPACITY: usize = 32;
+pub const SKIP_NEIGHBORS: usize = 3;
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct IndexHeader {
+    pub num_dim: usize,
+    pub indexed_rows: usize,
+    pub root_page_id: u32,
+    pub leaf_capacity: usize,
+    pub skip_neighbors: usize,
+}
+
+#[derive(Clone)]
+pub struct BpannIndex {
+    pub header: IndexHeader,
+    pub pages: Vec<Page>,
+    pub skip_edges: HashMap<u32, Vec<u32>>,
+    page_map: HashMap<u32, usize>,
+    pub index_dir: PathBuf,
+}
+
+/// Skip edges are written only for the middle row-count band. Limits come from
+/// call-time tuning; on-disk edges still reflect whatever limits were active at build.
+fn needs_edges(row_count: usize) -> bool {
+    current_tuning().rows_edges(row_count)
+}
+
+fn remap_page(page: &Page, id_map: &HashMap<u32, u32>) -> Page {
+    match page {
+        Page::Internal {
+            page_id,
+            centroids,
+            child_page_ids,
+        } => Page::Internal {
+            page_id: id_map[page_id],
+            centroids: centroids.clone(),
+            child_page_ids: child_page_ids.iter().map(|id| id_map[id]).collect(),
+        },
+        Page::Leaf {
+            page_id,
+            row_ids,
+            row_range,
+            vectors,
+            stored_centroid,
+        } => Page::Leaf {
+            page_id: id_map[page_id],
+            row_ids: row_ids.clone(),
+            row_range: *row_range,
+            vectors: vectors.clone(),
+            stored_centroid: stored_centroid.clone(),
+        },
+    }
+}
+
+fn build_map(pages: &[Page]) -> HashMap<u32, usize> {
+    pages
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.page_id(), i))
+        .collect()
+}
+
+impl BpannIndex {
+    pub fn build_vectors(
+        vectors: &[Vec<f32>],
+        num_dim: usize,
+        leaf_capacity: usize,
+        seed: u64,
+        index_dir: PathBuf,
+    ) -> Result<Self, BpannError> {
+        let row_ids: Vec<u32> = (0..vectors.len() as u32).collect();
+        Self::build_rows(&row_ids, vectors, num_dim, leaf_capacity, seed, index_dir)
+    }
+
+    pub fn build_rows(
+        row_ids: &[u32],
+        vectors: &[Vec<f32>],
+        num_dim: usize,
+        leaf_capacity: usize,
+        seed: u64,
+        index_dir: PathBuf,
+    ) -> Result<Self, BpannError> {
+        Self::build_tree(
+            row_ids,
+            vectors,
+            num_dim,
+            leaf_capacity,
+            seed,
+            index_dir,
+            true,
+        )
+    }
+
+    pub fn build_persist(
+        row_ids: &[u32],
+        vectors: &[Vec<f32>],
+        num_dim: usize,
+        index_dir: PathBuf,
+        persist: bool,
+    ) -> Result<Self, BpannError> {
+        let page = Page::Leaf {
+            page_id: 0,
+            row_ids: row_ids.to_vec(),
+            row_range: None,
+            vectors: vectors.to_vec(),
+            stored_centroid: None,
+        };
+        let leaf_capacity = row_ids.len().max(1);
+        let header = IndexHeader {
+            num_dim,
+            indexed_rows: row_ids.len(),
+            root_page_id: 0,
+            leaf_capacity,
+            skip_neighbors: SKIP_NEIGHBORS,
+        };
+        let pages = vec![page];
+        let page_map = build_map(&pages);
+        let index = Self {
+            header,
+            pages,
+            skip_edges: HashMap::new(),
+            page_map,
+            index_dir,
+        };
+        if persist {
+            index.persist()?;
+        }
+        Ok(index)
+    }
+
+    pub fn pages_unpersisted(
+        num_dim: usize,
+        indexed_rows: usize,
+        leaf_capacity: usize,
+        pages: Vec<Page>,
+        index_dir: PathBuf,
+    ) -> Result<Self, BpannError> {
+        if pages.is_empty() {
+            return Err(BpannError::InvalidParameter(
+                "pages_unpersisted requires pages".to_string(),
+            ));
+        }
+        let page_map = build_map(&pages);
+        Ok(Self {
+            header: IndexHeader {
+                num_dim,
+                indexed_rows,
+                root_page_id: 0,
+                leaf_capacity: leaf_capacity.max(1),
+                skip_neighbors: SKIP_NEIGHBORS,
+            },
+            pages,
+            skip_edges: HashMap::new(),
+            page_map,
+            index_dir,
+        })
+    }
+
+    pub fn build_centroid(
+        row_ids: &[u32],
+        centroid: Vec<f32>,
+        num_dim: usize,
+        index_dir: PathBuf,
+        persist: bool,
+    ) -> Result<Self, BpannError> {
+        let page = Page::Leaf {
+            page_id: 0,
+            row_ids: row_ids.to_vec(),
+            row_range: None,
+            vectors: Vec::new(),
+            stored_centroid: Some(centroid),
+        };
+        let leaf_capacity = row_ids.len().max(1);
+        let header = IndexHeader {
+            num_dim,
+            indexed_rows: row_ids.len(),
+            root_page_id: 0,
+            leaf_capacity,
+            skip_neighbors: SKIP_NEIGHBORS,
+        };
+        let pages = vec![page];
+        let page_map = build_map(&pages);
+        let index = Self {
+            header,
+            pages,
+            skip_edges: HashMap::new(),
+            page_map,
+            index_dir,
+        };
+        if persist {
+            index.persist()?;
+        }
+        Ok(index)
+    }
+
+    pub fn concat_merge(
+        parts: Vec<BpannIndex>,
+        index_dir: PathBuf,
+        persist: bool,
+    ) -> Result<Self, BpannError> {
+        if parts.is_empty() {
+            return Err(BpannError::InvalidParameter(
+                "concat_merge requires at least one index".to_string(),
+            ));
+        }
+        if parts.len() == 1 {
+            let mut single = parts.into_iter().next().expect("one index");
+            single.index_dir = index_dir;
+            if persist {
+                single.persist()?;
+            }
+            return Ok(single);
+        }
+        let num_dim = parts[0].header.num_dim;
+        let leaf_capacity = parts[0].header.leaf_capacity;
+        let skip_neighbors = parts[0].header.skip_neighbors;
+        let mut pages = Vec::new();
+        let mut child_page_ids = Vec::new();
+        let mut child_centroids = Vec::new();
+        let mut skip_edges = HashMap::new();
+        let mut total_rows = 0usize;
+        let mut next_id = 1u32;
+        for part in &parts {
+            total_rows += part.header.indexed_rows;
+            let id_map: HashMap<u32, u32> = part
+                .pages
+                .iter()
+                .map(|page| {
+                    let new_id = next_id;
+                    next_id += 1;
+                    (page.page_id(), new_id)
+                })
+                .collect();
+            child_page_ids.push(id_map[&part.header.root_page_id]);
+            child_centroids.push(part.root_centroid());
+            for page in &part.pages {
+                pages.push(remap_page(page, &id_map));
+            }
+            for (&from, tos) in &part.skip_edges {
+                if let Some(&new_from) = id_map.get(&from) {
+                    let new_tos: Vec<u32> = tos
+                        .iter()
+                        .filter_map(|to| id_map.get(to).copied())
+                        .collect();
+                    if !new_tos.is_empty() {
+                        skip_edges.insert(new_from, new_tos);
+                    }
+                }
+            }
+        }
+        pages.push(Page::Internal {
+            page_id: 0,
+            centroids: child_centroids,
+            child_page_ids,
+        });
+        let page_map = build_map(&pages);
+        let header = IndexHeader {
+            num_dim,
+            indexed_rows: total_rows,
+            root_page_id: 0,
+            leaf_capacity,
+            skip_neighbors,
+        };
+        let index = Self {
+            header,
+            pages,
+            skip_edges,
+            page_map,
+            index_dir,
+        };
+        if persist {
+            index.persist()?;
+        }
+        Ok(index)
+    }
+
+    pub fn build_tree(
+        row_ids: &[u32],
+        vectors: &[Vec<f32>],
+        num_dim: usize,
+        leaf_capacity: usize,
+        seed: u64,
+        index_dir: PathBuf,
+        persist: bool,
+    ) -> Result<Self, BpannError> {
+        if row_ids.len() <= leaf_capacity {
+            return Self::build_persist(row_ids, vectors, num_dim, index_dir, persist);
+        }
+        let partition = PartitionTree::build(row_ids, vectors, leaf_capacity, seed);
+        let (pages, root_page_id) = partition_pages(&partition.root);
+        let skip_edges = if needs_edges(row_ids.len()) {
+            build_edges(&pages, SKIP_NEIGHBORS)
+        } else {
+            HashMap::new()
+        };
+        let page_map = build_map(&pages);
+        let header = IndexHeader {
+            num_dim,
+            indexed_rows: row_ids.len(),
+            root_page_id,
+            leaf_capacity,
+            skip_neighbors: SKIP_NEIGHBORS,
+        };
+        let index = Self {
+            header: header.clone(),
+            pages,
+            skip_edges,
+            page_map,
+            index_dir: index_dir.clone(),
+        };
+        if persist {
+            index.persist()?;
+        }
+        Ok(index)
+    }
+
+    pub fn open(index_dir: PathBuf) -> Result<Self, BpannError> {
+        let header_path = index_dir.join("header.json");
+        let text = fs::read_to_string(&header_path)
+            .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+        let header: IndexHeader =
+            serde_json::from_str(&text).map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+        let pages_path = index_dir.join("pages.bin");
+        let file =
+            File::open(&pages_path).map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+        let mut reader = BufReader::new(file);
+        let pages = crate::index::page::read_index(&mut reader)
+            .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+        let skip_edges = read_edges(&index_dir.join("skip_edges.bin"))?;
+        let page_map = build_map(&pages);
+        Ok(Self {
+            header,
+            pages,
+            skip_edges,
+            page_map,
+            index_dir,
+        })
+    }
+
+    pub fn persist(&self) -> Result<(), BpannError> {
+        crate::index::persist_atomic::persist_files(
+            &self.index_dir,
+            &self.header,
+            &self.pages,
+            &self.skip_edges,
+        )
+    }
+
+    pub fn disk_index(&self) -> Result<bool, BpannError> {
+        let pages_path = self.index_dir.join("pages.bin");
+        let skip_path = self.index_dir.join("skip_edges.bin");
+        let on_disk_pages =
+            fs::read(&pages_path).map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+        let mut expected_pages = Vec::new();
+        write_index(&self.pages, self.header.num_dim, &mut expected_pages)
+            .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+        if on_disk_pages != expected_pages {
+            return Ok(false);
+        }
+        let on_disk_skip =
+            fs::read(&skip_path).map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+        Ok(on_disk_skip == skip_bytes(&self.skip_edges))
+    }
+
+    pub fn page(&self, page_id: u32) -> Option<&Page> {
+        self.page_map.get(&page_id).map(|&i| &self.pages[i])
+    }
+
+    pub fn root_centroid(&self) -> Vec<f32> {
+        self.page(self.header.root_page_id)
+            .map(Page::centroid)
+            .unwrap_or_default()
+    }
+
+    pub fn leaf_row(&self) -> Vec<u32> {
+        let mut row_ids = Vec::new();
+        for page in &self.pages {
+            if let Page::Leaf {
+                row_ids: ids,
+                row_range,
+                ..
+            } = page
+            {
+                if let Some((start, end)) = row_range {
+                    row_ids.extend(*start..*end);
+                } else {
+                    row_ids.extend_from_slice(ids);
+                }
+            }
+        }
+        row_ids.sort_unstable();
+        row_ids.dedup();
+        row_ids
+    }
+
+    pub fn leaf_page(&self) -> Vec<u32> {
+        self.pages
+            .iter()
+            .filter(|p| matches!(p, Page::Leaf { .. }))
+            .map(|p| p.page_id())
+            .collect()
+    }
+
+    pub fn index_bytes(&self) -> usize {
+        let mut total = 0usize;
+        for name in ["header.json", "pages.bin", "skip_edges.bin"] {
+            let p = self.index_dir.join(name);
+            if p.exists() {
+                total += p.metadata().map(|m| m.len() as usize).unwrap_or(0);
+            }
+        }
+        total
+    }
+
+    pub fn page_bytes(&self) -> Vec<u8> {
+        let mut all = Vec::new();
+        for page in &self.pages {
+            all.extend(page.serialize(self.header.num_dim));
+        }
+        all
+    }
+}
+
+fn partition_pages(node: &PartitionNode) -> (Vec<Page>, u32) {
+    collect_pages(node, 0)
+}
+
+fn collect_pages(node: &PartitionNode, next_id: u32) -> (Vec<Page>, u32) {
+    match node {
+        PartitionNode::Leaf { entries, .. } => {
+            let row_ids: Vec<u32> = entries.iter().map(|(id, _)| *id).collect();
+            let vecs: Vec<Vec<f32>> = entries.iter().map(|(_, v)| v.clone()).collect();
+            let page = Page::Leaf {
+                page_id: next_id,
+                row_ids,
+                row_range: None,
+                vectors: vecs,
+                stored_centroid: None,
+            };
+            (vec![page], next_id)
+        }
+        PartitionNode::Internal { children, .. } => {
+            let my_id = next_id;
+            let mut child_page_ids = Vec::new();
+            let mut child_centroids = Vec::new();
+            let mut child_pages = Vec::new();
+            let mut cur_id = next_id + 1;
+            let mut last_id = my_id;
+            for child in children {
+                let (pages, subtree_last) = collect_pages(child, cur_id);
+                if let Some(first) = pages.first() {
+                    child_page_ids.push(first.page_id());
+                    child_centroids.push(first.centroid());
+                }
+                last_id = last_id.max(subtree_last);
+                cur_id = subtree_last + 1;
+                child_pages.extend(pages);
+            }
+            let internal = Page::Internal {
+                page_id: my_id,
+                centroids: child_centroids,
+                child_page_ids,
+            };
+            let mut all = vec![internal];
+            all.extend(child_pages);
+            (all, last_id.max(my_id))
+        }
+    }
+}
+
+fn build_edges(pages: &[Page], k: usize) -> HashMap<u32, Vec<u32>> {
+    let leaves: Vec<(u32, Vec<f32>)> = pages
+        .iter()
+        .filter_map(|p| match p {
+            Page::Leaf { page_id, .. } => Some((*page_id, p.centroid())),
+            _ => None,
+        })
+        .collect();
+    let mut edges = HashMap::new();
+    for (i, (id_a, ca)) in leaves.iter().enumerate() {
+        let mut dists: Vec<(u32, f32)> = leaves
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| *j != i)
+            .map(|(_, (id_b, cb))| (*id_b, crate::distance::l2_f32(ca, cb)))
+            .collect();
+        dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        let neighbors: Vec<u32> = dists.into_iter().take(k).map(|(id, _)| id).collect();
+        edges.insert(*id_a, neighbors);
+    }
+    edges
+}
+
+fn read_edges(path: &Path) -> Result<HashMap<u32, Vec<u32>>, BpannError> {
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let data = fs::read(path).map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+    if data.len() < 4 {
+        return Ok(HashMap::new());
+    }
+    let n = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+    let mut off = 4;
+    let mut out = HashMap::new();
+    for _ in 0..n {
+        if off + 8 > data.len() {
+            break;
+        }
+        let from = u32::from_le_bytes(data[off..off + 4].try_into().unwrap());
+        off += 4;
+        let m = u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as usize;
+        off += 4;
+        let mut tos = Vec::with_capacity(m);
+        for _ in 0..m {
+            if off + 4 > data.len() {
+                break;
+            }
+            tos.push(u32::from_le_bytes(data[off..off + 4].try_into().unwrap()));
+            off += 4;
+        }
+        out.insert(from, tos);
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn disk_pages() {
+        let dir = TempDir::new().unwrap();
+        let index_dir = dir.path().join("index");
+        let index = BpannIndex::build_persist(
+            &[0u32, 1, 2],
+            &[vec![0.0f32, 0.0], vec![1.0, 0.0], vec![0.5, 1.0]],
+            2,
+            index_dir.clone(),
+            true,
+        )
+        .unwrap();
+        assert!(index.disk_index().unwrap());
+
+        let pages_path = index_dir.join("pages.bin");
+        let mut pages = fs::read(&pages_path).unwrap();
+        pages[0] ^= 0xFF;
+        fs::write(&pages_path, pages).unwrap();
+        assert!(!index.disk_index().unwrap());
+    }
+
+    #[test]
+    fn needs_provider() {
+        use crate::tuning::{clear_provider, set_provider, BpannTuning};
+
+        clear_provider();
+        // Defaults: 100 rows is exhaustive → no skip edges.
+        assert!(!needs_edges(100));
+
+        set_provider(Box::new(|| BpannTuning {
+            exhaustive_limit: 10,
+            skip_limit: 1_000,
+            ..Default::default()
+        }));
+        assert!(needs_edges(100));
+
+        set_provider(Box::new(|| BpannTuning {
+            exhaustive_limit: 10,
+            skip_limit: 50,
+            ..Default::default()
+        }));
+        assert!(!needs_edges(100));
+
+        clear_provider();
+        assert!(!needs_edges(100));
+    }
+}

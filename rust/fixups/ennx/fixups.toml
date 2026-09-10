@@ -1,0 +1,7 @@
+['cfg(target_os = "macos")']
+features = ["metal"]
+extra_deps = ["//rust:metal"]
+
+['cfg(target_os = "linux")']
+features = ["opencl"]
+extra_deps = ["//rust:opencl3"]

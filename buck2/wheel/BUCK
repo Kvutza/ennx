@@ -1,0 +1,7 @@
+rust_binary(
+    name = "pack",
+    srcs = ["pack.rs"],
+    crate_root = "pack.rs",
+    edition = "2021",
+    visibility = ["PUBLIC"],
+)

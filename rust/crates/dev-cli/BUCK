@@ -1,0 +1,21 @@
+load("//buck2:reindeer_rules.bzl", "app_rust_binary")
+
+app_rust_binary(
+    name = "ennx",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "dev_cli",
+    crate_root = "src/main.rs",
+    edition = "2021",
+    deps = ["//rust:clap", "//rust:serde", "//rust:toml"],
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "ennx-test",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "dev_cli_test",
+    crate_root = "src/main.rs",
+    edition = "2021",
+    deps = ["//rust:clap", "//rust:serde", "//rust:toml"],
+    visibility = ["//buck2/tests:all"],
+)

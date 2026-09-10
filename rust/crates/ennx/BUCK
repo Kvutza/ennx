@@ -1,0 +1,326 @@
+load("//buck2:reindeer_rules.bzl", "app_rust_binary", "app_rust_library")
+load("//buck2/tests:suite.bzl", "test_suite")
+
+cxx_binary(
+    name = "region-arithmetic",
+    srcs = ["tests/region_math.cpp"],
+    headers = {"arithmetic.cl": "src/search/arithmetic.cl"},
+    header_namespace = "",
+    compiler_flags = ["-std=c++17", "-ffp-contract=off"],
+)
+
+sh_test(
+    name = "region-math",
+    test = ":region-arithmetic",
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "region-opencl",
+    srcs = glob([
+        "src/**/*.cl",
+        "src/**/*.metal",
+        "src/**/*.rs",
+    ]),
+    crate = "ennx",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    features = ["opencl", "usearch-native"],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//rust:opencl3",
+        ":usearch-bridge",
+        "//rust/crates/bpann:bpann",
+        "//rust:memmap2",
+        "//rust:ndarray",
+        "//rust:rand",
+        "//rust:rand_chacha",
+        "//rust:rand_distr",
+        "//rust:rayon",
+        "//rust:serde",
+        "//rust:sobol",
+        "//rust:tempfile",
+        "//rust:thiserror",
+        "//rust:toml",
+    ] + select({
+        "//:linux-arm64": [],
+        "//:linux-x86_64": [],
+        "//:macos-arm64": [
+            "//buck2/native:openmp-macos",
+            "//rust:metal",
+        ],
+    }),
+    rpath = True,
+    run_env = {"RUST_TEST_THREADS": "1"},
+    runtime_dependency_handling = "symlink",
+    rustc_flags = select({
+        "//:macos-arm64": [
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
+        ],
+        "DEFAULT": [],
+    }),
+)
+
+filegroup(
+    name = "ennx-source",
+    srcs = glob([
+        "examples/**/*.rs",
+        "src/**/*.cl",
+        "src/**/*.h",
+        "src/**/*.metal",
+        "src/**/*.rs",
+    ]) + [
+        "Cargo.toml",
+        "LICENSE",
+        "NOTICE",
+        "README.md",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "usearch-bridge",
+    srcs = ["src/usearch_bridge.cpp"],
+    compiler_flags = [
+        "-std=c++17",
+        "-Wno-unknown-pragmas",
+    ],
+    deps = ["//buck2/native:usearch"],
+    exported_linker_flags = select({
+        "//:linux-arm64": ["-lstdc++"],
+        "//:linux-x86_64": ["-lstdc++"],
+        "//:macos-arm64": ["-lc++"],
+    }),
+    visibility = ["PUBLIC"],
+)
+
+app_rust_library(
+    name = "ennx",
+    srcs = glob([
+        "src/**/*.cl",
+        "src/**/*.metal",
+        "src/**/*.rs",
+    ]),
+    crate = "ennx",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    features = select({
+        "//:linux-arm64": ["opencl", "usearch-native"],
+        "//:linux-x86_64": ["opencl", "usearch-native"],
+        "//:macos-arm64": ["metal", "usearch-native"],
+    }),
+    visibility = ["PUBLIC"],
+    deps = [
+        ":usearch-bridge",
+        "//rust/crates/bpann:bpann",
+        "//rust:memmap2",
+        "//rust:ndarray",
+        "//rust:rand",
+        "//rust:rand_distr",
+        "//rust:rayon",
+        "//rust:serde",
+        "//rust:sobol",
+        "//rust:thiserror",
+        "//rust:toml",
+    ] + select({
+        "//:linux-arm64": ["//rust:opencl3"],
+        "//:linux-x86_64": ["//rust:opencl3"],
+        "//:macos-arm64": ["//rust:metal"],
+    }),
+)
+
+rust_test(
+    name = "ennx-unit",
+    srcs = glob([
+        "src/**/*.cl",
+        "src/**/*.metal",
+        "src/**/*.rs",
+    ]),
+    crate = "ennx",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    features = select({
+        "//:linux-arm64": ["opencl", "usearch-native"],
+        "//:linux-x86_64": ["opencl", "usearch-native"],
+        "//:macos-arm64": ["metal", "usearch-native"],
+    }),
+    visibility = ["//buck2/tests:all"],
+    deps = [
+        ":usearch-bridge",
+        "//rust/crates/bpann:bpann",
+        "//rust:memmap2",
+        "//rust:ndarray",
+        "//rust:rand",
+        "//rust:rand_chacha",
+        "//rust:rand_distr",
+        "//rust:rayon",
+        "//rust:serde",
+        "//rust:sobol",
+        "//rust:tempfile",
+        "//rust:thiserror",
+        "//rust:toml",
+    ] + select({
+        "//:linux-arm64": ["//rust:opencl3"],
+        "//:linux-x86_64": ["//rust:opencl3"],
+        "//:macos-arm64": [
+            "//buck2/native:openmp-macos",
+            "//rust:metal",
+        ],
+    }),
+    rpath = True,
+    run_env = {"RUST_TEST_THREADS": "1"},
+    runtime_dependency_handling = "symlink",
+    rustc_flags = select({
+        "//:macos-arm64": [
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
+        ],
+        "DEFAULT": [],
+    }),
+)
+
+app_rust_library(
+    name = "ennx_bench",
+    srcs = glob([
+        "src/**/*.cl",
+        "src/**/*.metal",
+        "src/**/*.rs",
+    ]),
+    crate = "ennx",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    features = [
+        "metal",
+        "usearch-native",
+    ],
+    deps = [
+        ":usearch-bridge",
+        "//rust/crates/bpann:bpann",
+        "//rust:memmap2",
+        "//rust:ndarray",
+        "//rust:rand",
+        "//rust:rand_distr",
+        "//rust:rayon",
+        "//rust:serde",
+        "//rust:sobol",
+        "//rust:thiserror",
+        "//rust:toml",
+        "//rust:metal",
+    ],
+    target_compatible_with = ["prelude//os/constraints:macos"],
+)
+
+app_rust_binary(
+    name = "posterior_frontier",
+    srcs = ["examples/posterior_frontier.rs"],
+    crate = "posterior_frontier",
+    crate_root = "examples/posterior_frontier.rs",
+    edition = "2021",
+    deps = [
+        ":ennx",
+        "//rust:ndarray",
+    ] + select({
+        "//:macos-arm64": ["//buck2/native:openmp-macos"],
+        "DEFAULT": [],
+    }),
+    rpath = True,
+    runtime_dependency_handling = "symlink",
+    rustc_flags = select({
+        "//:macos-arm64": [
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
+        ],
+        "DEFAULT": [],
+    }),
+)
+
+app_rust_binary(
+    name = "trial_bench",
+    srcs = ["examples/trial_bench.rs"],
+    crate = "trial_bench",
+    crate_root = "examples/trial_bench.rs",
+    edition = "2021",
+    deps = [":ennx"] + select({
+        "//:macos-arm64": ["//buck2/native:openmp-macos"],
+        "DEFAULT": [],
+    }),
+    rpath = True,
+    runtime_dependency_handling = "symlink",
+    rustc_flags = select({
+        "//:macos-arm64": [
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
+        ],
+        "DEFAULT": [],
+    }),
+)
+
+app_rust_binary(
+    name = "knn_frontier",
+    srcs = ["examples/knn_frontier.rs"],
+    crate = "knn_frontier",
+    crate_root = "examples/knn_frontier.rs",
+    edition = "2021",
+    deps = [
+        ":ennx_bench",
+        "//rust:ndarray",
+    ] + select({
+        "//:macos-arm64": ["//buck2/native:openmp-macos"],
+        "DEFAULT": [],
+    }),
+    rpath = True,
+    runtime_dependency_handling = "symlink",
+    rustc_flags = select({
+        "//:macos-arm64": [
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
+        ],
+        "DEFAULT": [],
+    }),
+)
+
+# Each integration crate receives the same platform features as the library.
+[
+    rust_test(
+        name = source.removeprefix("tests/").removesuffix(".rs") + "_test",
+        srcs = [source, "src/lib.rs", "src/experimental.rs"],
+        crate_root = source,
+        edition = "2021",
+        features = select({
+            "//:macos-arm64": ["metal", "usearch-native"],
+            "DEFAULT": ["opencl", "usearch-native"],
+        }),
+        deps = [
+            ":ennx",
+            "//rust:ndarray",
+            "//rust:rand",
+            "//rust:rand_chacha",
+            "//rust:tempfile",
+        ] + select({
+            "//:macos-arm64": ["//buck2/native:openmp-macos"],
+            "DEFAULT": [],
+        }),
+        visibility = ["PUBLIC"],
+        rpath = True,
+        runtime_dependency_handling = "symlink",
+        run_env = {"RUST_TEST_THREADS": "1"},
+        rustc_flags = select({
+            "//:macos-arm64": [
+                "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
+            ],
+            "DEFAULT": [],
+        }),
+        target_compatible_with = ["prelude//os/constraints:macos"] if source == "tests/knn_metal.rs" else [],
+    )
+    for source in glob(["tests/*.rs"])
+]
+
+_TESTS = [
+    ":" + source.removeprefix("tests/").removesuffix(".rs") + "_test"
+    for source in glob(["tests/*.rs"], exclude = ["tests/knn_metal.rs"])
+] + select({
+    "//:macos-arm64": [":knn_metal_test"],
+    "DEFAULT": [],
+})
+
+test_suite(
+    name = "integration",
+    tests = _TESTS,
+    visibility = ["//buck2/tests:all"],
+)

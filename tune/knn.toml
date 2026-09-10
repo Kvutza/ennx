@@ -1,0 +1,31 @@
+# Run: ./ennx tune knn tune/knn.toml
+version = 1
+
+[knn]
+output = "dist/knn-frontier.csv"
+rounds = 5
+
+# Shared values; individual points override any dimension.
+[knn.defaults]
+queries = 32
+dims = 32
+k = 10
+
+[[knn.points]]
+name = "ann_small"
+rows = 1_024
+dims = 16
+
+[[knn.points]]
+name = "ann_medium"
+rows = 8_192
+
+[[knn.points]]
+name = "batch"
+rows = 4_096
+queries = 128
+
+[[knn.points]]
+name = "dim"
+rows = 4_096
+dims = 128

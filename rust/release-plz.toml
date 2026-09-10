@@ -1,0 +1,13 @@
+[workspace]
+changelog_update = false
+dependencies_update = false
+release_always = false
+publish_timeout = "30m"
+
+[[package]]
+name = "ennx-bpann"
+git_release_enable = false
+
+[[package]]
+name = "ennx-py"
+release = false

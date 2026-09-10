@@ -1,0 +1,55 @@
+#!/usr/bin/env dotslash
+
+{
+  "name": "prek",
+  "platforms": {
+    "macos-aarch64": {
+      "size": 5349207,
+      "hash": "blake3",
+      "digest": "f71c503ef494bd34e33017a1c1da4c99490e6754d6e6fcec7846d4a6ced07cd7",
+      "format": "tar.gz",
+      "path": "prek-aarch64-apple-darwin/prek",
+      "providers": [
+        {
+          "url": "https://github.com/j178/prek/releases/download/v0.4.11/prek-aarch64-apple-darwin.tar.gz"
+        }
+      ]
+    },
+    "linux-aarch64": {
+      "size": 5656570,
+      "hash": "blake3",
+      "digest": "5f90337c31182ba363d0ea5c31e54c32a46ae86f581c5dba4baf731950daedd1",
+      "format": "tar.gz",
+      "path": "prek-aarch64-unknown-linux-musl/prek",
+      "providers": [
+        {
+          "url": "https://github.com/j178/prek/releases/download/v0.4.11/prek-aarch64-unknown-linux-musl.tar.gz"
+        }
+      ]
+    },
+    "macos-x86_64": {
+      "size": 5932826,
+      "hash": "blake3",
+      "digest": "12663ee25f3c424af52c3440447cc28c7e89a37256b96f1d0a5c3fd3490bc690",
+      "format": "tar.gz",
+      "path": "prek-x86_64-apple-darwin/prek",
+      "providers": [
+        {
+          "url": "https://github.com/j178/prek/releases/download/v0.4.11/prek-x86_64-apple-darwin.tar.gz"
+        }
+      ]
+    },
+    "linux-x86_64": {
+      "size": 6233559,
+      "hash": "blake3",
+      "digest": "3d69f57d33106db2e8363256fa6627077d2f8c74ed3629d0a024c93cc639aa4d",
+      "format": "tar.gz",
+      "path": "prek-x86_64-unknown-linux-musl/prek",
+      "providers": [
+        {
+          "url": "https://github.com/j178/prek/releases/download/v0.4.11/prek-x86_64-unknown-linux-musl.tar.gz"
+        }
+      ]
+    }
+  }
+}

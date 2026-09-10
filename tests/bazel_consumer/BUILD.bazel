@@ -1,0 +1,9 @@
+alias(
+    name = "rust_core",
+    actual = "@ennx//:cpu",
+)
+
+alias(
+    name = "python_wheel",
+    actual = "@ennx//:wheel",
+)

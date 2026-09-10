@@ -1,0 +1,16 @@
+[package]
+name = "ennx-dev-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "ennx"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+serde = { workspace = true, features = ["derive"] }
+toml.workspace = true

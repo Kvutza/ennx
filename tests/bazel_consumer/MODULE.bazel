@@ -1,0 +1,8 @@
+module(name = "ennx_bazel_consumer")
+
+bazel_dep(name = "ennx", version = "0.0.0")
+
+local_path_override(
+    module_name = "ennx",
+    path = "../..",
+)

@@ -1,0 +1,51 @@
+load(":openmp.bzl", "unpack_openmp")
+
+http_archive(
+    name = "llvm-openmp-conda",
+    sha256 = "ccbaad6bbc88f135ab849bc36af5fa6eda36a9ed18ce6f58e3dde3d11784c156",
+    target_compatible_with = [
+        "prelude//cpu/constraints:arm64",
+        "prelude//os/constraints:macos",
+    ],
+    type = "zip",
+    urls = [
+        "https://conda.anaconda.org/conda-forge/osx-arm64/llvm-openmp-22.1.8-hc7d1edf_0.conda",
+    ],
+)
+
+http_archive(
+    name = "usearch-source",
+    sha256 = "1cd7f672d20412962c457b11c858c6c5aecb949808a5345a95e1d671112bcf72",
+    strip_prefix = "usearch-2.26.0",
+    urls = [
+        "https://static.crates.io/crates/usearch/2.26.0/download",
+    ],
+)
+
+unpack_openmp(
+    name = "openmp-build",
+    archive = ":llvm-openmp-conda",
+    target_compatible_with = ["prelude//os/constraints:macos"],
+    visibility = ["PUBLIC"],
+)
+
+prebuilt_cxx_library(
+    name = "openmp-macos",
+    exported_linker_flags = [
+        "-Wl,-needed_library,$(location :openmp-build[lib])",
+    ],
+    shared_lib = ":openmp-build[lib]",
+    soname = "libomp.dylib",
+    target_compatible_with = ["prelude//os/constraints:macos"],
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "usearch",
+    exported_preprocessor_flags = [
+        "-DUSEARCH_USE_OPENMP=0",
+        "-DUSEARCH_USE_NUMKONG=0",
+        "-I$(location :usearch-source)/include",
+    ],
+    visibility = ["PUBLIC"],
+)

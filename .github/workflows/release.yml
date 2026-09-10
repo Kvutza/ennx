@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v* release tag matching the package version
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve release source
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate tag and package versions
+        id: source
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: python3 tools/release_provenance.py "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: resolve
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-24.04' && 'quay.io/pypa/manylinux_2_28_x86_64@sha256:53390351aeb4688114b02c36a23b3e6ce1166ee9b7afc5df1a4f776354fc764c' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Install manylinux build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          dnf install -y epel-release
+          dnf install -y git-lfs clang lld ocl-icd-devel
+
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+          fetch-depth: 0
+          lfs: true
+
+      - name: Install Rust toolchain
+        run: |
+          if ! command -v rustup >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.96.0
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install 1.96.0 --profile minimal --component rustfmt
+
+      - name: Install Pixi
+        uses: prefix-dev/setup-pixi@v0.9.0
+        with:
+          pixi-version: v0.78.0
+          cache: false
+          environments: ennx ennx-py312 ennx-py314
+          locked: false
+
+      - name: Restore Buck2 cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .buck2-tools
+            buck-out/dev
+          key: ${{ runner.os }}-${{ runner.arch }}-buck2-v3-${{ hashFiles('.buckconfig', 'BUCK', 'buck2/**', 'toolchains/**', 'tools/**', 'rust-toolchain.toml', 'rust/BUCK', 'rust/crates/**/BUCK', 'Cargo.toml', 'rust/**/*.toml', 'pixi.toml', '.github/workflows/*.yml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-buck2-v3-${{ hashFiles('.buckconfig', 'BUCK', 'buck2/**', 'toolchains/**', 'tools/**', 'rust-toolchain.toml', 'rust/BUCK', 'rust/crates/**/BUCK', 'Cargo.toml', 'rust/**/*.toml', 'pixi.toml', '.github/workflows/*.yml') }}-
+
+      - name: Verify release checkout
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+        run: pixi run -e ennx python tools/release_provenance.py "$RELEASE_TAG" --commit "$RELEASE_COMMIT"
+
+      - name: Check formatting
+        run: ./ennx fmt --check
+
+      - name: Build and verify wheels
+        run: ./ennx build --tests --out release
+
+      - name: Run native tests
+        run: ./ennx test
+
+      - name: Collect wheel artifacts
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+        run: |
+          pixi run -e ennx python tools/release_provenance.py "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --wheels release
+          test "$(find release -type f -name 'ennx-*.whl' | wc -l | tr -d ' ')" -eq 3
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ennx-${{ matrix.os }}
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    name: Create GitHub Release
+    needs: [resolve, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+        run: |
+          python3 tools/release_provenance.py "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --wheels release
+          cp README.md LICENSE NOTICE release/
+          if gh release view "$RELEASE_TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null; then
+            gh release upload "$RELEASE_TAG" release/* \
+              --repo "${GITHUB_REPOSITORY}"
+          else
+            gh release create "$RELEASE_TAG" release/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --target "$RELEASE_COMMIT" \
+              --generate-notes \
+              --title "$RELEASE_TAG"
+          fi

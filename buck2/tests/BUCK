@@ -1,0 +1,71 @@
+load(":suite.bzl", "test_suite")
+
+rust_test(
+    name = "metal",
+    srcs = ["metal.rs"],
+    crate_root = "metal.rs",
+    deps = [
+        "//buck2/native:openmp-macos",
+        "//rust/crates/ennx:ennx",
+        "//rust:ndarray",
+    ],
+    rpath = True,
+    runtime_dependency_handling = "symlink",
+    rustc_flags = [
+        "-Clink-arg=-Wl,-rpath,@loader_path/../../native/__openmp-build__/openmp/lib",
+    ],
+    target_compatible_with = ["prelude//os/constraints:macos"],
+)
+
+rust_test(
+    name = "bpann",
+    srcs = ["bpann.rs"],
+    crate_root = "bpann.rs",
+    deps = ["//rust/crates/bpann:bpann"],
+)
+
+rust_test(
+    name = "dense",
+    srcs = ["dense.rs"],
+    crate_root = "dense.rs",
+    deps = ["//rust/crates/ennx:ennx"] + select({
+        "//:macos-arm64": ["//buck2/native:openmp-macos"],
+        "DEFAULT": [],
+    }),
+    rpath = True,
+    runtime_dependency_handling = "symlink",
+    rustc_flags = select({
+        "//:macos-arm64": [
+            "-Clink-arg=-Wl,-rpath,@loader_path/../../native/__openmp-build__/openmp/lib",
+        ],
+        "DEFAULT": [],
+    }),
+)
+
+rust_test(
+    name = "opencl",
+    srcs = ["opencl.rs"],
+    crate_root = "opencl.rs",
+    deps = ["//rust:opencl3"],
+)
+
+_TESTS = [
+    ":bpann",
+    ":dense",
+    ":opencl",
+    "//rust/crates/dev-cli:ennx-test",
+    "//rust/crates/bpann:bpann-unit",
+    "//rust/crates/ennx:ennx-unit",
+    "//rust/crates/ennx:region-math",
+    "//rust/crates/ennx:region-opencl",
+    "//rust/crates/ennx:integration",
+] + select({
+    "//:macos-arm64": [":metal"],
+    "DEFAULT": [],
+})
+
+test_suite(
+    name = "all",
+    tests = _TESTS,
+    visibility = ["PUBLIC"],
+)

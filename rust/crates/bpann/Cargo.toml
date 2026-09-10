@@ -1,0 +1,28 @@
+[package]
+name = "ennx-bpann"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords = ["nearest-neighbor", "ann", "disk-index"]
+categories = ["science"]
+description = "B+ANN disk-based approximate nearest-neighbor index"
+include = ["src/**", "Cargo.toml", "LICENSE", "NOTICE"]
+
+[lib]
+name = "bpann"
+
+[dependencies]
+memmap2 = "0.9"
+ndarray = { workspace = true }
+rand = "0.8"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = { workspace = true }
+
+[dev-dependencies]
+rand_chacha = "0.3"
+tempfile = "3"
