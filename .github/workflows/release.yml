@@ -66,7 +66,9 @@ jobs:
       - name: Fetch release tag
         env:
           RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
-        run: git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
 
       - name: Install Rust toolchain
         run: |
@@ -140,7 +142,9 @@ jobs:
       - name: Fetch release tag
         env:
           RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
-        run: git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
