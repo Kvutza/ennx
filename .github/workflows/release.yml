@@ -110,7 +110,7 @@ jobs:
       - name: Build and verify wheels
         run: ./ennx build --tests --out release
 
-      - name: Run native tests
+      - name: Run Rust and kernel tests
         run: ./ennx test
 
       - name: Collect wheel artifacts
