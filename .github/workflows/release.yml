@@ -52,6 +52,7 @@ jobs:
       - name: Install manylinux build prerequisites
         if: runner.os == 'Linux'
         run: |
+          chown root:root "$HOME"
           dnf install -y epel-release
           dnf install -y git-lfs clang lld ocl-icd-devel
 
