@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+if command -v pixi >/dev/null 2>&1; then
+    exec pixi "$@"
+fi
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+"$repo_dir/tools/bootstrap-dotslash" >/dev/null
+exec "$repo_dir/.buck2-tools/bin/dotslash" "$repo_dir/tools/pixi" "$@"

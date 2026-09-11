@@ -29,7 +29,22 @@ python = "3.13.*"
 [feature.py314.dependencies]
 python = "3.14.*"
 
+[feature.build-tools.dependencies]
+git = "*"
+git-lfs = "*"
+
+[feature.build-tools.target.linux-64.dependencies]
+auditwheel = "*"
+patchelf = "*"
+binutils = "*"
+
+[feature.build-tools.target.linux-aarch64.dependencies]
+auditwheel = "*"
+patchelf = "*"
+binutils = "*"
+
 [environments]
+build-tools = { features = ["build-tools"], no-default-feature = true }
 ennx = { features = ["ennx", "test", "gp", "py313"], no-default-feature = true }
 ennx-py312 = { features = ["ennx", "test", "py312"], no-default-feature = true }
 ennx-py314 = { features = ["ennx", "test", "py314"], no-default-feature = true }
