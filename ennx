@@ -79,8 +79,6 @@ run_build() {
                 ;;
         esac
     done
-    echo "Preparing Python environments..."
-    pixi install --all
     if [ "${ENNX_DEPS_CHECKED:-0}" != 1 ]; then
         check_deps
     fi
