@@ -4,4 +4,34 @@ set -eu
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_dir"
 
-cargo metadata --no-deps --format-version 1 >/dev/null
+case "$(uname -s):$(uname -m)" in
+    Darwin:arm64)
+        if ! xcrun --find clang++ >/dev/null 2>&1 ||
+            ! xcrun --show-sdk-path >/dev/null 2>&1; then
+            echo "ennx: install Xcode command-line tools with: xcode-select --install" >&2
+            exit 1
+        fi
+        required="clang clang++ ar otool install_name_tool"
+        ;;
+    Linux:x86_64|Linux:aarch64)
+        required="clang clang++ ar ld.lld"
+        ;;
+    *)
+        echo "ennx: unsupported build host: $(uname -s) $(uname -m)" >&2
+        exit 1
+        ;;
+esac
+
+for tool in $required; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "ennx: missing native build tool: $tool" >&2
+        echo "Install the platform C/C++ development tools (Clang, LLD and system headers on Linux)." >&2
+        exit 1
+    fi
+done
+
+if ! printf '#include <cstdlib>\nint main() { return 0; }\n' |
+    clang++ -x c++ -fsyntax-only -; then
+    echo "ennx: the C++ compiler cannot use the system headers; install or repair the platform SDK" >&2
+    exit 1
+fi

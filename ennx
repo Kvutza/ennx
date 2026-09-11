@@ -83,7 +83,7 @@ run_build() {
         check_deps
     fi
     echo "Building the library, CLI, tests, and Python wheels..."
-    bash tools/build-wheels "$out" "$verification"
+    ENNX_DEPS_CHECKED=1 bash tools/build-wheels "$out" "$verification"
 }
 
 run_test() {

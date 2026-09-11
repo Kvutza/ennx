@@ -12,6 +12,10 @@ esac
 mkdir -p "$destination"
 build_report=
 
+if [ "${ENNX_DEPS_CHECKED:-0}" != 1 ]; then
+    sh tools/check-build-deps
+fi
+
 cleanup() {
     if [ -n "$build_report" ]; then
         rm -f "$build_report"
@@ -44,40 +48,86 @@ ensure_python_bin() {
     local python_version=$1
     local environment=$2
     local python_bin=$3
+    local override_var="ENNX_PYTHON_${python_version/./}"
     local absolute_python_bin=$python_bin
     case "$absolute_python_bin" in
         /*) ;;
         *) absolute_python_bin="$PWD/$absolute_python_bin" ;;
     esac
-    if [ -x "$absolute_python_bin" ]; then
+    if python_ready "$absolute_python_bin" "$python_version"; then
         return 0
     fi
-    if [ "$python_bin" = ".pixi/envs/$environment/bin/python" ]; then
-        if ! command -v pixi >/dev/null 2>&1; then
-            echo "missing CPython $python_version interpreter: $python_bin" >&2
-            echo "install Pixi or set ENNX_PYTHON_${python_version/./} to a CPython $python_version interpreter" >&2
-            exit 1
-        fi
+    if [ -z "${!override_var:-}" ] && [ -z "${ENNX_PYTHON:-}" ]; then
         echo "Preparing Python $python_version environment ($environment)..."
-        pixi install --environment "$environment"
+        sh tools/pixiw install --environment "$environment"
     fi
-    if [ ! -x "$absolute_python_bin" ]; then
-        echo "missing CPython $python_version interpreter: $python_bin" >&2
-        if [ "$python_bin" != ".pixi/envs/$environment/bin/python" ]; then
-            echo "check ENNX_PYTHON_${python_version/./} or ENNX_PYTHON" >&2
-        fi
+    if ! python_ready "$absolute_python_bin" "$python_version"; then
+        echo "ennx: $python_bin must be CPython $python_version with the verification dependencies from pixi.toml" >&2
+        echo "check ENNX_PYTHON_${python_version/./} or ENNX_PYTHON if set" >&2
         exit 1
     fi
 }
 
+python_ready() {
+    [ -x "$1" ] && "$1" - "$2" >/dev/null 2>&1 <<'PY'
+import importlib.util
+import sys
+
+if sys.implementation.name != "cpython" or sys.version_info[:2] != tuple(map(int, sys.argv[1].split("."))):
+    sys.exit(1)
+modules = ("numpy", "scipy", "pytest", "click", "botorch", "optuna", "ax")
+sys.exit(not all(importlib.util.find_spec(module) is not None for module in modules))
+PY
+}
+
+ensure_wheel_tools() {
+    local required=
+    local missing=0
+    local tool
+    if [ "$(uname -s)" = Linux ]; then
+        required="auditwheel patchelf readelf"
+    fi
+    if grep -RIlq '^version https://git-lfs.github.com/spec/v1$' tests/fixtures; then
+        required="$required git git-lfs"
+    fi
+    for tool in $required; do
+        command -v "$tool" >/dev/null 2>&1 || missing=1
+    done
+    [ "$missing" = 1 ] || return 0
+
+    local bin_dir="$PWD/.pixi/envs/build-tools/bin"
+    for tool in $required; do
+        if ! command -v "$tool" >/dev/null 2>&1 && [ ! -x "$bin_dir/$tool" ]; then
+            echo "Preparing wheel utilities..."
+            sh tools/pixiw install --environment build-tools
+            break
+        fi
+    done
+    # Preserve installed tools; use managed utilities only as fallbacks.
+    export PATH="$PATH:$bin_dir"
+    for tool in $required; do
+        command -v "$tool" >/dev/null 2>&1 || {
+            echo "ennx: missing wheel utility after setup: $tool" >&2
+            exit 1
+        }
+    done
+}
+
+ensure_wheel_tools
+
 # Finish with the default ABI so ./ennx test uses the same config.
-for python_version in 3.12 3.14 3.13; do
-    case "$python_version" in
-        3.12) environment=ennx-py312 ;;
-        3.13) environment=ennx ;;
-        3.14) environment=ennx-py314 ;;
-        *) echo "unsupported Python version: $python_version" >&2; exit 2 ;;
-    esac
+python_versions=(3.12 3.14 3.13)
+environments=(ennx-py312 ennx-py314 ennx)
+python_bins=()
+for index in "${!python_versions[@]}"; do
+    python_bin=$(python_bin_for_version "${python_versions[$index]}" "${environments[$index]}")
+    ensure_python_bin "${python_versions[$index]}" "${environments[$index]}" "$python_bin"
+    python_bins+=("$python_bin")
+done
+
+for index in "${!python_versions[@]}"; do
+    python_version=${python_versions[$index]}
+    python_bin=${python_bins[$index]}
     build_report=$(mktemp "${TMPDIR:-/tmp}/ennx-buck2-report.XXXXXX")
     ./buck2w \
         build //:wheel //buck2/tests:all //rust/crates/dev-cli:ennx \
@@ -85,7 +135,7 @@ for python_version in 3.12 3.14 3.13; do
         --config "ennx.python_version=$python_version" \
         --local-only \
         --build-report "$build_report"
-    wheel=$(python3 - "$build_report" <<'PY'
+    wheel=$("$python_bin" - "$build_report" <<'PY'
 import json
 import sys
 
@@ -108,8 +158,6 @@ PY
         wheel="$destination/$(basename "$wheel")"
     fi
     # Verify the final artifact once; dev requests the full Python suite.
-    python_bin=$(python_bin_for_version "$python_version" "$environment")
-    ensure_python_bin "$python_version" "$environment" "$python_bin"
     ENNX_PYTHON_VERSION="$python_version" \
         ENNX_PYTHON="$python_bin" \
         ENNX_WHEEL_PATH="$wheel" tools/buck2-wheel-verify ${verification:+"$verification"}
