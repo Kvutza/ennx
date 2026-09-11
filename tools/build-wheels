@@ -19,6 +19,57 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
+python_bin_for_version() {
+    local python_version=$1
+    local environment=$2
+    local override=
+    case "$python_version" in
+        3.12) override=${ENNX_PYTHON_312:-} ;;
+        3.13) override=${ENNX_PYTHON_313:-} ;;
+        3.14) override=${ENNX_PYTHON_314:-} ;;
+        *) echo "unsupported Python version: $python_version" >&2; exit 2 ;;
+    esac
+    if [ -n "$override" ]; then
+        printf '%s\n' "$override"
+        return
+    fi
+    if [ -n "${ENNX_PYTHON:-}" ]; then
+        printf '%s\n' "$ENNX_PYTHON"
+        return
+    fi
+    printf '.pixi/envs/%s/bin/python\n' "$environment"
+}
+
+ensure_python_bin() {
+    local python_version=$1
+    local environment=$2
+    local python_bin=$3
+    local absolute_python_bin=$python_bin
+    case "$absolute_python_bin" in
+        /*) ;;
+        *) absolute_python_bin="$PWD/$absolute_python_bin" ;;
+    esac
+    if [ -x "$absolute_python_bin" ]; then
+        return 0
+    fi
+    if [ "$python_bin" = ".pixi/envs/$environment/bin/python" ]; then
+        if ! command -v pixi >/dev/null 2>&1; then
+            echo "missing CPython $python_version interpreter: $python_bin" >&2
+            echo "install Pixi or set ENNX_PYTHON_${python_version/./} to a CPython $python_version interpreter" >&2
+            exit 1
+        fi
+        echo "Preparing Python $python_version environment ($environment)..."
+        pixi install --environment "$environment"
+    fi
+    if [ ! -x "$absolute_python_bin" ]; then
+        echo "missing CPython $python_version interpreter: $python_bin" >&2
+        if [ "$python_bin" != ".pixi/envs/$environment/bin/python" ]; then
+            echo "check ENNX_PYTHON_${python_version/./} or ENNX_PYTHON" >&2
+        fi
+        exit 1
+    fi
+}
+
 # Finish with the default ABI so ./ennx test uses the same config.
 for python_version in 3.12 3.14 3.13; do
     case "$python_version" in
@@ -57,11 +108,8 @@ PY
         wheel="$destination/$(basename "$wheel")"
     fi
     # Verify the final artifact once; dev requests the full Python suite.
-    python_bin=".pixi/envs/$environment/bin/python"
-    if [ ! -x "$python_bin" ]; then
-        echo "missing CPython $python_version environment; run ./ennx build first" >&2
-        exit 1
-    fi
+    python_bin=$(python_bin_for_version "$python_version" "$environment")
+    ensure_python_bin "$python_version" "$environment" "$python_bin"
     ENNX_PYTHON_VERSION="$python_version" \
         ENNX_PYTHON="$python_bin" \
         ENNX_WHEEL_PATH="$wheel" tools/buck2-wheel-verify ${verification:+"$verification"}
