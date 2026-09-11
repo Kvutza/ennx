@@ -11,6 +11,14 @@ import tomllib
 import zipfile
 
 
+PYTHON_ABIS = ("cp312", "cp313", "cp314")
+PLATFORM_TAGS = (
+    "macosx_11_0_arm64",
+    "manylinux_2_28_aarch64",
+    "manylinux_2_28_x86_64",
+)
+
+
 def git(root: Path, *args: str) -> str:
     return subprocess.check_output(
         ["git", "-C", str(root), *args], text=True, stderr=subprocess.PIPE
@@ -47,13 +55,30 @@ def verify_checkout(root: Path, tag: str, commit: str) -> None:
         raise ValueError("release checkout contains modified tracked files")
 
 
-def verify_wheels(directory: Path, version: str) -> None:
+def expected_wheel_names(version: str, platform_tags: tuple[str, ...]) -> set[str]:
+    return {
+        f"ennx-{version}-{abi}-{abi}-{platform_tag}.whl"
+        for abi in PYTHON_ABIS
+        for platform_tag in platform_tags
+    }
+
+
+def verify_wheels(
+    directory: Path, version: str, platform_tags: tuple[str, ...] = PLATFORM_TAGS
+) -> None:
     wheels = sorted(directory.glob("*.whl"))
     if not wheels:
         raise ValueError("no release wheels found")
+    actual = {wheel.name for wheel in wheels}
+    expected = expected_wheel_names(version, platform_tags)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unexpected = sorted(actual - expected)
+        raise ValueError(
+            "release wheels do not match expected set: "
+            f"missing={missing}, unexpected={unexpected}"
+        )
     for wheel in wheels:
-        if wheel.name.split("-")[:2] != ["ennx", version]:
-            raise ValueError(f"wheel filename disagrees with release: {wheel.name}")
         with zipfile.ZipFile(wheel) as archive:
             metadata_paths = [
                 name
@@ -73,6 +98,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tag")
     parser.add_argument("--commit")
+    parser.add_argument("--platform-tag", action="append", choices=PLATFORM_TAGS)
     parser.add_argument("--wheels", type=Path)
     args = parser.parse_args()
     root = Path.cwd()
@@ -80,7 +106,9 @@ def main() -> None:
     if args.commit:
         verify_checkout(root, args.tag, args.commit)
     if args.wheels:
-        verify_wheels(args.wheels, args.tag[1:])
+        verify_wheels(
+            args.wheels, args.tag[1:], tuple(args.platform_tag or PLATFORM_TAGS)
+        )
     print(f"tag={args.tag}\ncommit={commit}")
 
 
