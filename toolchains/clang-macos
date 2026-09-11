@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+compiler=$1
+mode=$2
+shift 2
+if ! sdk=$(xcrun --show-sdk-path); then
+    echo "ennx: install Apple's SDK with: xcode-select --install" >&2
+    exit 1
+fi
+if [ "$mode" = cxx ]; then
+    set -- -nostdinc++ -isystem "$sdk/usr/include/c++/v1" "$@"
+fi
+exec "$compiler" --no-default-config -isysroot "$sdk" -mmacosx-version-min=11.0 "$@"
