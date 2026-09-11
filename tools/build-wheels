@@ -12,14 +12,6 @@ esac
 mkdir -p "$destination"
 build_report=
 
-if [ "${ENNX_DEPS_CHECKED:-0}" != 1 ]; then
-    ENNX_CXX_ROOT=$(sh tools/check-build-deps)
-    export ENNX_CXX_ROOT
-    if [ -n "$ENNX_CXX_ROOT" ]; then
-        export PATH="$ENNX_CXX_ROOT/bin:$PATH"
-    fi
-fi
-
 cleanup() {
     if [ -n "$build_report" ]; then
         rm -f "$build_report"
@@ -73,51 +65,21 @@ ensure_python_bin() {
 }
 
 python_ready() {
-    [ -x "$1" ] && "$1" - "$2" >/dev/null 2>&1 <<'PY'
+    [ -x "$1" ] && PATH="$(dirname "$1"):$PATH" "$1" - "$2" >/dev/null 2>&1 <<'PY'
 import importlib.util
+import shutil
 import sys
 
 if sys.implementation.name != "cpython" or sys.version_info[:2] != tuple(map(int, sys.argv[1].split("."))):
     sys.exit(1)
 modules = ("numpy", "scipy", "pytest", "click", "botorch", "optuna", "ax")
+if sys.platform == "linux":
+    modules += ("auditwheel",)
+    if not all(shutil.which(tool) for tool in ("auditwheel", "patchelf", "readelf")):
+        sys.exit(1)
 sys.exit(not all(importlib.util.find_spec(module) is not None for module in modules))
 PY
 }
-
-ensure_wheel_tools() {
-    local required=
-    local missing=0
-    local tool
-    if [ "$(uname -s)" = Linux ]; then
-        required="auditwheel patchelf readelf"
-    fi
-    if grep -RIlq '^version https://git-lfs.github.com/spec/v1$' tests/fixtures; then
-        required="$required git git-lfs"
-    fi
-    for tool in $required; do
-        command -v "$tool" >/dev/null 2>&1 || missing=1
-    done
-    [ "$missing" = 1 ] || return 0
-
-    local bin_dir="$PWD/.pixi/envs/build-tools/bin"
-    for tool in $required; do
-        if ! command -v "$tool" >/dev/null 2>&1 && [ ! -x "$bin_dir/$tool" ]; then
-            echo "Preparing wheel utilities..."
-            sh tools/pixiw install --environment build-tools
-            break
-        fi
-    done
-    # Preserve installed tools; use managed utilities only as fallbacks.
-    export PATH="$PATH:$bin_dir"
-    for tool in $required; do
-        command -v "$tool" >/dev/null 2>&1 || {
-            echo "ennx: missing wheel utility after setup: $tool" >&2
-            exit 1
-        }
-    done
-}
-
-ensure_wheel_tools
 
 # Finish with the default ABI so ./ennx test uses the same config.
 python_versions=(3.12 3.14 3.13)
@@ -151,18 +113,21 @@ PY
     rm -f "$build_report"
     build_report=
     test -f "$wheel"
-    if [ "$(uname -s)" = Linux ]; then
-        # repair rejects binaries requiring a newer glibc than the promised tag.
-        auditwheel repair --plat "manylinux_2_28_$(uname -m)" \
-            --only-plat --wheel-dir "$destination" "$wheel"
-        wheel="$destination/$(basename "$wheel")"
-        auditwheel show "$wheel"
-    else
-        cp "$wheel" "$destination/"
-        wheel="$destination/$(basename "$wheel")"
-    fi
-    # Verify the final artifact once; dev requests the full Python suite.
-    ENNX_PYTHON_VERSION="$python_version" \
-        ENNX_PYTHON="$python_bin" \
-        ENNX_WHEEL_PATH="$wheel" tools/buck2-wheel-verify ${verification:+"$verification"}
+    (
+        if [ "$(uname -s)" = Linux ]; then
+            export PATH="$(dirname "$python_bin"):$PATH"
+            # repair rejects binaries requiring a newer glibc than the promised tag.
+            auditwheel repair --plat "manylinux_2_28_$(uname -m)" \
+                --only-plat --wheel-dir "$destination" "$wheel"
+            wheel="$destination/$(basename "$wheel")"
+            auditwheel show "$wheel"
+        else
+            cp "$wheel" "$destination/"
+            wheel="$destination/$(basename "$wheel")"
+        fi
+        # Verify the final artifact once; dev requests the full Python suite.
+        ENNX_PYTHON_VERSION="$python_version" \
+            ENNX_PYTHON="$python_bin" \
+            ENNX_WHEEL_PATH="$wheel" tools/buck2-wheel-verify ${verification:+"$verification"}
+    )
 done

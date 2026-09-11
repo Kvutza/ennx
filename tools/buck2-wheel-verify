@@ -40,15 +40,12 @@ hydrate_lfs_fixtures() {
         fixture_restore_dir=
         return
     fi
-    if ! git lfs version >/dev/null 2>&1; then
-        echo "Git LFS is required to materialize test fixtures" >&2
-        exit 1
-    fi
+    tools/bootstrap-dotslash
     while IFS= read -r fixture; do
         mkdir -p "$fixture_restore_dir/files/$(dirname "$fixture")"
         cp "$fixture" "$fixture_restore_dir/files/$fixture"
         materialized="$fixture_restore_dir/materialized"
-        git lfs smudge -- "$fixture" < "$fixture" > "$materialized"
+        .buck2-tools/bin/dotslash tools/git-lfs smudge -- "$fixture" < "$fixture" > "$materialized"
         if grep -Fqx 'version https://git-lfs.github.com/spec/v1' "$materialized"; then
             echo "Git LFS object is unavailable for fixture: $fixture" >&2
             exit 1

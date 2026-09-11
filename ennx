@@ -26,15 +26,6 @@ hooks() {
         --show-diff-on-failure
 }
 
-check_deps() {
-    echo "Checking dependencies..."
-    ENNX_CXX_ROOT=$(sh tools/check-build-deps)
-    export ENNX_CXX_ROOT
-    if [ -n "$ENNX_CXX_ROOT" ]; then
-        export PATH="$ENNX_CXX_ROOT/bin:$PATH"
-    fi
-}
-
 run_format() {
     check=$1
     if [ "$check" = 1 ]; then
@@ -62,6 +53,7 @@ run_build() {
     verification=$1
     shift
     out=dist
+    out_set=0
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --tests)
@@ -70,12 +62,13 @@ run_build() {
                 shift
                 ;;
             --out)
-                [ "$out" = dist ] || fail "build received --out more than once"
+                [ "$out_set" = 0 ] || fail "build received --out more than once"
                 [ "$#" -ge 2 ] || fail "build --out requires a directory"
                 case "$2" in
                     "" | -*) fail "build --out requires a directory" ;;
                 esac
                 out=$2
+                out_set=1
                 shift 2
                 ;;
             *)
@@ -83,11 +76,8 @@ run_build() {
                 ;;
         esac
     done
-    if [ "${ENNX_DEPS_CHECKED:-0}" != 1 ]; then
-        check_deps
-    fi
     echo "Building the library, CLI, tests, and Python wheels..."
-    ENNX_DEPS_CHECKED=1 bash tools/build-wheels "$out" "$verification"
+    bash tools/build-wheels "$out" "$verification"
 }
 
 run_test() {
@@ -104,9 +94,6 @@ run_test() {
                 ;;
         esac
     done
-    if [ "${ENNX_DEPS_CHECKED:-0}" != 1 ]; then
-        check_deps
-    fi
     if [ "$python" = 1 ]; then
         tools/buck2-wheel-verify --tests
         return 0
@@ -299,7 +286,7 @@ EOF
         [ "$#" -eq 0 ] || fail "invalid dev option: $1"
         run_format 0
         run_build full
-        ENNX_DEPS_CHECKED=1 run_test
+        run_test
         exit 0
         ;;
     *)

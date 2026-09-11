@@ -54,7 +54,7 @@ jobs:
         run: |
           chown root:root "$HOME"
           dnf install -y epel-release
-          dnf install -y git-lfs clang lld ocl-icd-devel
+          dnf install -y git-lfs ocl-icd-devel
 
       - name: Check out source
         uses: actions/checkout@v4

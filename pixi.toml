@@ -16,6 +16,16 @@ ax-platform = "==1.3.1"
 pytest = "*"
 click = "*"
 
+[feature.test.target.linux-64.dependencies]
+auditwheel = "*"
+patchelf = "*"
+binutils = "*"
+
+[feature.test.target.linux-aarch64.dependencies]
+auditwheel = "*"
+patchelf = "*"
+binutils = "*"
+
 [feature.gp.dependencies]
 pytorch = ">=2.0"
 gpytorch = ">=1.11"
@@ -29,40 +39,7 @@ python = "3.13.*"
 [feature.py314.dependencies]
 python = "3.14.*"
 
-[feature.build-tools.dependencies]
-git = "*"
-git-lfs = "*"
-
-[feature.build-tools.target.linux-64.dependencies]
-auditwheel = "*"
-patchelf = "*"
-binutils = "*"
-
-[feature.build-tools.target.linux-aarch64.dependencies]
-auditwheel = "*"
-patchelf = "*"
-binutils = "*"
-
-[feature.native-tools.dependencies]
-clang = "==22.1.8"
-clangxx = "==22.1.8"
-lld = "==22.1.8"
-llvm-tools = "==22.1.8"
-
-# GCC 8 headers keep C++ symbol requirements within the manylinux 2.28 ABI.
-[feature.native-tools.target.linux-64.dependencies]
-sysroot_linux-64 = "==2.28"
-libgcc-devel_linux-64 = "==8.5.0"
-libstdcxx-devel_linux-64 = "==8.5.0"
-
-[feature.native-tools.target.linux-aarch64.dependencies]
-sysroot_linux-aarch64 = "==2.28"
-libgcc-devel_linux-aarch64 = "==8.5.0"
-libstdcxx-devel_linux-aarch64 = "==8.5.0"
-
 [environments]
-native-tools = { features = ["native-tools"], no-default-feature = true }
-build-tools = { features = ["build-tools"], no-default-feature = true }
 ennx = { features = ["ennx", "test", "gp", "py313"], no-default-feature = true }
 ennx-py312 = { features = ["ennx", "test", "py312"], no-default-feature = true }
 ennx-py314 = { features = ["ennx", "test", "py314"], no-default-feature = true }

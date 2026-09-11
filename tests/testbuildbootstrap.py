@@ -20,14 +20,12 @@ class BuildBootstrapTests(unittest.TestCase):
         for name in (
             "ennx",
             "tools/build-wheels",
-            "tools/check-build-deps",
             "tools/pixiw",
             "tools/pixi",
         ):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, target)
-        (self.root / "tests/fixtures").mkdir(parents=True)
         self.bin = self.root / "bin"
         self.bin.mkdir()
         for name in (
@@ -40,30 +38,9 @@ class BuildBootstrapTests(unittest.TestCase):
             "rm",
             "cp",
             "basename",
-            "grep",
         ):
             (self.bin / name).symlink_to(shutil.which(name))
         self.script("bin/uname", 'case "$1" in -s) echo Darwin;; -m) echo arm64;; esac')
-        for name in ("xcrun", "clang", "clang++", "ar", "otool", "install_name_tool"):
-            self.script(f"bin/{name}", "exit 0")
-        self.script("bin/xcrun", 'echo "/mock SDK"')
-        self.script(
-            "compiler-stub",
-            """
-while [ "$#" -gt 0 ]; do
-    if [ "$1" = --version ]; then
-        echo 'clang version 22.1.8 (test)'
-        exit 0
-    fi
-    if [ "$1" = -o ]; then
-        cp bin/ar "$2"
-        exit 0
-    fi
-    shift
-done
-""",
-        )
-        shutil.copy2(self.root / "compiler-stub", self.bin / "clang++")
         self.script(
             "tools/buck2-wheel-verify", 'echo "verify:$ENNX_PYTHON_VERSION" >> events'
         )
@@ -71,9 +48,6 @@ done
             "buck2w",
             """
 echo build >> events
-if [ -n "${ENNX_CXX_ROOT:-}" ]; then
-    echo "compiler:$ENNX_CXX_ROOT" >> events
-fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --build-report) report=$2; shift;;
@@ -102,21 +76,8 @@ echo "pixi:$*" >> events
 environment=$3
 bin=".pixi/envs/$environment/bin"
 mkdir -p "$bin"
-if [ "$environment" = build-tools ]; then
-    for tool in auditwheel patchelf readelf git git-lfs; do
-        cp bin/ar "$bin/$tool"
-    done
-elif [ "$environment" = native-tools ]; then
-    for tool in clang clang++; do
-        cp compiler-stub "$bin/$tool"
-    done
-    for tool in llvm-ar ld.lld ld64.lld; do
-        cp bin/ar "$bin/$tool"
-    done
-else
-    cp python-stub "$bin/python"
-    rm -f "$bin/python.broken"
-fi
+cp python-stub "$bin/python"
+rm -f "$bin/python.broken"
 """,
         )
         self.script(
@@ -244,107 +205,66 @@ cp dotslash-stub .buck2-tools/bin/dotslash
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(line.startswith("pixi:") for line in self.events()))
 
-    def test_missing_clang_is_installed_and_reused(self):
-        self.prepare_python()
-        (self.bin / "clang++").unlink()
-        first = self.run_build()
-        self.assertEqual(first.returncode, 0, first.stderr)
-        events = self.events()
-        install = "pixi:install --environment native-tools"
-        self.assertIn(install, events)
-        self.assertLess(events.index(install), events.index("build"))
-        self.assertEqual(
-            events.count(f"compiler:{self.root}/.pixi/envs/native-tools"), 3
-        )
-        second = self.run_build()
-        self.assertEqual(second.returncode, 0, second.stderr)
-        self.assertNotIn(install, self.events()[len(events) :])
-
-    def test_broken_host_linker_uses_managed_compiler(self):
-        self.prepare_python()
-        self.script("bin/clang++", "exit 1")
+    def test_generic_override_is_reused(self):
+        self.env["ENNX_PYTHON"] = str(self.root / "python-stub")
         result = self.run_build()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("pixi:install --environment native-tools", self.events())
+        self.assertEqual(self.events().count("build"), 3)
+        self.assertFalse(any(line.startswith("pixi:") for line in self.events()))
 
-    def test_native_install_failure_stops_before_compiling(self):
-        (self.bin / "clang++").unlink()
-        self.env["FAIL_INSTALL"] = "1"
-        result = self.run_build()
-        self.assertEqual(result.returncode, 42, result.stderr)
-        self.assertNotIn("build", self.events())
-
-    def test_linux_missing_lld_installs_native_toolchain(self):
+    def test_linux_wheel_tools_use_each_verifier_environment(self):
         self.prepare_python()
+        self.script("bin/uname", 'case "$1" in -s) echo Linux;; -m) echo x86_64;; esac')
+        for name in ("ennx-py312", "ennx-py314", "ennx"):
+            self.script(
+                f".pixi/envs/{name}/bin/auditwheel",
+                'echo "auditwheel:$0:$1" >> events',
+            )
         self.script(
-            "bin/uname", 'case "$1" in -s) echo Linux;; -m) echo aarch64;; esac'
+            "tools/buck2-wheel-verify",
+            'echo "verifier-tool:$(command -v auditwheel)" >> events',
         )
         result = self.run_build()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("pixi:install --environment native-tools", self.events())
-
-    def test_buck_wrapper_passes_compiler_and_sdk_as_configuration(self):
-        shutil.copy2(ROOT / "buck2w", self.root / "buck2w")
-        self.script("dotslash-stub", 'printf "%s\\n" "$@"')
-        prefix = str(self.root / "compiler with spaces")
-        self.env["ENNX_CXX_ROOT"] = prefix
-        result = subprocess.run(
-            [str(self.root / "buck2w"), "run", "//:cli", "--", "--help"],
-            cwd=self.root,
-            env=self.env,
-            text=True,
-            capture_output=True,
-            timeout=30,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            result.stdout.splitlines()[1:],
             [
-                "run",
-                "--config",
-                f"ennx.cxx_root={prefix}",
-                "--config",
-                "ennx.cxx_sdk=/mock SDK",
-                "//:cli",
-                "--",
-                "--help",
+                line.replace(str(self.root) + "/", "").replace("./.pixi", ".pixi")
+                for line in self.events()
+                if line != "build"
+            ],
+            [
+                event
+                for name in ("ennx-py312", "ennx-py314", "ennx")
+                for event in (
+                    f"auditwheel:.pixi/envs/{name}/bin/auditwheel:repair",
+                    f"auditwheel:.pixi/envs/{name}/bin/auditwheel:show",
+                    f"verifier-tool:.pixi/envs/{name}/bin/auditwheel",
+                )
             ],
         )
 
-    def test_help_and_invalid_options_do_not_bootstrap(self):
-        self.assertEqual(self.run_build("--help").returncode, 0)
-        self.assertNotEqual(self.run_build("--bad").returncode, 0)
-        self.assertEqual(self.events(), [])
-
-    def test_missing_macos_sdk_reports_install_command(self):
-        self.script("bin/xcrun", "exit 1")
+    def test_version_override_takes_precedence(self):
+        self.prepare_python()
+        self.env["ENNX_PYTHON"] = str(self.root / "python-stub")
+        self.env["ENNX_PYTHON_312"] = "missing-python"
         result = self.run_build()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("xcode-select --install", result.stderr)
+        self.assertIn("ENNX_PYTHON_312", result.stderr)
         self.assertEqual(self.events(), [])
 
-    def test_linux_installs_missing_wheel_utilities(self):
-        self.prepare_python()
-        self.script("bin/uname", 'case "$1" in -s) echo Linux;; -m) echo x86_64;; esac')
-        self.script("bin/ld.lld", "exit 0")
-        result = self.run_build()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("pixi:install --environment build-tools", self.events())
-
-    def test_lfs_utilities_are_installed_only_for_pointer_fixtures(self):
-        self.prepare_python()
-        (self.root / "tests/fixtures/example").write_text(
-            "version https://git-lfs.github.com/spec/v1\n"
-        )
-        first = self.run_build()
-        self.assertEqual(first.returncode, 0, first.stderr)
-        events = self.events()
-        self.assertIn("pixi:install --environment build-tools", events)
-        second = self.run_build()
-        self.assertEqual(second.returncode, 0, second.stderr)
-        self.assertFalse(
-            any(line.startswith("pixi:") for line in self.events()[len(events) :])
-        )
+    def test_help_and_invalid_options_do_not_bootstrap(self):
+        self.assertEqual(self.run_build("--help").returncode, 0)
+        for args in (
+            ("--bad",),
+            ("--out",),
+            ("--out", ""),
+            ("--out", "--tests"),
+            ("--tests", "--tests"),
+            ("--out", "dist", "--out", "other"),
+        ):
+            with self.subTest(args=args):
+                self.assertNotEqual(self.run_build(*args).returncode, 0)
+                self.assertEqual(self.events(), [])
 
 
 if __name__ == "__main__":
