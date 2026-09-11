@@ -1,4 +1,4 @@
-load("@prelude//toolchains:cxx.bzl", "system_cxx_toolchain")
+load(":cxx.bzl", "ennx_cxx_toolchain")
 load("@prelude//toolchains:genrule.bzl", "system_genrule_toolchain")
 load("@prelude//toolchains:python.bzl", "remote_python_toolchain")
 load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
@@ -11,7 +11,7 @@ config_setting(
 )
 
 pinned_rust_toolchain(name = "rust")
-system_cxx_toolchain(name = "cxx", visibility = ["PUBLIC"])
+ennx_cxx_toolchain(name = "cxx")
 system_genrule_toolchain(name = "genrule", visibility = ["PUBLIC"])
 remote_python_toolchain(name = "python", visibility = ["PUBLIC"])
 noop_test_toolchain(name = "test", visibility = ["PUBLIC"])
