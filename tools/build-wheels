@@ -81,6 +81,24 @@ sys.exit(not all(importlib.util.find_spec(module) is not None for module in modu
 PY
 }
 
+python_abi() {
+    case "$1" in
+        3.12) printf 'cp312\n' ;;
+        3.13) printf 'cp313\n' ;;
+        3.14) printf 'cp314\n' ;;
+        *) echo "unsupported Python version: $1" >&2; exit 2 ;;
+    esac
+}
+
+wheel_platform_tag() {
+    case "$(uname -s):$(uname -m)" in
+        Darwin:arm64) printf 'macosx_11_0_arm64\n' ;;
+        Linux:x86_64) printf 'manylinux_2_28_x86_64\n' ;;
+        Linux:aarch64 | Linux:arm64) printf 'manylinux_2_28_aarch64\n' ;;
+        *) echo "unsupported build host: $(uname -s) $(uname -m)" >&2; exit 1 ;;
+    esac
+}
+
 # Finish with the default ABI so ./ennx test uses the same config.
 python_versions=(3.12 3.14 3.13)
 environments=(ennx-py312 ennx-py314 ennx)
@@ -110,6 +128,16 @@ target = report["results"]["root//:wheel"]
 print(target["outputs"]["DEFAULT"][0])
 PY
 )
+    abi=$(python_abi "$python_version")
+    platform_tag=$(wheel_platform_tag)
+    case "$(basename "$wheel")" in
+        *-"$abi"-"$abi"-"$platform_tag".whl) ;;
+        *)
+            echo "ennx: Buck produced the wrong wheel for this host: $wheel" >&2
+            echo "expected Python ABI $abi and platform tag $platform_tag" >&2
+            exit 1
+            ;;
+    esac
     rm -f "$build_report"
     build_report=
     test -f "$wheel"
@@ -117,7 +145,7 @@ PY
         if [ "$(uname -s)" = Linux ]; then
             export PATH="$(dirname "$python_bin"):$PATH"
             # repair rejects binaries requiring a newer glibc than the promised tag.
-            auditwheel repair --plat "manylinux_2_28_$(uname -m)" \
+            auditwheel repair --plat "$platform_tag" \
                 --only-plat --wheel-dir "$destination" "$wheel"
             wheel="$destination/$(basename "$wheel")"
             auditwheel show "$wheel"

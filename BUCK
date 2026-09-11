@@ -16,9 +16,12 @@ constraint_value(
 )
 
 platform(
-    name = "release",
-    deps = ["prelude//platforms:default"],
-    constraint_values = [":release-mode"],
+    name = "macos-arm64-platform",
+    constraint_values = [
+        "prelude//cpu/constraints:arm64",
+        "prelude//os/constraints:macos",
+    ],
+    visibility = ["PUBLIC"],
 )
 
 config_setting(
@@ -61,6 +64,24 @@ config_setting(
         "prelude//cpu/constraints:arm64",
         "prelude//os/constraints:macos",
     ],
+)
+
+platform(
+    name = "release-linux-arm64-platform",
+    deps = [":linux-arm64-platform"],
+    constraint_values = [":release-mode"],
+)
+
+platform(
+    name = "release-linux-x86_64-platform",
+    deps = [":linux-x86_64-platform"],
+    constraint_values = [":release-mode"],
+)
+
+platform(
+    name = "release-macos-arm64-platform",
+    deps = [":macos-arm64-platform"],
+    constraint_values = [":release-mode"],
 )
 
 filegroup(
@@ -156,19 +177,30 @@ python_wheel(
     version = read_config("ennx", "release_version", "0.2.0"),
 )
 
-alias(
-    name = "platform-wheel",
-    actual = select({
-        ":linux-arm64": ":wheel-linux-arm64",
-        ":linux-x86_64": ":wheel-linux-x86_64",
-        ":macos-arm64": ":wheel-macos-arm64",
-    }),
-    visibility = ["PUBLIC"],
+configured_alias(
+    name = "wheel-linux-arm64-release",
+    actual = ":wheel-linux-arm64",
+    platform = ":release-linux-arm64-platform",
 )
 
 configured_alias(
+    name = "wheel-linux-x86_64-release",
+    actual = ":wheel-linux-x86_64",
+    platform = ":release-linux-x86_64-platform",
+)
+
+configured_alias(
+    name = "wheel-macos-arm64-release",
+    actual = ":wheel-macos-arm64",
+    platform = ":release-macos-arm64-platform",
+)
+
+alias(
     name = "wheel",
-    actual = ":platform-wheel",
-    platform = ":release",
+    actual = select({
+        ":linux-arm64": ":wheel-linux-arm64-release",
+        ":linux-x86_64": ":wheel-linux-x86_64-release",
+        ":macos-arm64": ":wheel-macos-arm64-release",
+    }),
     visibility = ["PUBLIC"],
 )

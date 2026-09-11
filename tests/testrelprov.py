@@ -6,6 +6,8 @@ import zipfile
 import pytest
 
 from tools.release_provenance import (
+    PLATFORM_TAGS,
+    PYTHON_ABIS,
     git,
     resolve_release,
     verify_checkout,
@@ -66,22 +68,45 @@ def test_004(repository):
     assert resolve_release(repository, "v1.2.3") == git(repository, "rev-parse", "HEAD")
 
 
-@pytest.mark.parametrize("version", ["1.2.3", "9.9.9"])
-def test_005(tmp_path, version):
-    wheel = tmp_path / "ennx-1.2.3-cp313-cp313-macosx_11_0_arm64.whl"
+def write_wheel(directory, version, abi, platform_tag, metadata_version=None):
+    wheel = directory / f"ennx-{version}-{abi}-{abi}-{platform_tag}.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr(
-            "ennx-1.2.3.dist-info/METADATA", f"Name: ennx\nVersion: {version}\n"
+            f"ennx-{version}.dist-info/METADATA",
+            f"Name: ennx\nVersion: {metadata_version or version}\n",
+        )
+    return wheel
+
+
+@pytest.mark.parametrize("version", ["1.2.3", "9.9.9"])
+def test_005(tmp_path, version):
+    for abi in PYTHON_ABIS:
+        write_wheel(
+            tmp_path,
+            "1.2.3",
+            abi,
+            "macosx_11_0_arm64",
+            metadata_version=version,
         )
     if version == "1.2.3":
-        verify_wheels(tmp_path, "1.2.3")
+        verify_wheels(tmp_path, "1.2.3", ("macosx_11_0_arm64",))
     else:
         with pytest.raises(ValueError, match="metadata"):
-            verify_wheels(tmp_path, "1.2.3")
-    with pytest.raises(ValueError, match="filename"):
-        verify_wheels(tmp_path, "2.0.0")
+            verify_wheels(tmp_path, "1.2.3", ("macosx_11_0_arm64",))
+    with pytest.raises(ValueError, match="expected set"):
+        verify_wheels(tmp_path, "2.0.0", ("macosx_11_0_arm64",))
 
 
 def test_006(tmp_path):
     with pytest.raises(ValueError, match="no release wheels"):
+        verify_wheels(tmp_path, "1.2.3")
+
+
+def test_007(tmp_path):
+    for platform_tag in PLATFORM_TAGS:
+        for abi in PYTHON_ABIS:
+            write_wheel(tmp_path, "1.2.3", abi, platform_tag)
+    verify_wheels(tmp_path, "1.2.3")
+    (tmp_path / "ennx-1.2.3-cp312-cp312-manylinux_2_28_aarch64.whl").unlink()
+    with pytest.raises(ValueError, match="manylinux_2_28_aarch64"):
         verify_wheels(tmp_path, "1.2.3")

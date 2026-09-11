@@ -48,14 +48,27 @@ class BuildBootstrapTests(unittest.TestCase):
             "buck2w",
             """
 echo build >> events
+version=3.13
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --config) case "$2" in ennx.python_version=*) version=${2#*=};; esac; shift;;
         --build-report) report=$2; shift;;
     esac
     shift
 done
-: > wheel.whl
-echo wheel.whl > "$report"
+case "$version" in
+    3.12) abi=cp312;;
+    3.13) abi=cp313;;
+    3.14) abi=cp314;;
+esac
+case "$(uname -s):$(uname -m)" in
+    Darwin:arm64) tag=macosx_11_0_arm64;;
+    Linux:x86_64) tag=manylinux_2_28_x86_64;;
+    Linux:aarch64 | Linux:arm64) tag=manylinux_2_28_aarch64;;
+esac
+wheel="ennx-0.0.0-$abi-$abi-$tag.whl"
+: > "$wheel"
+echo "$wheel" > "$report"
 """,
         )
         # The interpreter stub handles the readiness probe and report extraction.
@@ -64,7 +77,7 @@ echo wheel.whl > "$report"
             """
 case "$2" in
     3.*) [ ! -f "$0.broken" ]; exit $?;;
-    *) echo wheel.whl;;
+    *) cat "$2";;
 esac
 """,
         )
