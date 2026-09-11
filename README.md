@@ -14,7 +14,9 @@ The Rust library and Python bindings share a build managed through `./ennx`.
 
 Buck2 runs the build. Cargo manifests declare Rust dependencies; Reindeer
 generates their Buck2 targets. `./ennx build` downloads missing build utilities
-and Python verification environments automatically, including Pixi when needed.
+and Python verification environments automatically, including Clang, LLD and Pixi
+when needed. Linux compiler headers and support libraries are included; macOS
+still needs Apple's SDK.
 Existing tools and environments are reused; no system Rust or Python is required.
 Unchanged build results are reused across commands.
 

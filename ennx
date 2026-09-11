@@ -28,7 +28,11 @@ hooks() {
 
 check_deps() {
     echo "Checking dependencies..."
-    sh tools/check-build-deps
+    ENNX_CXX_ROOT=$(sh tools/check-build-deps)
+    export ENNX_CXX_ROOT
+    if [ -n "$ENNX_CXX_ROOT" ]; then
+        export PATH="$ENNX_CXX_ROOT/bin:$PATH"
+    fi
 }
 
 run_format() {

@@ -13,7 +13,11 @@ mkdir -p "$destination"
 build_report=
 
 if [ "${ENNX_DEPS_CHECKED:-0}" != 1 ]; then
-    sh tools/check-build-deps
+    ENNX_CXX_ROOT=$(sh tools/check-build-deps)
+    export ENNX_CXX_ROOT
+    if [ -n "$ENNX_CXX_ROOT" ]; then
+        export PATH="$ENNX_CXX_ROOT/bin:$PATH"
+    fi
 fi
 
 cleanup() {

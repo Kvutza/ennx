@@ -43,7 +43,25 @@ auditwheel = "*"
 patchelf = "*"
 binutils = "*"
 
+[feature.native-tools.dependencies]
+clang = "==22.1.8"
+clangxx = "==22.1.8"
+lld = "==22.1.8"
+llvm-tools = "==22.1.8"
+
+# GCC 8 headers keep C++ symbol requirements within the manylinux 2.28 ABI.
+[feature.native-tools.target.linux-64.dependencies]
+sysroot_linux-64 = "==2.28"
+libgcc-devel_linux-64 = "==8.5.0"
+libstdcxx-devel_linux-64 = "==8.5.0"
+
+[feature.native-tools.target.linux-aarch64.dependencies]
+sysroot_linux-aarch64 = "==2.28"
+libgcc-devel_linux-aarch64 = "==8.5.0"
+libstdcxx-devel_linux-aarch64 = "==8.5.0"
+
 [environments]
+native-tools = { features = ["native-tools"], no-default-feature = true }
 build-tools = { features = ["build-tools"], no-default-feature = true }
 ennx = { features = ["ennx", "test", "gp", "py313"], no-default-feature = true }
 ennx-py312 = { features = ["ennx", "test", "py312"], no-default-feature = true }
