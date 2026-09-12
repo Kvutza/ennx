@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use cuda_core::{
-    CudaContext, CudaEvent, CudaStream, DeviceBuffer, DeviceCopy, IntoResult, LaunchConfig,
-    LaunchConfig1D,
+    CudaContext, CudaEvent, CudaStream, DeviceBuffer, DeviceCopy, IntoResult, LaunchConfig1D,
+    simt::LaunchConfig,
 };
 use cuda_host::embedded::{ArtifactPayloadKind, EmbeddedModuleError, OwnedArtifactBundle};
 use ennx_cuda_kernels::trials;
@@ -540,7 +540,7 @@ impl TrialEngine {
         let source = self.rows.cu_deviceptr() + (base_slot * self.row_stride) as u64;
         let destination = self.rows.cu_deviceptr() + (trial_slot * self.row_stride) as u64;
         unsafe {
-            cuda_core::memory::memcpy_dtod_async(
+            cuda_core::simt::memory::memcpy_dtod_async(
                 destination,
                 source,
                 self.row_bytes,
@@ -880,7 +880,7 @@ impl TrialEngine {
         let mut row = vec![0_u8; self.row_bytes];
         let source = self.rows.cu_deviceptr() + (slot * self.row_stride) as u64;
         unsafe {
-            cuda_core::memory::memcpy_dtoh_async(
+            cuda_core::simt::memory::memcpy_dtoh_async(
                 row.as_mut_ptr(),
                 source,
                 self.row_bytes,
@@ -929,7 +929,7 @@ impl TrialEngine {
         self.runtime.stream.synchronize().map_err(cuda_error)?;
         let destination = self.rows.cu_deviceptr() + (slot * self.row_stride) as u64;
         unsafe {
-            cuda_core::memory::memcpy_htod_sync(destination, row.as_ptr(), row.len())
+            cuda_core::simt::memory::memcpy_htod_sync(destination, row.as_ptr(), row.len())
                 .map_err(cuda_error)
         }
     }
@@ -1147,7 +1147,7 @@ impl Bf16Engine {
         let runtime = Runtime::new()?;
         let base = DeviceBuffer::zeroed(&runtime.stream, len).map_err(cuda_error)?;
         unsafe {
-            cuda_core::memory::memcpy_dtod_async(
+            cuda_core::simt::memory::memcpy_dtod_async(
                 base.cu_deviceptr(),
                 pointer,
                 len.checked_mul(size_of::<u16>())
@@ -1159,7 +1159,7 @@ impl Bf16Engine {
         runtime.stream.synchronize().map_err(cuda_error)?;
         let candidate = DeviceBuffer::zeroed(&runtime.stream, len).map_err(cuda_error)?;
         unsafe {
-            cuda_core::memory::memcpy_dtod_async(
+            cuda_core::simt::memory::memcpy_dtod_async(
                 candidate.cu_deviceptr(),
                 base.cu_deviceptr(),
                 len * size_of::<u16>(),
@@ -1266,7 +1266,7 @@ impl Bf16Engine {
 
     fn clear_status(&self) -> CudaResult<()> {
         unsafe {
-            cuda_core::memory::memset_d8_async(
+            cuda_core::simt::memory::memset_d8_async(
                 self.status.cu_deviceptr(),
                 0,
                 self.status.len() * size_of::<u32>(),
@@ -1287,7 +1287,7 @@ impl Bf16Engine {
 
     fn reset_candidate(&self) -> CudaResult<()> {
         unsafe {
-            cuda_core::memory::memcpy_dtod_async(
+            cuda_core::simt::memory::memcpy_dtod_async(
                 self.candidate.cu_deviceptr(),
                 self.base.cu_deviceptr(),
                 self.len
@@ -1421,7 +1421,7 @@ fn copy_prefix<T: DeviceCopy>(
         return Ok(());
     }
     unsafe {
-        cuda_core::memory::memcpy_htod_async(
+        cuda_core::simt::memory::memcpy_htod_async(
             buffer.cu_deviceptr(),
             values.as_ptr(),
             size_of_val(values),
@@ -1447,7 +1447,7 @@ fn read_prefix<T: DeviceCopy>(
         return Ok(output);
     }
     unsafe {
-        cuda_core::memory::memcpy_dtoh_async(
+        cuda_core::simt::memory::memcpy_dtoh_async(
             output.as_mut_ptr(),
             buffer.cu_deviceptr(),
             len * size_of::<T>(),

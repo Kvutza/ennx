@@ -13,12 +13,19 @@ import sys
 import time
 from pathlib import Path
 
-from cuoxtool import CUDA_OXIDE_REV, LLVM_MAJOR, RUST_TOOLCHAIN
+from cuoxtool import (
+    CUDA_OXIDE_REV,
+    CUDA_TOOLKIT_PACKAGE,
+    CUDA_TOOLKIT_VERSION,
+    LLVM_MAJOR,
+    RUST_TOOLCHAIN,
+)
 
 DEFAULT_WORKSPACE = Path("/content/cuda-oxide")
 DEFAULT_PROJECT = Path(__file__).resolve().parents[1] / "cuda"
 LLVM_KEY_URL = "https://apt.llvm.org/llvm-snapshot.gpg.key"
 TOOLCHAIN_STATE = Path.home() / ".cache/ennx/cuda-oxide-toolchain.json"
+CUDA_TOOLKIT_ROOT = Path(f"/usr/local/cuda-{CUDA_TOOLKIT_VERSION}")
 
 
 def run(
@@ -44,6 +51,11 @@ def fingerprint() -> dict[str, object]:
         raise RuntimeError(
             "No NVIDIA runtime found; select a GPU under Runtime > Change runtime type"
         )
+    nvcc = CUDA_TOOLKIT_ROOT / "bin/nvcc"
+    if not nvcc.is_file():
+        raise RuntimeError(
+            f"CUDA Toolkit {CUDA_TOOLKIT_VERSION} is not installed; run the setup command"
+        )
     return {
         "platform": platform.platform(),
         "python": platform.python_version(),
@@ -54,7 +66,7 @@ def fingerprint() -> dict[str, object]:
                 "--format=csv,noheader",
             ]
         ),
-        "cuda": capture(["nvcc", "--version"]),
+        "cuda": capture([str(nvcc), "--version"]),
     }
 
 
@@ -67,6 +79,26 @@ def install_packages() -> None:
         Path(f"/usr/bin/llc-{LLVM_MAJOR}"),
         Path(f"/usr/bin/llvm-config-{LLVM_MAJOR}"),
     ]
+    cuda_nvcc = CUDA_TOOLKIT_ROOT / "bin/nvcc"
+    if cuda_nvcc.exists() and all(tool.exists() for tool in llvm_tools):
+        print(
+            f"CUDA {CUDA_TOOLKIT_VERSION} and LLVM {LLVM_MAJOR} are already installed",
+            flush=True,
+        )
+        return
+
+    if not cuda_nvcc.exists():
+        run(["apt-get", "update"])
+        run(
+            [
+                "apt-get",
+                "install",
+                "-y",
+                "--no-install-recommends",
+                CUDA_TOOLKIT_PACKAGE,
+            ]
+        )
+
     if all(tool.exists() for tool in llvm_tools):
         print(f"LLVM {LLVM_MAJOR} is already installed", flush=True)
         return
@@ -195,9 +227,9 @@ def toolchain_env() -> dict[str, str]:
     ]
     env.update(
         {
-            "CUDA_HOME": "/usr/local/cuda",
-            "CUDA_PATH": "/usr/local/cuda",
-            "CUDA_TOOLKIT_PATH": "/usr/local/cuda",
+            "CUDA_HOME": str(CUDA_TOOLKIT_ROOT),
+            "CUDA_PATH": str(CUDA_TOOLKIT_ROOT),
+            "CUDA_TOOLKIT_PATH": str(CUDA_TOOLKIT_ROOT),
             "CUDA_OXIDE_LLC": f"/usr/bin/llc-{LLVM_MAJOR}",
             "LIBCLANG_PATH": f"/usr/lib/llvm-{LLVM_MAJOR}/lib",
             "LLVM_CONFIG_PATH": f"/usr/bin/llvm-config-{LLVM_MAJOR}",
@@ -218,6 +250,7 @@ def setup(workspace: Path) -> dict[str, object]:
     install_started = time.monotonic()
     expected_state = {
         "cuda_oxide_rev": CUDA_OXIDE_REV,
+        "cuda_toolkit_version": CUDA_TOOLKIT_VERSION,
         "llvm_major": LLVM_MAJOR,
         "rust_toolchain": RUST_TOOLCHAIN,
     }
@@ -362,11 +395,12 @@ def main() -> None:
 
     result: dict[str, object] = {
         "cuda_oxide_rev": CUDA_OXIDE_REV,
+        "cuda_toolkit_version": CUDA_TOOLKIT_VERSION,
         "rust_toolchain": RUST_TOOLCHAIN,
-        "runtime": fingerprint(),
     }
     if args.action in {"setup", "all"}:
         result["setup"] = setup(args.workspace)
+    result["runtime"] = fingerprint()
     if args.action in {"doctor", "all"}:
         result["doctor"] = exercise(args.workspace, ["doctor"])
     if args.action in {"vecadd", "all"}:
