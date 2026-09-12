@@ -42,12 +42,18 @@ class BuildBootstrapTests(unittest.TestCase):
             (self.bin / name).symlink_to(shutil.which(name))
         self.script("bin/uname", 'case "$1" in -s) echo Darwin;; -m) echo arm64;; esac')
         self.script(
-            "tools/buck2-wheel-verify", 'echo "verify:$ENNX_PYTHON_VERSION" >> events'
+            "tools/buck2-wheel-verify",
+            """
+mode=smoke
+[ "$#" -eq 0 ] || mode=$1
+echo "verify:$ENNX_PYTHON_VERSION:$mode" >> events
+""",
         )
         self.script(
             "buck2w",
             """
 echo build >> events
+printf '%s\n' "$*" >> buck-invocations
 version=3.13
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -131,7 +137,11 @@ cp dotslash-stub .buck2-tools/bin/dotslash
         path = self.root / "events"
         return path.read_text().splitlines() if path.exists() else []
 
-    def test_fresh_build_bootstraps_before_compiling_and_reuses_environments(self):
+    def buck_invocations(self):
+        path = self.root / "buck-invocations"
+        return path.read_text().splitlines() if path.exists() else []
+
+    def test_freshbuild(self):
         first = self.run_build("--out", "output with spaces")
         self.assertEqual(first.returncode, 0, first.stderr)
         events = self.events()
@@ -145,9 +155,19 @@ cp dotslash-stub .buck2-tools/bin/dotslash
         )
         self.assertLess(events.index(installs[-1]), events.index("build"))
         self.assertEqual(events.count("build"), 3)
+        invocations = self.buck_invocations()
+        self.assertEqual(len(invocations), 3)
+        self.assertTrue(all("//:wheel" in command for command in invocations))
+        self.assertEqual(
+            sum("//buck2/tests:all" in command for command in invocations), 1
+        )
+        self.assertEqual(
+            sum("//rust/crates/dev-cli:ennx" in command for command in invocations),
+            1,
+        )
         self.assertEqual(
             [line for line in events if line.startswith("verify:")],
-            ["verify:3.12", "verify:3.14", "verify:3.13"],
+            ["verify:3.12:smoke", "verify:3.14:smoke", "verify:3.13:smoke"],
         )
         second = self.run_build()
         self.assertEqual(second.returncode, 0, second.stderr)
@@ -159,19 +179,31 @@ cp dotslash-stub .buck2-tools/bin/dotslash
             )
         )
 
-    def test_existing_pixi_is_used(self):
+    def test_pixi(self):
         (self.bin / "pixi").symlink_to(self.root / "fake-pixi")
         result = self.run_build()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("dotslash", self.events())
 
-    def test_install_failure_stops_before_compilation(self):
+    def test_fullmatrix(self):
+        result = self.run_build("--tests")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            [line for line in self.events() if line.startswith("verify:")],
+            [
+                "verify:3.12:--tests",
+                "verify:3.14:--tests",
+                "verify:3.13:--tests",
+            ],
+        )
+
+    def test_install(self):
         self.env["FAIL_INSTALL"] = "1"
         result = self.run_build()
         self.assertEqual(result.returncode, 42, result.stderr)
         self.assertNotIn("build", self.events())
 
-    def test_incomplete_environment_is_repaired(self):
+    def test_incompleteenv(self):
         self.prepare_python()
         (self.root / ".pixi/envs/ennx-py314/bin/python.broken").touch()
         result = self.run_build()
@@ -181,7 +213,7 @@ cp dotslash-stub .buck2-tools/bin/dotslash
             ["pixi:install --environment ennx-py314"],
         )
 
-    def test_invalid_override_is_not_replaced(self):
+    def test_badenv(self):
         self.prepare_python()
         self.env["ENNX_PYTHON_312"] = "missing-python"
         result = self.run_build()
@@ -189,7 +221,33 @@ cp dotslash-stub .buck2-tools/bin/dotslash
         self.assertIn("ENNX_PYTHON_312", result.stderr)
         self.assertEqual(self.events(), [])
 
-    def test_wrong_python_version_fails_before_compilation(self):
+    def test_missingdep(self):
+        self.prepare_python()
+        # Execute the real readiness probe with only requests unavailable.
+        self.script(
+            ".pixi/envs/ennx-py312/bin/python",
+            f"""
+case "$2" in
+    3.*) exec "{sys.executable}" -c '
+import importlib.util
+import sys
+sys.version_info = (3, 12)
+sys.platform = "darwin"
+importlib.util.find_spec = lambda name: None if name == "requests" else object()
+exec(sys.stdin.read())
+' "$2";;
+    *) cat "$2";;
+esac
+""",
+        )
+        result = self.run_build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = self.events()
+        installs = [line for line in events if line.startswith("pixi:")]
+        self.assertEqual(installs, ["pixi:install --environment ennx-py312"])
+        self.assertLess(events.index(installs[0]), events.index("build"))
+
+    def test_wrongpython(self):
         self.prepare_python()
         version = "312" if sys.version_info[:2] != (3, 12) else "314"
         self.env[f"ENNX_PYTHON_{version}"] = sys.executable
@@ -199,7 +257,7 @@ cp dotslash-stub .buck2-tools/bin/dotslash
         self.assertIn(f"ENNX_PYTHON_{version}", result.stderr)
         self.assertEqual(self.events(), [])
 
-    def test_override_pointing_at_default_environment_is_not_modified(self):
+    def test_default(self):
         self.prepare_python()
         self.env["ENNX_PYTHON_312"] = ".pixi/envs/ennx-py312/bin/python"
         marker = self.root / ".pixi/envs/ennx-py312/bin/python.broken"
@@ -209,7 +267,7 @@ cp dotslash-stub .buck2-tools/bin/dotslash
         self.assertTrue(marker.exists())
         self.assertEqual(self.events(), [])
 
-    def test_valid_override_with_spaces_is_reused(self):
+    def test_spaced(self):
         self.prepare_python()
         override = self.root / "custom python"
         shutil.copy2(self.root / "python-stub", override)
@@ -218,14 +276,14 @@ cp dotslash-stub .buck2-tools/bin/dotslash
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(line.startswith("pixi:") for line in self.events()))
 
-    def test_generic_override_is_reused(self):
+    def test_envpython(self):
         self.env["ENNX_PYTHON"] = str(self.root / "python-stub")
         result = self.run_build()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.events().count("build"), 3)
         self.assertFalse(any(line.startswith("pixi:") for line in self.events()))
 
-    def test_linux_wheel_tools_use_each_verifier_environment(self):
+    def test_linux(self):
         self.prepare_python()
         self.script("bin/uname", 'case "$1" in -s) echo Linux;; -m) echo x86_64;; esac')
         for name in ("ennx-py312", "ennx-py314", "ennx"):
@@ -256,7 +314,7 @@ cp dotslash-stub .buck2-tools/bin/dotslash
             ],
         )
 
-    def test_version_override_takes_precedence(self):
+    def test_version(self):
         self.prepare_python()
         self.env["ENNX_PYTHON"] = str(self.root / "python-stub")
         self.env["ENNX_PYTHON_312"] = "missing-python"
@@ -265,7 +323,7 @@ cp dotslash-stub .buck2-tools/bin/dotslash
         self.assertIn("ENNX_PYTHON_312", result.stderr)
         self.assertEqual(self.events(), [])
 
-    def test_help_and_invalid_options_do_not_bootstrap(self):
+    def test_helpoptions(self):
         self.assertEqual(self.run_build("--help").returncode, 0)
         for args in (
             ("--bad",),
@@ -278,6 +336,20 @@ cp dotslash-stub .buck2-tools/bin/dotslash
             with self.subTest(args=args):
                 self.assertNotEqual(self.run_build(*args).returncode, 0)
                 self.assertEqual(self.events(), [])
+
+    def test_tune_help_lists_config_families(self):
+        result = subprocess.run(
+            [str(self.root / "ennx"), "tune", "--help"],
+            cwd=self.root,
+            env=self.env,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("flat TuRBO-ENN study fields", result.stdout)
+        self.assertIn("[knn]", result.stdout)
+        self.assertIn("[proposal]", result.stdout)
 
 
 if __name__ == "__main__":

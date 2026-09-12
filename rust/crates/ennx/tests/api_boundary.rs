@@ -1,10 +1,10 @@
 use ennx::experimental::{
-    quantize_e2m1, quantize_int4, ComputeDevice, ForwardProgram, KnnPlan, PackedModel,
-    SearchConfig, SharingPolicy, WeightBlock,
+    ComputeDevice, ForwardProgram, KnnPlan, PackedModel, SearchConfig, SharingPolicy, WeightBlock,
+    quantize_e2m1, quantize_int4,
 };
 use ennx::prelude::{
-    create_optimizer, standardize_y, CandidateRV, ENNParams, IndexDriver, OptimizerConfig,
-    PosteriorFlags, ENN,
+    CandidateRV, ENN, ENNParams, IndexDriver, OptimizerConfig, PosteriorFlags, create_optimizer,
+    standardize_y,
 };
 
 #[test]

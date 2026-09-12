@@ -5,8 +5,14 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use metal::objc::{
+    __send_message as send_message,
+    runtime::{Object, Sel},
+};
 use metal::{
-    Buffer, CommandQueue, CompileOptions, ComputePipelineState, Device, MTLResourceOptions, MTLSize,
+    Buffer, CommandBufferRef, CommandQueue, CompileOptions, ComputePipelineState, Device,
+    FunctionConstantValues, Library, MTLCommandBufferStatus, MTLDataType, MTLResourceOptions,
+    MTLSize,
 };
 
 static RUNTIME: OnceLock<Result<Arc<Runtime>, String>> = OnceLock::new();
@@ -38,10 +44,42 @@ pub(crate) fn thread_group(width: u64) -> MTLSize {
     }
 }
 
+pub(crate) fn gpu_interval(command: &CommandBufferRef) -> Option<(f64, f64)> {
+    if command.status() != MTLCommandBufferStatus::Completed {
+        return None;
+    }
+    static SELECTORS: OnceLock<[Sel; 2]> = OnceLock::new();
+    let selectors =
+        SELECTORS.get_or_init(|| [Sel::register("GPUStartTime"), Sel::register("GPUEndTime")]);
+    // These public properties are read only after successful completion.
+    let read = |selector| unsafe {
+        send_message::<Object, (), f64>(
+            command as *const CommandBufferRef as *const Object,
+            selector,
+            (),
+        )
+        .ok()
+    };
+    let start = read(selectors[0])?;
+    let end = read(selectors[1])?;
+    (start.is_finite() && end.is_finite() && start > 0.0 && end >= start).then_some((start, end))
+}
+
+pub(crate) fn gpu_seconds(command: &CommandBufferRef) -> Option<f64> {
+    gpu_interval(command).map(|(start, end)| end - start)
+}
+
+pub(crate) fn trace(stage: &str) {
+    if std::env::var_os("ENNX_METAL_TRACE").is_some() {
+        eprintln!("[ennx-metal] {stage}");
+    }
+}
+
 pub(crate) struct Runtime {
     pub(crate) device: Device,
     pub(crate) queue: CommandQueue,
     info: DeviceInfo,
+    libraries: Mutex<HashMap<(u64, bool, Option<u64>), Library>>,
     pipelines: Mutex<HashMap<(u64, String), ComputePipelineState>>,
     schedules: Mutex<HashMap<u64, usize>>,
 }
@@ -56,17 +94,21 @@ impl Runtime {
     }
 
     fn new() -> Result<Self, String> {
+        trace("creating system default device");
         let device = Device::system_default().ok_or("no default Metal device found")?;
+        trace("creating command queue");
         let name = device.name().to_string();
         let info = DeviceInfo {
             target: target_name(&name),
             name,
         };
         let queue = device.new_command_queue();
+        trace("runtime ready");
         Ok(Self {
             device,
             queue,
             info,
+            libraries: Mutex::new(HashMap::new()),
             pipelines: Mutex::new(HashMap::new()),
             schedules: Mutex::new(HashMap::new()),
         })
@@ -82,7 +124,7 @@ impl Runtime {
         label: &str,
         name: &str,
     ) -> Result<ComputePipelineState, String> {
-        self.compile(source, label, name, true)
+        self.compile(source, label, name, true, None, &[])
     }
 
     pub(crate) fn precise(
@@ -91,7 +133,17 @@ impl Runtime {
         label: &str,
         name: &str,
     ) -> Result<ComputePipelineState, String> {
-        self.compile(source, label, name, false)
+        self.compile(source, label, name, false, None, &[])
+    }
+
+    pub(crate) fn precise_metal4(
+        &self,
+        source: &str,
+        label: &str,
+        name: &str,
+        bool_constants: &[(u64, bool)],
+    ) -> Result<ComputePipelineState, String> {
+        self.compile(source, label, name, false, Some(4 << 16), bool_constants)
     }
 
     fn compile(
@@ -100,8 +152,18 @@ impl Runtime {
         label: &str,
         name: &str,
         fast: bool,
+        language_version: Option<u64>,
+        bool_constants: &[(u64, bool)],
     ) -> Result<ComputePipelineState, String> {
-        let key = (source_hash(source), format!("{name}:{fast}"));
+        let specialization = bool_constants
+            .iter()
+            .map(|(index, value)| format!("{index}={value}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let key = (
+            source_hash(source),
+            format!("{name}:{fast}:{language_version:?}:{specialization}"),
+        );
         if let Some(pipeline) = self
             .pipelines
             .lock()
@@ -110,19 +172,62 @@ impl Runtime {
         {
             return Ok(pipeline.to_owned());
         }
-        let options = CompileOptions::new();
-        options.set_fast_math_enabled(fast);
-        let library = self
-            .device
-            .new_library_with_source(source, &options)
-            .map_err(|error| format!("{label} Metal compile: {error}"))?;
+        let library_key = (source_hash(source), fast, language_version);
+        let cached_library = self
+            .libraries
+            .lock()
+            .map_err(|_| "Apple GPU library cache poisoned")?
+            .get(&library_key)
+            .map(ToOwned::to_owned);
+        let library = if let Some(library) = cached_library {
+            library.to_owned()
+        } else {
+            trace(&format!("compiling Metal library for {name}"));
+            let options = CompileOptions::new();
+            options.set_fast_math_enabled(fast);
+            if let Some(version) = language_version {
+                unsafe {
+                    send_message::<Object, (u64,), ()>(
+                        options.as_ref() as *const _ as *const Object,
+                        Sel::register("setLanguageVersion:"),
+                        (version,),
+                    )
+                    .map_err(|error| format!("{label} Metal language version: {error:?}"))?;
+                }
+            }
+            let library = self
+                .device
+                .new_library_with_source(source, &options)
+                .map_err(|error| format!("{label} Metal compile: {error}"))?;
+            trace(&format!("Metal library ready for {name}"));
+            self.libraries
+                .lock()
+                .map_err(|_| "Apple GPU library cache poisoned")?
+                .insert(library_key, library.to_owned());
+            library
+        };
+        trace(&format!("resolving Metal function {name}"));
+        let constants = (!bool_constants.is_empty()).then(|| {
+            let constants = FunctionConstantValues::new();
+            for (index, value) in bool_constants {
+                constants.set_constant_value_at_index(
+                    (value as *const bool).cast(),
+                    MTLDataType::Bool,
+                    *index,
+                );
+            }
+            constants
+        });
         let function = library
-            .get_function(name, None)
+            .get_function(name, constants)
             .map_err(|error| format!("missing Metal kernel {name}: {error}"))?;
+        trace(&format!("Metal function ready for {name}"));
+        trace(&format!("creating Metal pipeline for {name}"));
         let pipeline = self
             .device
             .new_compute_pipeline_state_with_function(&function)
             .map_err(|error| format!("Metal pipeline {name}: {error}"))?;
+        trace(&format!("Metal pipeline ready for {name}"));
         self.pipelines
             .lock()
             .map_err(|_| "Apple GPU pipeline cache poisoned")?
@@ -148,6 +253,7 @@ impl Runtime {
         )
     }
 
+    #[allow(dead_code)]
     pub(crate) fn schedule<F>(
         &self,
         family: &str,
@@ -273,8 +379,7 @@ fn target_name(name: &str) -> Target {
 
 #[cfg(test)]
 mod tests {
-    use super::{device_info, source_hash, target_name, Runtime, Target};
-
+    use super::{Runtime, Target, device_info, source_hash, target_name};
     fn metal_unavailable4(error: &str) -> bool {
         error.contains("no default Metal device found")
     }

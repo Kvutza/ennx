@@ -3,15 +3,15 @@ use std::path::PathBuf;
 
 use crate::distance::l2_f32;
 use crate::error::BpannError;
-use crate::index::build::{BpannIndex, IndexHeader};
-use crate::index::search::{refine_store, search_store, search_tree, MmapSearchStore};
 use crate::index::LEAF_CAPACITY;
+use crate::index::build::{BpannIndex, IndexHeader};
+use crate::index::search::{MmapSearchStore, refine_store, search_store, search_tree};
 use crate::mmap_store::MmapColumnStore;
 use crate::observation as obs;
 use crate::tuning::current_tuning;
 
 use crate::index::sync_forest::{
-    centroid_rows, load_mmap, range_index, vector_index, IndexBuildContext,
+    IndexBuildContext, centroid_rows, load_mmap, range_index, vector_index,
 };
 
 const INDEX_MIN: usize = 3;
@@ -662,10 +662,11 @@ mod tests {
             |p| matches!(p, crate::index::page::Page::Leaf { vectors, .. } if !vectors.is_empty()),
         );
         assert!(has_vectors);
-        assert!(!idx
-            .search_candidates(&[1.0, 0.0], 3, None)
-            .unwrap()
-            .is_empty());
+        assert!(
+            !idx.search_candidates(&[1.0, 0.0], 3, None)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

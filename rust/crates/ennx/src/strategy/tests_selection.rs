@@ -1,13 +1,13 @@
 use super::{
-    ask_hybrid, ask_init, ask_turbo, select_pareto, select_random, select_segment, select_thompson,
-    select_ucb, tell_common, tell_init, tell_turbo, CandidateSegment, InitStrategy,
-    InitStrategyState, Strategy, TurboStrategyState,
+    CandidateSegment, InitStrategy, InitStrategyState, Strategy, TurboStrategyState, ask_hybrid,
+    ask_init, ask_turbo, select_pareto, select_random, select_segment, select_thompson, select_ucb,
+    tell_common, tell_init, tell_turbo,
 };
-use crate::config::{turbo_enn, turbo_zero, AcquisitionConfig};
+use crate::config::{AcquisitionConfig, turbo_enn, turbo_zero};
 use crate::optimizer::{Optimizer, Telemetry};
 use ndarray::array;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 #[test]
 fn test_001() {
@@ -146,9 +146,10 @@ fn failed_state() {
     assert_eq!(opt.obs_count(), 1);
 
     let x = opt.ask(1, &mut rng).unwrap();
-    assert!(opt
-        .tell(&x.view(), &array![[0.3]].view(), &mut rng)
-        .is_err());
+    assert!(
+        opt.tell(&x.view(), &array![[0.3]].view(), &mut rng)
+            .is_err()
+    );
     assert_eq!(opt.init_progress(), Some((1, 3)));
     assert_eq!(opt.obs_count(), 1);
 }

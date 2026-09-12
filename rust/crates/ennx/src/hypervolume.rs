@@ -132,7 +132,7 @@ pub fn hypervolume_1d(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::{array, Array2, ArrayView2};
+    use ndarray::{Array2, ArrayView2, array};
 
     fn hypervolume_origin(y: &ArrayView2<f64>) -> f64 {
         let ref_point = array![0.0, 0.0];

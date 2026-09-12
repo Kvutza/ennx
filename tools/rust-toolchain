@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""Synchronize Rust toolchain consumers from the workspace declarations."""
+
+from __future__ import annotations
+
+import re
+import sys
+import tomllib
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+PIN_FILE = ROOT / "toolchains/rust_pins.bzl"
+TRIPLES = (
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+)
+PACKAGES = ("rustc", "rust-std", "clippy-preview")
+CHANNEL_PATTERN = re.compile(r"nightly-(\d{4}-\d{2}-\d{2})\Z")
+
+
+class ToolchainError(Exception):
+    """A toolchain declaration is invalid or cannot be synchronized."""
+
+
+def read(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
+
+
+def replace_one(text: str, pattern: str, replacement: str, path: str) -> str:
+    updated, count = re.subn(pattern, lambda _match: replacement, text, flags=re.MULTILINE)
+    if count != 1:
+        raise ToolchainError(f"{path}: expected one match for {pattern!r}, found {count}")
+    return updated
+
+
+def replace_channel(text: str, channel: str, path: str) -> str:
+    return replace_one(text, r'^channel = "[^"]+"$', f'channel = "{channel}"', path)
+
+
+def source_state(channel_override: str | None) -> tuple[str, str, str]:
+    toolchain = tomllib.loads(read("rust-toolchain.toml"))
+    workspace = tomllib.loads(read("Cargo.toml"))
+    channel = channel_override or toolchain["toolchain"]["channel"]
+    edition = workspace["workspace"]["package"]["edition"]
+    match = CHANNEL_PATTERN.fullmatch(channel)
+    if match is None:
+        raise ToolchainError("Rust channel must be a dated nightly such as nightly-2026-09-29")
+    if edition not in {"2021", "2024"}:
+        raise ToolchainError(f"unsupported Rust edition: {edition}")
+    return channel, match.group(1), edition
+
+
+def update_text(path: str, text: str, channel: str, date: str, edition: str) -> str:
+    if path == "cuda/rust-toolchain.toml":
+        return replace_channel(text, channel, path)
+    if path == "MODULE.bazel":
+        text = replace_one(text, r'^    edition = "[^"]+",$', f'    edition = "{edition}",', path)
+        return replace_one(
+            text,
+            r'^    versions = \["nightly/[^\"]+"\],$',
+            f'    versions = ["nightly/{date}"],',
+            path,
+        )
+    if path == ".buckconfig":
+        return replace_one(text, r"^default_edition = \d+$", f"default_edition = {edition}", path)
+    if path == "ops/cuoxtool.py":
+        return replace_one(
+            text,
+            r'^RUST_TOOLCHAIN = "[^"]+"$',
+            f'RUST_TOOLCHAIN = "{channel}"',
+            path,
+        )
+    if path == "rust/crates/modal-runner/src/main.rs":
+        return replace_one(
+            text,
+            r'^const RUST_NIGHTLY: &str = "[^"]+";$',
+            f'const RUST_NIGHTLY: &str = "{channel}";',
+            path,
+        )
+    if path == "buck2/cuda/defs.bzl":
+        return replace_one(
+            text,
+            r'^        env = \{"RUSTUP_TOOLCHAIN": "[^"]+"\},$',
+            f'        env = {{"RUSTUP_TOOLCHAIN": "{channel}"}},',
+            path,
+        )
+    if path == "docs/flame.md":
+        return replace_one(text, r"cargo \+nightly-\d{4}-\d{2}-\d{2} oxide", f"cargo +{channel} oxide", path)
+    if path == "docs/buck2.md":
+        return replace_one(
+            text,
+            r"Rust (?:[^ ]+|`[^`]+`) is pinned (?:in `toolchains/rust\.bzl`|through `rust-toolchain\.toml`)\.",
+            f"Rust `{channel}` is pinned through `rust-toolchain.toml`.",
+            path,
+        )
+    if path == "examples/colabcuoxdev.ipynb":
+        return re.sub(r"nightly-\d{4}-\d{2}-\d{2}", channel, text)
+    if path.endswith("/Cargo.toml"):
+        return replace_one(text, r'^edition = "[^"]+"$', f'edition = "{edition}"', path)
+    if path.endswith("/BUCK"):
+        return re.sub(r'edition = "(?:2021|2024)"', f'edition = "{edition}"', text)
+    raise ToolchainError(f"no synchronizer for {path}")
+
+
+def synchronized_files(channel: str, date: str, edition: str) -> dict[str, str]:
+    paths = [
+        "cuda/rust-toolchain.toml",
+        "cuda/Cargo.toml",
+        "cuda/kernels/Cargo.toml",
+        "MODULE.bazel",
+        ".buckconfig",
+        "ops/cuoxtool.py",
+        "rust/crates/modal-runner/src/main.rs",
+        "buck2/cuda/defs.bzl",
+        "docs/flame.md",
+        "docs/buck2.md",
+        "examples/colabcuoxdev.ipynb",
+        "buck2/wheel/BUCK",
+    ]
+    paths.extend(
+        str(path.relative_to(ROOT))
+        for path in sorted((ROOT / "rust/crates").glob("*/BUCK"))
+    )
+    return {
+        path: update_text(path, read(path), channel, date, edition)
+        for path in paths
+    }
+
+
+def pin_state(text: str) -> tuple[str, str, str] | None:
+    values = {}
+    for name in ("RUST_CHANNEL", "RUST_DATE", "RUST_EDITION"):
+        match = re.search(rf'^{name} = "([^"]+)"$', text, flags=re.MULTILINE)
+        if match is None:
+            return None
+        values[name] = match.group(1)
+    hashes = re.findall(r'"[0-9a-f]{64}"', text)
+    if len(hashes) != len(TRIPLES) * len(PACKAGES):
+        return None
+    return values["RUST_CHANNEL"], values["RUST_DATE"], values["RUST_EDITION"]
+
+
+def fetch_hashes(date: str) -> dict[str, tuple[str, ...]]:
+    url = f"https://static.rust-lang.org/dist/{date}/channel-rust-nightly.toml"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            manifest = tomllib.loads(response.read().decode("utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise ToolchainError(f"cannot read {url}: {error}") from error
+    if manifest.get("date") != date:
+        raise ToolchainError(f"manifest date is {manifest.get('date')!r}, expected {date!r}")
+    hashes = {}
+    for triple in TRIPLES:
+        records = []
+        for package in PACKAGES:
+            target = manifest["pkg"][package]["target"][triple]
+            if not target.get("available"):
+                raise ToolchainError(f"{package} is unavailable for {triple} on {date}")
+            records.append(target["xz_hash"])
+        hashes[triple] = tuple(records)
+    return hashes
+
+
+def render_pins(channel: str, date: str, edition: str, hashes: dict[str, tuple[str, ...]]) -> str:
+    lines = [
+        "# Generated by `./ennx toolchain sync`; do not edit by hand.",
+        f'RUST_CHANNEL = "{channel}"',
+        f'RUST_DATE = "{date}"',
+        f'RUST_EDITION = "{edition}"',
+        "",
+        "RUST_ARCHIVES = {",
+    ]
+    for triple in TRIPLES:
+        lines.append(f'    "{triple}": (')
+        lines.extend(f'        "{checksum}",' for checksum in hashes[triple])
+        lines.append("    ),")
+    lines.extend(["}", ""])
+    return "\n".join(lines)
+
+
+def current_pins(channel: str, date: str, edition: str) -> str:
+    if PIN_FILE.exists():
+        text = PIN_FILE.read_text(encoding="utf-8")
+        if pin_state(text) == (channel, date, edition):
+            return text
+    return render_pins(channel, date, edition, fetch_hashes(date))
+
+
+def check() -> None:
+    channel, date, edition = source_state(None)
+    drift = [
+        path
+        for path, expected in synchronized_files(channel, date, edition).items()
+        if read(path) != expected
+    ]
+    pins = PIN_FILE.read_text(encoding="utf-8") if PIN_FILE.exists() else ""
+    if pin_state(pins) != (channel, date, edition):
+        drift.append(str(PIN_FILE.relative_to(ROOT)))
+    if drift:
+        formatted = "\n  ".join(drift)
+        raise ToolchainError(f"toolchain declarations are out of sync:\n  {formatted}\nrun ./ennx toolchain sync")
+    print(f"Rust toolchain is synchronized: {channel}, edition {edition}")
+
+
+def sync(channel_override: str | None) -> None:
+    channel, date, edition = source_state(channel_override)
+    pins = current_pins(channel, date, edition)
+    updates = synchronized_files(channel, date, edition)
+    if channel_override is not None:
+        updates["rust-toolchain.toml"] = replace_channel(
+            read("rust-toolchain.toml"), channel, "rust-toolchain.toml"
+        )
+    updates["toolchains/rust_pins.bzl"] = pins
+    for path, text in updates.items():
+        (ROOT / path).write_text(text, encoding="utf-8")
+    print(f"Synchronized Rust toolchain: {channel}, edition {edition}")
+
+
+def usage() -> None:
+    print("Usage: ./ennx toolchain <check | sync [nightly-YYYY-MM-DD]>")
+
+
+def main(arguments: list[str]) -> int:
+    try:
+        if arguments == ["check"]:
+            check()
+        elif arguments and arguments[0] == "sync" and len(arguments) <= 2:
+            sync(arguments[1] if len(arguments) == 2 else None)
+        else:
+            usage()
+            return 2
+    except (KeyError, ToolchainError, urllib.error.URLError) as error:
+        print(f"ennx: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -246,7 +246,9 @@ def rust_findings(
     for line_no, line in enumerate(text.splitlines(), 1):
         impl = RUST_IMPL.match(line)
         if impl and RUST_TRAIT_IMPL.search(impl.group("head")):
-            trait_depths.append(depth + line.count("{") - line.count("}"))
+            body_depth = depth + line.count("{") - line.count("}")
+            if body_depth > depth:
+                trait_depths.append(body_depth)
 
         in_trait_impl = any(depth >= item for item in trait_depths)
         match = RUST_DEF.match(line)

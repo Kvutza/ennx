@@ -2,8 +2,8 @@ use super::*;
 use crate::index::IndexDriver;
 use crate::model::ENN;
 use crate::test_helpers::test_model as create_test_model;
-use ndarray::array;
 use ndarray::ArrayView2;
+use ndarray::array;
 
 fn assert_fill<F>(model: &ENN, paramss: Vec<ENNParams>, mut run: F)
 where
@@ -25,17 +25,19 @@ where
     let mut se_all = Array3::zeros((np, bs, model.num_metrics()));
     let mut se_epi_all = Array3::zeros((np, bs, model.num_metrics()));
     let mut se_ale_all = Array3::zeros((np, bs, model.num_metrics()));
-    assert!(run(
-        model,
-        &query.view(),
-        &paramss,
-        &flags,
-        &mut mu_all,
-        &mut se_all,
-        &mut se_epi_all,
-        &mut se_ale_all
-    )
-    .is_ok());
+    assert!(
+        run(
+            model,
+            &query.view(),
+            &paramss,
+            &flags,
+            &mut mu_all,
+            &mut se_all,
+            &mut se_epi_all,
+            &mut se_ale_all
+        )
+        .is_ok()
+    );
     assert_eq!(mu_all.shape(), &[np, bs, 1]);
     assert_eq!(se_all.shape(), &[np, bs, 1]);
     assert_eq!(se_epi_all.shape(), &[np, bs, 1]);
@@ -101,10 +103,12 @@ fn test_004() {
     assert_eq!(internals.se.shape(), &[5, 1]);
     assert_eq!(internals.se_epi.shape(), &[5, 1]);
     assert_eq!(internals.se_ale.shape(), &[5, 1]);
-    assert!((internals.se - &internals.se_epi)
-        .mapv(f64::abs)
-        .iter()
-        .all(|&d| d < 1e-12));
+    assert!(
+        (internals.se - &internals.se_epi)
+            .mapv(f64::abs)
+            .iter()
+            .all(|&d| d < 1e-12)
+    );
     assert!(internals.se_ale.iter().all(|&v| v == 0.0));
 }
 
@@ -146,10 +150,12 @@ fn test_007() {
 
     let result = model.batch_posterior(&query.view(), &paramss, &flags);
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("paramss must be non-empty"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("paramss must be non-empty")
+    );
 }
 
 #[test]

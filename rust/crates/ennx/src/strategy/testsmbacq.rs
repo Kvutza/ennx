@@ -1,7 +1,7 @@
 //! Regression tests for Morbo acquisition / incumbent RNG contracts.
 
 use super::{select_thompson, select_ucb};
-use crate::config::{turbo_enn, AcquisitionConfig, InitStrategy};
+use crate::config::{AcquisitionConfig, InitStrategy, turbo_enn};
 use crate::error::ENNError;
 use crate::mbtrregn::{MorboTRSettings, Rescalarize};
 use crate::optimizer::Optimizer;
@@ -9,10 +9,10 @@ use crate::strategy::Strategy;
 use crate::surrogate::{Surrogate, SurrogatePrediction};
 use crate::trregncfg::TrustRegionConfig;
 use crate::trust_region::TRLengthConfig;
-use ndarray::{array, Array1, Array2, Array3, ArrayView2};
-use rand::rngs::StdRng;
+use ndarray::{Array1, Array2, Array3, ArrayView2, array};
 use rand::RngCore;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 struct TieSurrogate {
     sample_value: f64,

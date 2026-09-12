@@ -3,8 +3,8 @@
 use numpy::{IntoPyArray, PyArrayDyn, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use std::path::PathBuf;
 
 pub(crate) fn optional_f64(
@@ -134,7 +134,7 @@ pub fn parse_dict(dict: &Bound<'_, pyo3::types::PyDict>) -> PyResult<ennx::Confi
                 return Err(PyValueError::new_err(format!(
                     "Invalid trust_region_kind: {}",
                     s
-                )))
+                )));
             }
         };
         overrides.trust_region_kind = Some(kind);
@@ -566,7 +566,7 @@ impl PyMultiTrustRegion {
                 return Err(PyValueError::new_err(format!(
                     "Unknown sharing policy: {}",
                     sharing_policy
-                )))
+                )));
             }
         };
         let mut config = MultiTrustRegionConfig::new(num_regions, Default::default());

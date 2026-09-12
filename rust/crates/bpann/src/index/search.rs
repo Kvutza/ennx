@@ -364,8 +364,8 @@ pub fn bpann_mmap(
 
 #[cfg(test)]
 mod tests {
-    use crate::index::build::BpannIndex;
     use crate::index::LEAF_CAPACITY;
+    use crate::index::build::BpannIndex;
 
     #[test]
     fn search_returns() {

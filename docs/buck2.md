@@ -2,7 +2,7 @@
 
 ```sh
 ./ennx build                  # Library, CLI, tests, and Python 3.12–3.14 wheels
-./ennx build --tests          # Also run the full Python suite for each wheel
+./ennx build --tests          # Test each wheel on its matching Python version
 ./ennx build --out artifacts
 ./ennx test
 ./ennx dev                    # Format, build, and test
@@ -10,7 +10,10 @@
 ```
 
 Wheels go to `dist/`. `./ennx build` prepares dependencies and builds in one command.
-DotSlash bootstraps Buck2. Buck downloads and caches pinned Rust, Python,
+Plain `build` runs wheel smoke verification for Python 3.12, 3.13, and 3.14.
+`build --tests` runs the broad Python suite against each wheel on its matching
+interpreter. DotSlash bootstraps Buck2.
+Buck downloads and caches pinned Rust, Python,
 Clang/LLD, and the Linux sysroot and support libraries. Builds always use these
 managed toolchains. No system Rust, Python, or Clang installation is needed.
 Build results are reused when inputs and configuration have not changed.
@@ -29,7 +32,9 @@ generates their targets in `rust/BUCK`. When changing a crate's dependencies or
 features, also update its handwritten BUCK target and run `tools/buck2-deps`
 (requires Cargo). Normal builds use the checked-in graph. Lockfiles stay local.
 
-Rust 1.96.0 is pinned in `toolchains/rust.bzl`. Development uses optimization
+Rust `nightly-2026-09-29` is pinned through `rust-toolchain.toml`. Run
+`./ennx toolchain check` to detect drift or `./ennx toolchain sync
+[nightly-YYYY-MM-DD]` to synchronize or upgrade every consumer. Development uses optimization
 level 1; wheels use level 3 and ThinLTO. Build tools use level 0.
 Set `BUCK_ISOLATION_DIR` to use a separate cache; the default is `dev`.
 

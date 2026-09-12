@@ -1,4 +1,4 @@
-use ennx::{EnnIndexAccess, EnnRowAccess, IndexDriver, ENN};
+use ennx::{ENN, EnnIndexAccess, EnnRowAccess, IndexDriver};
 use ndarray::array;
 
 #[test]

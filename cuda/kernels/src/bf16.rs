@@ -1,6 +1,6 @@
 use cuda_device::{thread, warp};
 
-use super::{DenseTerm, DenseTile, Seed, THREADS, WARPS, dense_sign};
+use super::{DenseTerm, DenseTile, Seed, THREADS, WARPS, dense_hash, dense_mix64, dense_sign};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -14,6 +14,16 @@ pub struct Bf16Leaf {
 
 // SAFETY: Bf16Leaf is repr(C) and contains only DeviceCopy scalars.
 unsafe impl cuda_core::DeviceCopy for Bf16Leaf {}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct Bf16Change {
+    pub squared: f32,
+    pub changed: u32,
+}
+
+// SAFETY: Bf16Change is repr(C) and contains only DeviceCopy scalars.
+unsafe impl cuda_core::DeviceCopy for Bf16Change {}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -31,6 +41,7 @@ pub struct Bf16Score {
     pub acquisition: u32,
     pub tiles: u32,
     pub resident: u32,
+    pub correlated: u32,
 }
 
 // SAFETY: Bf16Score is repr(C) and contains only DeviceCopy scalars.
@@ -83,6 +94,14 @@ pub struct TellParams {
     pub capacity: u32,
     pub failure_tolerance: u32,
     pub status_count: u32,
+    pub correlated: u32,
+    pub paired: u32,
+    pub accept: u32,
+    pub incumbent_value: f32,
+    pub incumbent_variance: f32,
+    pub improvement: f32,
+    pub improvement_variance: f32,
+    pub reject_is_failure: u32,
 }
 
 // SAFETY: TellParams is repr(C) and contains only DeviceCopy scalars.
@@ -99,7 +118,7 @@ pub(super) fn bf16_finite(value: u16) -> bool {
 }
 
 #[inline(always)]
-fn bf16_encode(value: f32) -> u16 {
+pub(super) fn bf16_encode(value: f32) -> u16 {
     let bits = value.to_bits();
     (bits.wrapping_add(0x7fff + ((bits >> 16) & 1)) >> 16) as u16
 }
@@ -167,12 +186,96 @@ pub(super) fn bf16_seed(
 ) -> u16 {
     let seed = u64::from(seed.low) | (u64::from(seed.high) << 32);
     let direction = dense_sign(seed, leaf.key, element);
-    let candidate = bf16_encode(bf16_decode(value) + leaf.scale * coefficient * direction);
-    if coefficient == 0.0 || candidate == value {
-        bf16_next(value, (coefficient > 0.0) == (direction > 0.0))
-    } else {
-        candidate
+    bf16_encode(bf16_decode(value) + leaf.scale * coefficient * direction)
+}
+
+#[inline(always)]
+pub(super) fn candidate_radius(state: SearchState, candidate: u32) -> f32 {
+    let factor = if candidate & 1 == 0 { 0.5 } else { 2.0 };
+    (state.length * factor)
+        .max(state.length_min)
+        .min(state.length_max) as f32
+}
+
+#[inline(always)]
+pub(super) fn paired_radius(
+    state: &mut SearchState,
+    selected_radius: f32,
+    accept: bool,
+    failure_tolerance: u32,
+    reject_is_failure: bool,
+) {
+    if accept {
+        state.length = f64::from(selected_radius);
+        state.failures = 0;
+    } else if reject_is_failure {
+        state.failures += 1;
+        if state.failures >= failure_tolerance {
+            state.length = (state.length * 0.5).max(state.length_min);
+            state.failures = 0;
+        }
     }
+}
+
+#[inline(always)]
+pub(super) fn dense_normal(seed: u64, key: u64, element: u64) -> f32 {
+    let first = dense_hash(seed, key, element / 2);
+    let second = dense_mix64(first ^ 0xd2b7_4407_b1ce_6e93);
+    let u1 = (((first >> 11) as f64 + 1.0) * (1.0 / 9007199254740992.0)) as f32;
+    let u2 = (((second >> 11) as f64) * (1.0 / 9007199254740992.0)) as f32;
+    let radius = (-2.0 * u1.max(1e-12).min(0.99999994).ln()).sqrt();
+    let angle = core::f32::consts::TAU * u2;
+    radius
+        * if element & 1 == 0 {
+            angle.cos()
+        } else {
+            angle.sin()
+        }
+}
+
+#[inline(always)]
+pub(super) fn correlated_value(
+    reference: f32,
+    inverse_rms: f32,
+    noise: f32,
+    candidate: u32,
+) -> f32 {
+    if candidate < 2 {
+        0.75 * (reference * inverse_rms) + 0.4375_f32.sqrt() * noise
+    } else {
+        noise
+    }
+}
+
+#[inline(always)]
+pub(super) fn bf16_candidate(
+    value: u16,
+    leaf: Bf16Leaf,
+    element: u64,
+    seed: Seed,
+    coefficient: f32,
+    reference: &[u16],
+    inverse_rms: f32,
+    correlated: u32,
+    candidate: u32,
+) -> u16 {
+    if correlated == 0 {
+        return bf16_seed(value, leaf, element, seed, coefficient);
+    }
+    let index = leaf.offset + element;
+    let seed = u64::from(seed.low) | (u64::from(seed.high) << 32);
+    let noise = dense_normal(seed ^ 0x8ebc_6af0_9c88_c6e3, leaf.key, element);
+    let direction = if correlated == 1 && candidate < 2 {
+        correlated_value(
+            bf16_decode(reference[index as usize]),
+            inverse_rms,
+            noise,
+            candidate,
+        )
+    } else {
+        noise
+    };
+    bf16_encode(bf16_decode(value) + leaf.scale * coefficient * direction)
 }
 
 #[inline(always)]
@@ -294,6 +397,9 @@ pub(super) fn acquisition_score(
 pub(super) fn tile_distances(
     rows: &[u16],
     history_slots: &[u32],
+    reference: &[u16],
+    inverse_rms: f32,
+    candidate: u32,
     seed: Seed,
     leaf: Bf16Leaf,
     tile: DenseTile,
@@ -310,21 +416,31 @@ pub(super) fn tile_distances(
     while tile_offset < tile.length {
         let local = tile_offset + thread_index;
         let mut invalid = false;
+        let mut changed = false;
         if local < tile.length {
             let element = u64::from(tile.start + local);
             let index = leaf.offset + element;
-            let value = bf16_seed(
+            let value = bf16_candidate(
                 rows[base_offset + index as usize],
                 leaf,
                 element,
                 seed,
                 params.coefficient,
+                reference,
+                inverse_rms,
+                params.correlated,
+                candidate,
             );
             invalid = !bf16_finite(value);
+            changed = value != rows[base_offset + index as usize];
             unsafe { values.add(thread_index as usize).write(bf16_decode(value)) };
         }
-        if warp::any(invalid) && lane == 0 {
-            unsafe { warp_status.add(warp_index as usize).write(1) };
+        let flags = u32::from(warp::any(invalid)) | (u32::from(warp::any(changed)) << 1);
+        if lane == 0 {
+            unsafe {
+                let status = warp_status.add(warp_index as usize);
+                status.write(status.read() | flags);
+            }
         }
         thread::sync_threads();
 
@@ -367,5 +483,5 @@ pub(super) fn warp_invalid(status: *const u32) -> bool {
         invalid |= unsafe { status.add(warp_index).read() };
         warp_index += 1;
     }
-    invalid != 0
+    invalid & 1 != 0
 }

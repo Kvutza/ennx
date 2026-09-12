@@ -1,0 +1,9 @@
+# The native engine links CUDA 13; Torch uses CUDA 12 only for input upload.
+--extra-index-url https://download.pytorch.org/whl/cu128
+nvidia-cublas==13.1.1.3
+nvidia-cuda-runtime==13.0.96
+click==8.5.0
+torch==2.11.0+cu128
+numpy==2.1.3
+safetensors==0.8.0
+requests==2.32.4

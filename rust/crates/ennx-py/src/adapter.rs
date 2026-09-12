@@ -2,7 +2,7 @@
 
 use ennx::error::ENNError;
 use ennx::surrogate::{Surrogate, SurrogatePrediction};
-use ndarray::{s, Array1, Array2, Array3, ArrayView2};
+use ndarray::{Array1, Array2, Array3, ArrayView2, s};
 use numpy::{IntoPyArray, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;

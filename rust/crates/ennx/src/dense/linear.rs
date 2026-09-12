@@ -1,6 +1,6 @@
 use crate::weights::ComputeDevice;
 
-use super::{dense_next, sign, DenseTerm};
+use super::{DenseTerm, dense_next, sign};
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 mod metal;

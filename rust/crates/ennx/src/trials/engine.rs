@@ -1,4 +1,4 @@
-use super::{make_steps, materialize, Ask, Center, Cpu, Engine, Parameter, SparseEdit};
+use super::{Ask, Center, Cpu, Engine, Parameter, SparseEdit, make_steps, materialize};
 use crate::weights::ComputeDevice;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]

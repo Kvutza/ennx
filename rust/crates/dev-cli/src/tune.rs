@@ -1,6 +1,57 @@
 use serde::Deserialize;
 use std::collections::HashSet;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExperimentKind {
+    Knn,
+    Proposal,
+    TurboEnn,
+}
+
+pub(crate) fn is_pretrain(text: &str) -> Result<bool, String> {
+    let value: toml::Value = toml::from_str(text).map_err(|error| error.to_string())?;
+    let table = value
+        .as_table()
+        .ok_or("experiment config must be a TOML table")?;
+    let study = match table.get("study") {
+        Some(toml::Value::String(study)) => Some(study.as_str()),
+        Some(toml::Value::Table(study)) => study.get("kind").and_then(toml::Value::as_str),
+        _ => None,
+    };
+    Ok(study == Some("pretrain") || table.contains_key("pretrain"))
+}
+
+pub(crate) fn experiment_kind(text: &str) -> Result<ExperimentKind, String> {
+    let value: toml::Value = toml::from_str(text).map_err(|error| error.to_string())?;
+    let table = value
+        .as_table()
+        .ok_or("experiment config must be a TOML table")?;
+    let mut kinds = Vec::new();
+    if table.contains_key("knn") {
+        kinds.push(ExperimentKind::Knn);
+    }
+    if table
+        .get("proposal")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|proposal| {
+            ["output", "elements", "history", "candidates", "rounds"]
+                .iter()
+                .all(|key| proposal.contains_key(*key))
+        })
+    {
+        kinds.push(ExperimentKind::Proposal);
+    }
+    let selected = kinds
+        .into_iter()
+        .map(|kind| ("experiment", kind))
+        .collect::<Vec<_>>();
+    match selected.as_slice() {
+        [(_, kind)] => Ok(*kind),
+        [] => Ok(ExperimentKind::TurboEnn),
+        _ => Err("experiment config contains multiple experiment tables".into()),
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct KnnTuneConfig {
     pub output: String,

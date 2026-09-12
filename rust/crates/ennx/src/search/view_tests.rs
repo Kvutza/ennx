@@ -1,5 +1,8 @@
 use super::{Ask, ComputeDevice, DeviceView, Optimizer, Parameter, TRLengthConfig};
 
+#[cfg(feature = "opencl")]
+use super::opencl_unavailable;
+
 fn read_view(view: DeviceView<'_>) -> Result<Vec<u8>, String> {
     #[cfg(all(target_os = "macos", feature = "metal"))]
     if let Some((buffer, offset)) = view.as_metal() {
@@ -48,9 +51,11 @@ fn recycled_views(device: ComputeDevice) {
             assert_eq!(read_view(view).unwrap(), *expected);
         }
         for (trial, expected) in trials.into_iter().zip(rows).rev() {
-            assert!(optimizer
-                .evaluate(trial, |_| Err("evaluation failed".into()))
-                .is_err());
+            assert!(
+                optimizer
+                    .evaluate(trial, |_| Err("evaluation failed".into()))
+                    .is_err()
+            );
             assert!(optimizer.evaluate(trial, |_| Ok(f32::NAN)).is_err());
             assert_eq!(optimizer.row(trial).unwrap(), expected);
             let value = optimizer
@@ -89,11 +94,4 @@ fn opencl_views() {
         Err(error) => panic!("{error}"),
     }
     recycled_views(ComputeDevice::OpenCl);
-}
-
-#[cfg(feature = "opencl")]
-fn opencl_unavailable(error: &str) -> bool {
-    error.contains("OpenCL platform")
-        || error.contains("OpenCL GPU")
-        || error.contains("failed to enumerate OpenCL")
 }

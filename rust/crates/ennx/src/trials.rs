@@ -16,8 +16,8 @@ mod bindings;
 mod bpann_history;
 mod engine;
 mod identity;
-use identity::trial_id;
 pub use identity::Trial;
+use identity::trial_id;
 mod layout;
 mod resident;
 mod stream;
@@ -26,16 +26,16 @@ mod tree;
 mod sparse;
 
 pub use bpann_history::{BpannHistory, IndexedObservation, ObservationId};
-pub(crate) use layout::{check_layout, make_steps, LeafStep};
+pub(crate) use layout::{LeafStep, check_layout, make_steps};
 #[cfg(any(
     all(feature = "cuda", target_os = "linux", target_arch = "x86_64"),
     all(feature = "metal", target_os = "macos"),
     feature = "opencl"
 ))]
-pub(crate) use layout::{make_tiles, Tile};
+pub(crate) use layout::{Tile, make_tiles};
 #[cfg(feature = "opencl")]
 pub(crate) use opencl::ResidentRow as OpenClResidentRow;
-pub use resident::{device_views, DeviceView};
+pub use resident::{DeviceView, device_views};
 pub use tree::Center;
 
 const MAX_HISTORY: usize = 128;
@@ -870,7 +870,7 @@ impl Search {
 }
 
 mod cpu;
-use cpu::{check_ask, check_count, hash, materialize, perturb, score, trial_distance, Cpu};
+use cpu::{Cpu, check_ask, check_count, hash, materialize, perturb, score, trial_distance};
 #[cfg(test)]
 #[path = "trials/tests.rs"]
 mod tests;

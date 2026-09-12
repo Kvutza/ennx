@@ -1,5 +1,5 @@
 use bpann::mmap_store;
-use ndarray::{array, Array2, ShapeBuilder};
+use ndarray::{Array2, ShapeBuilder, array};
 use tempfile::TempDir;
 
 #[test]

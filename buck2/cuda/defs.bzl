@@ -11,7 +11,7 @@ def cuda_oxide(name, package, workspace, bpann, ennx, python, modal, cuda, parit
         no_outputs_cleanup = True,
         cacheable = False,
         labels = ["uses_undeclared_inputs"],
-        env = {"RUSTUP_TOOLCHAIN": "nightly-2026-04-03"},
+        env = {"RUSTUP_TOOLCHAIN": "nightly-2026-09-29"},
         cmd = " ".join([
             "set -euo pipefail;",
             "python3 --version | grep -q '^Python 3\\.12\\.';",

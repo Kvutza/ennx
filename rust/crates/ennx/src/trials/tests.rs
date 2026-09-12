@@ -1,5 +1,5 @@
 use super::*;
-use ndarray::{array, Axis};
+use ndarray::{Axis, array};
 #[cfg(feature = "opencl")]
 use opencl3::memory::ClMem;
 use tempfile::TempDir;
@@ -338,11 +338,7 @@ fn coherent_thompson(device: ComputeDevice, route: ThompsonRoute) {
             scores.iter().enumerate().fold(
                 0,
                 |best, (index, &score)| {
-                    if score > scores[best] {
-                        index
-                    } else {
-                        best
-                    }
+                    if score > scores[best] { index } else { best }
                 },
             );
         for order in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
@@ -377,22 +373,22 @@ fn coherent_thompson(device: ComputeDevice, route: ThompsonRoute) {
 }
 
 #[test]
-fn cpu_thompson_coherent_dense() {
+fn dense_thompson() {
     coherent_thompson(ComputeDevice::Cpu, ThompsonRoute::Dense);
 }
 
 #[test]
-fn cpu_thompson_coherent_sparse() {
+fn sparse_thompson() {
     coherent_thompson(ComputeDevice::Cpu, ThompsonRoute::Sparse);
 }
 
 #[test]
-fn cpu_thompson_coherent_tree() {
+fn tree_thompson() {
     coherent_thompson(ComputeDevice::Cpu, ThompsonRoute::Tree);
 }
 
 #[test]
-fn cpu_thompson_shared_noise_moments() {
+fn thompson_moments() {
     let history = [(11, 0.0), (3, 0.0), (27, 0.0), (8, 0.0)];
     let neighborhoods = [
         [(1.0, 0), (3.0, 1)],
@@ -413,7 +409,7 @@ fn cpu_thompson_shared_noise_moments() {
             seed,
             ..Ask::default()
         };
-        let draws = crate::weights::thompson_history_draws(&history, seed);
+        let draws = crate::weights::history_draws(&history, seed);
         let samples =
             neighborhoods.map(|nearest| f64::from(cpu::score(&nearest, &history, &draws, config)));
         for index in 0..3 {
@@ -444,7 +440,7 @@ fn cpu_thompson_shared_noise_moments() {
 }
 
 #[test]
-fn cpu_thompson_history_slots_survive_reorder() {
+fn thompson_reorder() {
     let history = [(11, 0.5), (3, -0.25), (27, 1.0)];
     let reordered = [history[2], history[0], history[1]];
     let config = Ask {
@@ -453,8 +449,8 @@ fn cpu_thompson_history_slots_survive_reorder() {
         seed: 0xfeed_beef,
         ..Ask::default()
     };
-    let draws = crate::weights::thompson_history_draws(&history, config.seed);
-    let reordered_draws = crate::weights::thompson_history_draws(&reordered, config.seed);
+    let draws = crate::weights::history_draws(&history, config.seed);
+    let reordered_draws = crate::weights::history_draws(&reordered, config.seed);
     assert_eq!(reordered_draws, [draws[2], draws[0], draws[1]]);
     assert_eq!(
         cpu::score(&[(0.5, 0), (2.0, 2)], &history, &draws, config),
@@ -606,7 +602,7 @@ fn metal_stream() {
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[test]
-fn metal_thompson() {
+fn metal_parity() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
     match Search::new(&base, 0.0, leaves(), 3, ComputeDevice::Metal) {
         Ok(_) => stream_parity(
@@ -620,7 +616,7 @@ fn metal_thompson() {
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[test]
-fn metal_thompson_coherent() {
+fn metal_coherence() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
     match Search::new(&base, 0.0, leaves(), 5, ComputeDevice::Metal) {
         Ok(_) => {
@@ -756,7 +752,7 @@ fn opencl_stream() {
 
 #[cfg(feature = "opencl")]
 #[test]
-fn opencl_thompson() {
+fn opencl_parity() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
     match Search::new(&base, 0.0, leaves(), 3, ComputeDevice::OpenCl) {
         Ok(_) => stream_parity(
@@ -770,7 +766,7 @@ fn opencl_thompson() {
 
 #[cfg(feature = "opencl")]
 #[test]
-fn opencl_thompson_coherent() {
+fn opencl_coherence() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
     match Search::new(&base, 0.0, leaves(), 5, ComputeDevice::OpenCl) {
         Ok(_) => {
@@ -990,15 +986,17 @@ fn indexed_row() {
         .unwrap();
     assert_eq!(resolved, vec![ObservationId(1), ObservationId(0)]);
     assert_eq!(search.history_len(), 2);
-    assert!(search
-        .ask(
-            &[31],
-            Ask {
-                neighbors: 2,
-                ..Ask::default()
-            }
-        )
-        .is_ok());
+    assert!(
+        search
+            .ask(
+                &[31],
+                Ask {
+                    neighbors: 2,
+                    ..Ask::default()
+                }
+            )
+            .is_ok()
+    );
 }
 
 #[test]

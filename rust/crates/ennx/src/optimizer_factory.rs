@@ -4,7 +4,7 @@ use ndarray::Array2;
 use rand::RngCore;
 
 use crate::config::{
-    lhd_only, turbo_enn, turbo_zero, ConfigOverrides, InitStrategy, SurrogateConfig,
+    ConfigOverrides, InitStrategy, SurrogateConfig, lhd_only, turbo_enn, turbo_zero,
 };
 use crate::error::ENNError;
 use crate::optimizer::Optimizer;
@@ -122,8 +122,8 @@ pub fn lhd_overrides(
 mod tests {
     use super::*;
     use ndarray::array;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn create_smoke() {

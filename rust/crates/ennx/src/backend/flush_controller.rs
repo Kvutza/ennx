@@ -199,9 +199,9 @@ impl DiskBackendHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ENN;
     use crate::backend::EnnStorage;
     use crate::index::IndexDriver;
-    use crate::ENN;
     use ndarray::Array2;
     use std::sync::{Barrier, Mutex};
     use std::time::{Duration, Instant};
@@ -467,9 +467,11 @@ mod tests {
                 Some("injected soft sync failure".to_string());
         }
         let schedule_err = handle.schedule_flush().expect_err("schedule");
-        assert!(schedule_err
-            .to_string()
-            .contains("injected soft sync failure"));
+        assert!(
+            schedule_err
+                .to_string()
+                .contains("injected soft sync failure")
+        );
         let wait_err = handle.wait_flush().expect_err("wait");
         assert!(wait_err.to_string().contains("injected soft sync failure"));
         handle.wait_flush().expect("cleared");

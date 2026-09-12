@@ -115,7 +115,7 @@ fn soft_seeds() {
         for _ in 0..batches {
             let n = rng.gen_range(1usize..=threshold.saturating_mul(2).max(2));
             let x = ndarray::Array2::from_shape_fn((n, 2), |(i, j)| {
-                rng.gen::<f64>() + (total + i + j) as f64 * 0.01
+                rng.r#gen::<f64>() + (total + i + j) as f64 * 0.01
             });
             let y = ndarray::Array2::from_shape_fn((n, 1), |(i, _)| (total + i) as f64);
             b.append_rows(&x.view(), &y.view(), None).unwrap();

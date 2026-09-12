@@ -27,11 +27,22 @@ pub mod py_bf16;
 pub mod py_experimental;
 pub mod py_fit;
 pub mod py_fitter;
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "native-flame"))]
+pub mod py_flame;
+#[cfg(any(
+    all(target_os = "linux", target_arch = "x86_64", feature = "native-flame"),
+    all(target_os = "macos", feature = "metal")
+))]
+mod py_flameconfig;
 pub mod py_hash;
 pub mod py_hypervolume;
+#[cfg(all(target_os = "macos", feature = "metal"))]
+mod py_metal;
 pub mod py_model;
 pub mod py_optimizer;
 pub mod py_parameter;
+#[cfg(all(target_os = "macos", feature = "metal"))]
+pub mod py_qwen;
 pub mod py_util;
 pub mod py_weights;
 

@@ -17,7 +17,7 @@ use rand::RngCore;
 use crate::candidates::SobolEngine;
 use crate::config::{InitStrategy, OptimizerConfig, SurrogateConfig};
 use crate::error::ENNError;
-use crate::incumbent_tracker::{enn_k, tracker_surrogate, IncumbentTracker};
+use crate::incumbent_tracker::{IncumbentTracker, enn_k, tracker_surrogate};
 use crate::strategy::Strategy;
 use crate::surrogate::{BoxedSurrogate, ENNSurrogate, Surrogate};
 use tr_state::TrustRegionState;

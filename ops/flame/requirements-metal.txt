@@ -1,0 +1,6 @@
+# Verified on macOS arm64 with Python 3.12. No CUDA or JAX runtime is required.
+click==8.5.0
+torch==2.7.1
+numpy==2.2.6
+safetensors==0.6.2
+requests==2.32.4

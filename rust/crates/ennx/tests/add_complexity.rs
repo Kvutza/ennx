@@ -1,4 +1,4 @@
-use ennx::{IndexDriver, ENN};
+use ennx::{ENN, IndexDriver};
 use ndarray::Array2;
 use std::collections::HashMap;
 use std::hint::black_box;

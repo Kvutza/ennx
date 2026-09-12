@@ -3,9 +3,9 @@
 use std::fs;
 use std::time::Instant;
 
+use ennx::ENN;
 use ennx::backend::EnnStorage;
 use ennx::index::IndexDriver;
-use ennx::ENN;
 use ndarray::{Array2, ArrayView2};
 use tempfile::TempDir;
 

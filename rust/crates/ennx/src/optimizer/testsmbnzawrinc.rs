@@ -1,8 +1,8 @@
 //! Regression: Morbo + noise_aware must keep the mu row used to pick the incumbent.
 
 use ndarray::array;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 use crate::config::{OptimizerConfig, SurrogateConfig};
 use crate::mbtrregn::{MorboTRSettings, Rescalarize};

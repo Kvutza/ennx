@@ -24,7 +24,7 @@ target_platform_detector_spec = target:root//...->prelude//platforms:default \
 execution_platforms = prelude//platforms:default
 
 [rust]
-default_edition = 2021
+default_edition = 2024
 remap_src_paths = yes
 
 [ennx]

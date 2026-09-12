@@ -3,11 +3,11 @@ use std::ptr;
 use ndarray::{Array2, ArrayView2};
 use opencl3::command_queue::CommandQueue;
 use opencl3::context::Context;
-use opencl3::device::{get_all_devices, Device, CL_DEVICE_TYPE_CPU, CL_DEVICE_TYPE_GPU};
+use opencl3::device::{CL_DEVICE_TYPE_CPU, CL_DEVICE_TYPE_GPU, Device, get_all_devices};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 use opencl3::memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE};
 use opencl3::program::Program;
-use opencl3::types::{cl_mem_flags, CL_BLOCKING};
+use opencl3::types::{CL_BLOCKING, cl_mem_flags};
 
 use super::{flatten_f32, pad_k};
 use crate::index::IndexError;

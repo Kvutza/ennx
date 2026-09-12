@@ -1,9 +1,9 @@
-use super::{select_arms, select_indices, InitStrategy, Strategy};
-use crate::config::{lhd_only, turbo_enn, turbo_zero, AcquisitionConfig};
+use super::{InitStrategy, Strategy, select_arms, select_indices};
+use crate::config::{AcquisitionConfig, lhd_only, turbo_enn, turbo_zero};
 use crate::optimizer::Optimizer;
 use ndarray::array;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 #[test]
 fn test_selectbyindices() {

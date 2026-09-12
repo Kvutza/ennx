@@ -6,8 +6,8 @@ extern crate metal as metal_crate;
 
 use metal_crate::ComputePipelineState;
 
-use super::{tiles, DenseLeaf, DenseTerm};
-use crate::apple_gpu::{thread_group, Runtime};
+use super::{DenseLeaf, DenseTerm, tiles};
+use crate::apple_gpu::{Runtime, thread_group};
 
 const SOURCE: &str = concat!(include_str!("ops.metal"), "\n", include_str!("dense.metal"));
 const THREADS: u64 = 256;

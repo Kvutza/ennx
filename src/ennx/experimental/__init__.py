@@ -7,6 +7,12 @@ from .._lazy import module_attr
 _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "ModelPackage": (".._rust", "ModelPackage"),
     "NativeKdaModel": (".._rust", "NativeKdaModel"),
+    "FlameEvaluator": (".._rust", "FlameEvaluator"),
+    "MetalFlameEvaluator": (".._rust", "MetalFlameEvaluator"),
+    "MetalQwenEvaluator": (".._rust", "MetalQwenEvaluator"),
+    "MetalWeights": (".._rust", "MetalWeights"),
+    "MetalParamBlock": (".._rust", "MetalParamBlock"),
+    "MetalSearchState": (".._rust", "MetalSearchState"),
     "ResidentBoSession": (".._rust", "ResidentBoSession"),
     "Optimizer": (".._rust", "Optimizer"),
     "Telemetry": (".._rust", "Telemetry"),
@@ -55,7 +61,29 @@ def turbo_enn(
     length_init: float = 0.8,
     length_min: float = 0.0078125,
     length_max: float = 1.6,
+    failure_tolerance: int | None = None,
+    sampler: str = "independent",
+    reference_seed: int = 0,
 ) -> object:
+    """Create resident CUDA BF16 search with independent sign proposals by default.
+
+    ``sampler="independent"`` preserves legacy sign noise with TuRBO.
+    ``sampler="gaussian"`` uses independent dense Gaussian noise with TuRBO and
+    no reference direction. ``reference_seed`` is unused in these two modes.
+    ``sampler="correlated"`` uses dense Gaussian noise and a reference direction
+    initialized by ``reference_seed`` (u64), updated on acceptance. It requires
+    ``max_pending=1``,
+    ``failure_tolerance=None``, and ``ask(arms=1, candidates=4, ...)``. The GPU
+    accepted-radius controller replaces TuRBO counters in this mode.
+    ``proposals.geometry()`` reports each selected candidate index and Gaussian
+    persistence (0.75 for correlated indices 0/1, otherwise 0); ``describe()``
+    reports its actual selected radius. Persistence is the noise mixture
+    coefficient, not measured correlation after BF16 rounding or selection.
+    ``search.read_reference()`` explicitly copies the stored correlated reference
+    to a host NumPy uint16 array of raw BF16 bits for validation. This is a
+    model-sized copy, requires a completed round and released DLPack views, and
+    errors in other modes.
+    """
     search_type = __getattr__("SearchState")
     if search_type is None:
         raise RuntimeError("turbo_enn requires the CUDA wheel")
@@ -69,6 +97,9 @@ def turbo_enn(
         length_init=length_init,
         length_min=length_min,
         length_max=length_max,
+        failure_tolerance=failure_tolerance,
+        sampler=sampler,
+        reference_seed=reference_seed,
     )
 
 
@@ -80,6 +111,12 @@ __all__: list[str] = [
     "BpannHistory",
     "CandidateProposal",
     "DenseLinear",
+    "FlameEvaluator",
+    "MetalFlameEvaluator",
+    "MetalQwenEvaluator",
+    "MetalParamBlock",
+    "MetalSearchState",
+    "MetalWeights",
     "ModelPackage",
     "MultiTrustRegion",
     "MultiTrustRegionLoop",
@@ -96,14 +133,14 @@ __all__: list[str] = [
     "SharingPolicy",
     "Telemetry",
     "allocate_batches",
-    "enn_optimizer",
-    "enn_tr",
-    "create_zero",
     "create_lhd",
     "create_optimizer",
+    "create_zero",
     "dense_apply",
     "dense_dist2",
     "dense_linear",
+    "enn_optimizer",
+    "enn_tr",
     "experimental",
     "make_region",
     "mtrregn",

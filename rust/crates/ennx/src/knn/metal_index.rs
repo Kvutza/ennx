@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use metal::{ComputePipelineState, MTLSize};
 use ndarray::{Array2, ArrayView2};
 
-use super::{flatten_f32, pad_k};
 use super::{KnnPlan, KnnProfile};
+use super::{flatten_f32, pad_k};
 use crate::apple_gpu::Runtime;
 use crate::index::IndexError;
 use crate::knn::metal_plan::Plan;
@@ -1094,11 +1094,7 @@ fn plan_lists(plan: Plan, rows: usize) -> usize {
 }
 
 fn plan_fan(k: usize) -> usize {
-    if k <= 16 {
-        TILE_ROWS / k
-    } else {
-        2
-    }
+    if k <= 16 { TILE_ROWS / k } else { 2 }
 }
 
 fn set_params(encoder: &metal::ComputeCommandEncoderRef, slot: u64, params: &Params) {

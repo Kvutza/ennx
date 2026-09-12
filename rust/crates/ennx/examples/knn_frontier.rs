@@ -2,8 +2,8 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::time::{Duration, Instant};
 
-use ennx::experimental::{KnnIndex, KnnPlan};
 use ennx::IndexDriver;
+use ennx::experimental::{KnnIndex, KnnPlan};
 use ndarray::Array2;
 
 struct Point {

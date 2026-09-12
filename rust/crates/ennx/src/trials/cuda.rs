@@ -1,4 +1,4 @@
-use super::{make_steps, make_tiles, Ask, Center, LeafStep, Parameter, SparseEdit, Tile};
+use super::{Ask, Center, LeafStep, Parameter, SparseEdit, Tile, make_steps, make_tiles};
 
 pub(super) struct Engine {
     inner: ennx_cuda::TrialEngine,
@@ -36,7 +36,7 @@ impl Engine {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let outcomes = history.iter().map(|&(_, value)| value).collect::<Vec<_>>();
-        let draws = crate::weights::thompson_history_draws(history, config.seed);
+        let draws = crate::weights::history_draws(history, config.seed);
         let steps = make_steps(leaves, config.length)
             .into_iter()
             .map(cuda_leaf)
@@ -81,7 +81,7 @@ impl Engine {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let outcomes = history.iter().map(|&(_, value)| value).collect::<Vec<_>>();
-        let draws = crate::weights::thompson_history_draws(history, config.seed);
+        let draws = crate::weights::history_draws(history, config.seed);
         let steps = make_steps(leaves, config.length)
             .into_iter()
             .map(cuda_leaf)
@@ -180,7 +180,7 @@ impl Engine {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let outcomes = history.iter().map(|&(_, value)| value).collect::<Vec<_>>();
-        let draws = crate::weights::thompson_history_draws(history, config.seed);
+        let draws = crate::weights::history_draws(history, config.seed);
         let steps = make_steps(leaves, config.length)
             .into_iter()
             .map(cuda_leaf)

@@ -21,8 +21,9 @@ existing verification environments are reused.
 Cargo manifests declare Rust dependencies; Reindeer generates their Buck2 targets.
 
 `build` checks each Python 3.12–3.14 wheel and writes it to `dist/`.
-`dev` runs the full Python suite against every wheel.
+With `--tests`, the Python suite runs against every wheel using its matching
+interpreter.
 
 [API](docs/api.md) · [Integrations](docs/interop.md) ·
 [Changelog](CHANGELOG.md) · [Build](docs/buck2.md) · [Tests](docs/testing.md) ·
-[Notice](NOTICE)
+[Dense Qwen control](docs/qwen.md) · [Notice](NOTICE)

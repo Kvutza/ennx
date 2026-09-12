@@ -353,7 +353,7 @@ fn source(prefix: &str, entry: &str) -> String {
 }
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
-use crate::apple_gpu::{thread_group, Runtime};
+use crate::apple_gpu::{Runtime, thread_group};
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use std::sync::Arc;
 
@@ -430,7 +430,7 @@ use opencl3::command_queue::CommandQueue;
 #[cfg(feature = "opencl")]
 use opencl3::context::Context;
 #[cfg(feature = "opencl")]
-use opencl3::device::{get_all_devices, Device, CL_DEVICE_TYPE_CPU, CL_DEVICE_TYPE_GPU};
+use opencl3::device::{CL_DEVICE_TYPE_CPU, CL_DEVICE_TYPE_GPU, Device, get_all_devices};
 #[cfg(feature = "opencl")]
 use opencl3::kernel::{ExecuteKernel, Kernel};
 #[cfg(feature = "opencl")]

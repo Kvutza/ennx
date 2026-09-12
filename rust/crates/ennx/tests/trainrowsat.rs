@@ -1,6 +1,6 @@
 //! `train_rows` matches full in-memory views on random index sets.
 
-use ennx::{IndexDriver, ENN};
+use ennx::{ENN, IndexDriver};
 use ndarray::array;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};

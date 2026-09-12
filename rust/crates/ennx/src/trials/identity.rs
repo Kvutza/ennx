@@ -5,7 +5,7 @@ static NEXT_TRIAL: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn trial_id() -> Result<u64, String> {
     NEXT_TRIAL
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
         .map_err(|_| "trial identity space exhausted".to_string())
 }
 

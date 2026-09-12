@@ -6,3 +6,13 @@ Original portions are Copyright (c) 2025 yubo research.
 Subsequent modifications are Copyright (c) 2026 ENNX Contributors.
 
 ENNX is distributed under the MIT License. See LICENSE.
+
+Research design acknowledgements
+
+The modular full-weight perturbation interface was independently implemented
+after studying Modular CMA-ES (MIT), IOHexperimenter (BSD-3-Clause),
+fcmaes-rust (MIT), Nevergrad (MIT), evosax (Apache-2.0), and EvoX (GPL-3.0).
+No source code from these projects is incorporated. EvoX is a research
+reference only; no GPL-covered implementation is included. Project links,
+papers, licenses, and the exact design influences are recorded in
+docs/perturbation-lab.md.

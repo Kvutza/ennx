@@ -1,11 +1,11 @@
 //! Integration tests for BPANN indexing and search behavior.
 
+use bpann::BpannBackend;
 use bpann::backend::open_stride;
 use bpann::index::kmeans::PartitionTree;
 use bpann::index::page::closest_child;
 use bpann::index::{BpannIndex, LEAF_CAPACITY};
 use bpann::mmap_store::MmapColumnStore;
-use bpann::BpannBackend;
 use ndarray::array;
 use std::sync::Mutex;
 use tempfile::TempDir;
@@ -127,13 +127,13 @@ fn backend_accessors() {
     assert_eq!(idx1[[0, 0]], idx2[[0, 0]]);
     assert_eq!(idx1[[0, 0]], 0);
     assert_eq!(bpann::N_LIMIT, 8192);
-    let flat = bpann::load_or_build_small_n_cache(&b, b.len()).unwrap();
+    let flat = bpann::resident_cache(&b, b.len()).unwrap();
     assert_eq!(flat.len(), b.len() * 2);
-    let hits = bpann::topk_flat_sq_l2(&[0.0, 0.0], &flat, 2, 2, 1);
+    let hits = bpann::topk_l2(&[0.0, 0.0], &flat, 2, 2, 1);
     assert_eq!(hits[0].0, 0);
     assert!(bpann::OrderedF32(1.0) > bpann::OrderedF32(0.0));
-    assert!(bpann::topk_flat_sq_l2(&[0.0, 0.0], &[], 0, 2, 1).is_empty());
-    let scored = bpann::score_queries_flat(
+    assert!(bpann::topk_l2(&[0.0, 0.0], &[], 0, 2, 1).is_empty());
+    let scored = bpann::score_queries(
         &[vec![0.1, 0.1]],
         &bpann::ScoreQueriesFlat {
             flat: &flat,

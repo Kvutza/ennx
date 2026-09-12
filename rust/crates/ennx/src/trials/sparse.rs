@@ -1,4 +1,4 @@
-use super::{decode_code, hash, perturb, score, Ask, Parameter, SparseEdit};
+use super::{Ask, Parameter, SparseEdit, decode_code, hash, perturb, score};
 use crate::util::insert_neighbor;
 
 pub(super) fn make_edits(
@@ -46,7 +46,7 @@ pub(super) fn sparse_select(
     config: Ask,
 ) -> (usize, f32) {
     let draws = if config.acquisition == crate::weights::AcquisitionKind::Thompson {
-        crate::weights::thompson_history_draws(history, config.seed)
+        crate::weights::history_draws(history, config.seed)
     } else {
         Vec::new()
     };

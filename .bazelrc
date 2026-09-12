@@ -1,5 +1,6 @@
 common --enable_bzlmod
 build --experimental_convenience_symlinks=ignore
+build --@rules_rust//rust/toolchain/channel=nightly
 
 test --test_output=errors
 

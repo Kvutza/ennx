@@ -381,7 +381,7 @@ fn sample_weights(rng: &mut dyn RngCore, n: usize) -> Array1<f64> {
     let mut samples = Vec::with_capacity(n);
     let mut sum = 0.0;
     for _ in 0..n {
-        let u: f64 = rng.gen();
+        let u: f64 = rng.r#gen();
         let g = (-u.ln()).max(1e-300);
         samples.push(g);
         sum += g;
@@ -435,8 +435,8 @@ pub fn scalarize_ranges(
 mod tests {
     use super::*;
     use ndarray::array;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn morbo_range() {

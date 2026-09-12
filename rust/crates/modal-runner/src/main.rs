@@ -6,7 +6,7 @@ use tempfile::NamedTempFile;
 
 const CUDA_IMAGE: &str = "im-tZRy6QPZXIJyPrv4zZqPOM";
 const CUDA_REV: &str = "1f4d813719012d384f2db12b88efc9314c8bf50c";
-const RUST_NIGHTLY: &str = "nightly-2026-04-03";
+const RUST_NIGHTLY: &str = "nightly-2026-09-29";
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 

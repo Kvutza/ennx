@@ -1,8 +1,8 @@
 //! Acquisition function optimizers for TuRBO.
 
 use ndarray::{ArrayView1, ArrayView2};
-use rand::seq::SliceRandom;
 use rand::Rng;
+use rand::seq::SliceRandom;
 use thiserror::Error;
 
 use std::cmp::Ordering;
@@ -219,7 +219,7 @@ impl ParetoAcquisition {
     /// Select arms from Pareto front.
     ///
     /// For multi-objective, uses non-dominated sorting.
-    /// For single-objective, delegates to arms_from_pareto_fronts_2d.
+    /// For single-objective, delegates to `pareto_arms`.
     pub fn select<R: Rng + ?Sized>(
         &self,
         mu: &ArrayView2<f64>,
@@ -249,16 +249,11 @@ impl ParetoAcquisition {
         if n_objectives == 1 {
             let mu_1d = mu.column(0).to_owned();
             let sigma_1d = se.column(0).to_owned();
-            return Self::arms_from_pareto_fronts_2d(
-                &mu_1d.view(),
-                &sigma_1d.view(),
-                num_arms,
-                rng,
-            );
+            return Self::pareto_arms(&mu_1d.view(), &sigma_1d.view(), num_arms, rng);
         }
 
         // Multi-objective: use non-dominated sorting (simplified)
-        let pareto_fronts = self.non_domin_sort(mu);
+        let pareto_fronts = self.nondomin_sort(mu);
 
         // Select from fronts until we have enough
         let mut selected = Vec::with_capacity(num_arms);
@@ -282,9 +277,9 @@ impl ParetoAcquisition {
     }
 
     /// Non-dominated sorting (simplified implementation).
-    fn non_domin_sort(&self, objectives: &ArrayView2<f64>) -> Vec<Vec<usize>> {
+    fn nondomin_sort(&self, objectives: &ArrayView2<f64>) -> Vec<Vec<usize>> {
         if objectives.ncols() == 2 {
-            return self.non_domin_sort_2d(objectives);
+            return self.nondomin_2d(objectives);
         }
 
         let n = objectives.nrows();
@@ -364,7 +359,7 @@ impl ParetoAcquisition {
     /// Non-dominated sorting specialized for 2 objectives.
     ///
     /// Uses skyline peeling with objective-0 sort + objective-1 sweep.
-    fn non_domin_sort_2d(&self, objectives: &ArrayView2<f64>) -> Vec<Vec<usize>> {
+    fn nondomin_2d(&self, objectives: &ArrayView2<f64>) -> Vec<Vec<usize>> {
         let n = objectives.nrows();
         if n == 0 {
             return Vec::new();
@@ -413,7 +408,7 @@ impl ParetoAcquisition {
     }
 
     /// Select arms from 2D Pareto fronts (used for single-objective).
-    fn arms_from_pareto_fronts_2d<R: Rng + ?Sized>(
+    fn pareto_arms<R: Rng + ?Sized>(
         mu: &ArrayView1<f64>,
         sigma: &ArrayView1<f64>,
         num_arms: usize,
@@ -531,7 +526,7 @@ mod tests {
     fn test_007() {
         let pareto = ParetoAcquisition::new();
         let objectives = array![[3.0, 1.0], [2.0, 2.0], [1.0, 3.0], [0.5, 0.5]];
-        let fronts = pareto.non_domin_sort(&objectives.view());
+        let fronts = pareto.nondomin_sort(&objectives.view());
         assert_eq!(fronts.len(), 2);
         assert_eq!(fronts[0], vec![0, 1, 2]);
         assert_eq!(fronts[1], vec![3]);
@@ -542,7 +537,7 @@ mod tests {
         let pareto = ParetoAcquisition::new();
         // Points 0 and 1 are identical and both should be on first front.
         let objectives = array![[2.0, 2.0], [2.0, 2.0], [1.0, 1.0], [0.0, 3.0]];
-        let fronts = pareto.non_domin_sort(&objectives.view());
+        let fronts = pareto.nondomin_sort(&objectives.view());
         assert!(!fronts.is_empty());
         assert!(fronts[0].contains(&0));
         assert!(fronts[0].contains(&1));

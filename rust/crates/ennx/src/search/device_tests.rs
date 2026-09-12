@@ -1,5 +1,8 @@
 use super::{Ask, ComputeDevice, Optimizer, Parameter, TRLengthConfig};
 
+#[cfg(feature = "opencl")]
+use super::opencl_unavailable;
+
 fn compare(device: ComputeDevice) {
     let create = |device| {
         Optimizer::new_batch(
@@ -78,8 +81,8 @@ fn closed_loop(device: ComputeDevice) {
         neighbors: 1,
         ..Ask::default()
     };
-    assert!(gpu
-        .ask_stream(
+    assert!(
+        gpu.ask_stream(
             7,
             4,
             Ask {
@@ -87,7 +90,8 @@ fn closed_loop(device: ComputeDevice) {
                 ..config
             }
         )
-        .is_err());
+        .is_err()
+    );
     for step in 0..200 {
         let expected = cpu.batch_stream(step + 7, 2, 4, config).unwrap();
         let actual = gpu.batch_stream(step + 7, 2, 4, config).unwrap();
@@ -139,11 +143,4 @@ fn opencl_residency() {
     }
     compare(ComputeDevice::OpenCl);
     closed_loop(ComputeDevice::OpenCl);
-}
-
-#[cfg(feature = "opencl")]
-fn opencl_unavailable(error: &str) -> bool {
-    error.contains("OpenCL platform")
-        || error.contains("OpenCL GPU")
-        || error.contains("failed to enumerate OpenCL")
 }

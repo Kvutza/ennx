@@ -9,7 +9,7 @@ def _tools_impl(ctx):
     if ctx.attrs.os == "macos":
         compiler = cmd_args(ctx.attrs.macos_wrapper, clang, "c", hidden = [llvm])
         cxx_compiler = cmd_args(ctx.attrs.macos_wrapper, clangxx, "cxx", hidden = [llvm])
-        linker = cmd_args(cxx_compiler, "-fuse-ld=lld", cmd_args(llvm.project("bin/ld64.lld"), format = "--ld-path={}"))
+        linker = cmd_args(ctx.attrs.macos_wrapper, clangxx, "link", hidden = [llvm])
     else:
         sdk = ctx.attrs.sdk[DefaultInfo].default_outputs[0]
         triple = ctx.attrs.arch + "-conda-linux-gnu"

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use ennx::{ENNParams, IndexDriver, PosteriorComputation, PosteriorFlags, ENN};
+use ennx::{ENN, ENNParams, IndexDriver, PosteriorComputation, PosteriorFlags};
 use ndarray::Array2;
 
 fn main() -> Result<(), String> {

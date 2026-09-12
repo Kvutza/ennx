@@ -1,5 +1,5 @@
 use super::{
-    compute_internals, compute_posterior, empty_internals, get_data, WeightedPosteriorData,
+    WeightedPosteriorData, compute_internals, compute_posterior, empty_internals, get_data,
 };
 use crate::draw::DrawInternals;
 use crate::error::ENNError;

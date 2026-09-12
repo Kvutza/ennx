@@ -3,8 +3,11 @@ use cuda_device::{
 };
 
 mod bf16;
-pub use bf16::{Bf16Leaf, Bf16Score, SearchState, TellParams, TellSummary};
-use bf16::{acquisition_score, bf16_finite, bf16_seed, bf16_value, tile_distances, warp_invalid};
+pub use bf16::{Bf16Change, Bf16Leaf, Bf16Score, SearchState, TellParams, TellSummary};
+use bf16::{
+    acquisition_score, bf16_candidate, bf16_decode, bf16_encode, bf16_finite, bf16_value,
+    candidate_radius, correlated_value, dense_normal, tile_distances, warp_invalid,
+};
 mod knn;
 pub use knn::{
     BatchParams, BatchValue, DrawParams, KNN_K, KNN_THREADS, KNN_WARPS, KnnParams, MergeParams,
@@ -343,13 +346,18 @@ fn draw_normal(seed: u64, index: u32, metric: u32) -> f64 {
 
 #[inline(always)]
 fn dense_sign(seed: u64, leaf: u64, element: u64) -> f32 {
-    let leaf = dense_mix64(leaf ^ 0xd6e8_feb8_6659_fd93);
-    let element = dense_mix64(element ^ 0xa076_1d64_78bd_642f);
-    if dense_mix64(seed ^ leaf ^ element) & 1 == 0 {
+    if dense_hash(seed, leaf, element) & 1 == 0 {
         -1.0
     } else {
         1.0
     }
+}
+
+#[inline(always)]
+fn dense_hash(seed: u64, leaf: u64, element: u64) -> u64 {
+    let leaf = dense_mix64(leaf ^ 0xd6e8_feb8_6659_fd93);
+    let element = dense_mix64(element ^ 0xa076_1d64_78bd_642f);
+    dense_mix64(seed ^ leaf ^ element)
 }
 
 #[inline(always)]
@@ -472,6 +480,220 @@ macro_rules! tell_history {
         }
         best_slot
     }};
+}
+
+// Slot 1 stays pinned to the incumbent; only rejected relative observations rotate.
+macro_rules! tell_relativehistory {
+    ($local:ident, $history_slots:ident, $outcomes:ident, $variances:ident,
+     $destinations:ident, $params:ident) => {{
+        if $params.accept != 0 {
+            $local.history = 1;
+            unsafe {
+                *$history_slots.get_unchecked_mut(0) = 1;
+                *$outcomes.get_unchecked_mut(0) = 0.0;
+                *$variances.get_unchecked_mut(0) = 0.0;
+                *$destinations.get_unchecked_mut(0) = 1;
+            }
+        } else {
+            let destination = if $local.history == $params.capacity {
+                let slots_ptr = $history_slots.as_mut_ptr() as *const u32;
+                let outcomes_ptr = $outcomes.as_mut_ptr() as *const f32;
+                let variances_ptr = $variances.as_mut_ptr() as *const f32;
+                let oldest = unsafe { slots_ptr.add(1).read() };
+                let mut index = 2_u32;
+                while index < $local.history {
+                    unsafe {
+                        *$history_slots.get_unchecked_mut((index - 1) as usize) =
+                            slots_ptr.add(index as usize).read();
+                        *$outcomes.get_unchecked_mut((index - 1) as usize) =
+                            outcomes_ptr.add(index as usize).read();
+                        *$variances.get_unchecked_mut((index - 1) as usize) =
+                            variances_ptr.add(index as usize).read();
+                    }
+                    index += 1;
+                }
+                $local.history -= 1;
+                oldest
+            } else {
+                $local.history + 1
+            };
+            let index = $local.history as usize;
+            unsafe {
+                *$destinations.get_unchecked_mut(0) = destination;
+                *$history_slots.get_unchecked_mut(index) = destination;
+                *$outcomes.get_unchecked_mut(index) = $params.improvement;
+                *$variances.get_unchecked_mut(index) = $params.improvement_variance;
+            }
+            $local.history += 1;
+        }
+    }};
+}
+
+#[cfg(test)]
+mod paired_relative_tests {
+    use super::{SearchState, TellParams, bf16};
+
+    fn state() -> SearchState {
+        SearchState {
+            length: 0.01,
+            length_init: 0.01,
+            length_min: 0.0001,
+            length_max: 0.08,
+            trust_best: -3.0,
+            hist_min: -3.0,
+            hist_max: -3.0,
+            best: -3.0,
+            best_variance: 0.5,
+            prev_obs: 1,
+            successes: 0,
+            failures: 0,
+            restarts: 0,
+            history: 1,
+            status: 0,
+        }
+    }
+
+    #[test]
+    fn fifo_anchor() {
+        for capacity in [2, 3, 128] {
+            let mut local = state();
+            let mut history_slots = vec![0; capacity];
+            let mut outcomes = vec![0.0; capacity];
+            let mut variances = vec![0.0; capacity];
+            let mut destinations = [0];
+            history_slots[0] = 1;
+            let mut params = TellParams {
+                row_stride: 128,
+                row_len: 1,
+                trials: 1,
+                capacity: capacity as u32,
+                failure_tolerance: 4,
+                status_count: 1,
+                correlated: 1,
+                paired: 2,
+                accept: 0,
+                incumbent_value: -3.0,
+                incumbent_variance: 0.5,
+                improvement: 0.0,
+                improvement_variance: 0.0,
+                reject_is_failure: 1,
+            };
+            for epoch in 0..2 {
+                params.reject_is_failure = epoch;
+                for step in 1..=capacity * 3 {
+                    params.improvement = -(step as f32) * 0.01;
+                    params.improvement_variance = step as f32 * 0.001;
+                    tell_relativehistory!(
+                        local,
+                        history_slots,
+                        outcomes,
+                        variances,
+                        destinations,
+                        params
+                    );
+                    assert_eq!(local.history as usize, (step + 1).min(capacity));
+                    assert_eq!((history_slots[0], outcomes[0], variances[0]), (1, 0.0, 0.0));
+                    assert!((2..=capacity as u32).contains(&destinations[0]));
+                    let len = local.history as usize;
+                    let mut resident = history_slots[..len].to_vec();
+                    resident.sort_unstable();
+                    resident.dedup();
+                    assert_eq!(resident.len(), len);
+                    for index in 1..len {
+                        let observed_step = step - (len - 1 - index);
+                        assert_eq!(outcomes[index], -(observed_step as f32) * 0.01);
+                        assert_eq!(variances[index], observed_step as f32 * 0.001);
+                    }
+                }
+                params.accept = 1;
+                tell_relativehistory!(
+                    local,
+                    history_slots,
+                    outcomes,
+                    variances,
+                    destinations,
+                    params
+                );
+                assert_eq!(local.history, 1, "epoch {epoch}");
+                assert_eq!(destinations[0], 1);
+                assert_eq!((history_slots[0], outcomes[0], variances[0]), (1, 0.0, 0.0));
+                params.accept = 0;
+            }
+        }
+    }
+
+    #[test]
+    fn relative_state() {
+        let mut local = state();
+        for rejection in 1..=40 {
+            let previous = local.length;
+            let selected = bf16::candidate_radius(local, 1);
+            bf16::paired_radius(&mut local, selected, false, 4, true);
+            assert_eq!(local.failures, rejection % 4);
+            assert_eq!(
+                local.length,
+                if rejection % 4 == 0 {
+                    (previous * 0.5).max(local.length_min)
+                } else {
+                    previous
+                }
+            );
+            assert_eq!(local.restarts, 0);
+        }
+        assert_eq!(local.length, local.length_min);
+        for candidate in 0..4 {
+            let selected = bf16::candidate_radius(local, candidate);
+            local.failures = 3;
+            bf16::paired_radius(&mut local, selected, true, 4, true);
+            assert_eq!(local.length, f64::from(selected));
+            assert_eq!(local.failures, 0);
+            assert_eq!(local.restarts, 0);
+        }
+        local.length = local.length_max;
+        let selected = bf16::candidate_radius(local, 1);
+        bf16::paired_radius(&mut local, selected, false, 1, true);
+        assert_eq!(local.length, local.length_max * 0.5);
+        local.failures = u32::MAX - 1;
+        bf16::paired_radius(&mut local, selected, false, u32::MAX, true);
+        assert_eq!(local.failures, 0);
+        assert_eq!(local.restarts, 0);
+    }
+
+    #[test]
+    fn inconclusive_state() {
+        for failures in [0, 3, u32::MAX] {
+            let mut local = state();
+            local.failures = failures;
+            let initial_length = local.length;
+            let selected = bf16::candidate_radius(local, 1);
+            for _ in 0..40 {
+                bf16::paired_radius(&mut local, selected, false, 4, false);
+                assert_eq!(local.length, initial_length);
+                assert_eq!(local.failures, failures);
+                assert_eq!(local.restarts, 0);
+            }
+            if failures == 3 {
+                bf16::paired_radius(&mut local, selected, false, 4, true);
+                assert_eq!(local.length, initial_length * 0.5);
+                assert_eq!(local.failures, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn radius_reset() {
+        for reject_is_failure in [false, true] {
+            for candidate in 0..4 {
+                let mut local = state();
+                local.failures = 3;
+                let selected = bf16::candidate_radius(local, candidate);
+                bf16::paired_radius(&mut local, selected, true, 4, reject_is_failure);
+                assert_eq!(local.length, f64::from(selected));
+                assert_eq!(local.failures, 0);
+                assert_eq!(local.restarts, 0);
+            }
+        }
+    }
 }
 
 macro_rules! tell_adapt {
@@ -1325,11 +1547,14 @@ pub mod trials {
     pub fn distance_bf16(
         rows: &[u16],
         history_slots: &[u32],
+        reference: &[u16],
+        reference_scales: &[f32],
         state: &[SearchState],
         seeds: &[Seed],
         leaves: &[Bf16Leaf],
         tiles: &[DenseTile],
         mut partials: DisjointSlice<f32>,
+        mut tile_status: DisjointSlice<u32>,
         mut params: Bf16Score,
     ) {
         static mut VALUES: SharedArray<f32, 256> = SharedArray::UNINIT;
@@ -1346,6 +1571,9 @@ pub mod trials {
             return;
         }
         let candidate = block_index / params.tiles;
+        if params.correlated == 1 {
+            params.coefficient = candidate_radius(state[0], candidate);
+        }
         let tile_index = block_index % params.tiles;
         let thread_index = thread::threadIdx_x();
         let lane = warp::lane_id();
@@ -1365,6 +1593,13 @@ pub mod trials {
         tile_distances(
             rows,
             history_slots,
+            reference,
+            if params.correlated == 1 {
+                reference_scales[tile.leaf as usize]
+            } else {
+                1.0
+            },
+            candidate,
             seeds[candidate as usize],
             leaves[tile.leaf as usize],
             tile,
@@ -1374,13 +1609,17 @@ pub mod trials {
             params,
         );
         let invalid = warp_invalid(warp_status);
+        if thread_index == 0 {
+            let mut flags = 0;
+            let mut index = 0;
+            while index < WARPS {
+                flags |= unsafe { warp_status.add(index).read() };
+                index += 1;
+            }
+            unsafe { *tile_status.get_unchecked_mut(block_index as usize) = flags };
+        }
         if thread_index < params.history {
-            let stride = if params.resident != 0 {
-                MAX_HISTORY
-            } else {
-                params.history as usize
-            };
-            let output = block_index as usize * stride as usize + thread_index as usize;
+            let output = block_index as usize * params.history as usize + thread_index as usize;
             unsafe {
                 *partials.get_unchecked_mut(output) = if invalid {
                     f32::INFINITY
@@ -1396,6 +1635,7 @@ pub mod trials {
     #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
     pub fn score_bf16(
         partials: &[f32],
+        tile_status: &[u32],
         outcomes: &[f32],
         variances: &[f32],
         state: &[SearchState],
@@ -1406,6 +1646,7 @@ pub mod trials {
         static mut DISTANCES: SharedArray<f32, MAX_HISTORY> = SharedArray::UNINIT;
         static mut NEAREST_DISTANCES: SharedArray<f32, MAX_HISTORY> = SharedArray::UNINIT;
         static mut NEAREST_INDICES: SharedArray<u32, MAX_HISTORY> = SharedArray::UNINIT;
+        static mut CHANGED: SharedArray<u32, WARPS> = SharedArray::UNINIT;
 
         if params.resident != 0 {
             params.history = state[0].history;
@@ -1420,17 +1661,37 @@ pub mod trials {
         let distances = unsafe { SharedArray::as_raw_mut_ptr(&raw mut DISTANCES) };
         let nearest_distances = unsafe { SharedArray::as_raw_mut_ptr(&raw mut NEAREST_DISTANCES) };
         let nearest_indices = unsafe { SharedArray::as_raw_mut_ptr(&raw mut NEAREST_INDICES) };
+        // Skip rounded-away candidates only when this pool contains an actual change.
+        // Preserve real scores when every candidate is unchanged so callers can stop cleanly.
+        let mut changes = 0u32;
+        if params.correlated == 1 {
+            let mut tile = thread_index;
+            while tile < params.tiles {
+                let mut other = 0;
+                while other < params.candidates {
+                    let flags = tile_status[(other * params.tiles + tile) as usize];
+                    if flags & 2 != 0 {
+                        changes |= if other == candidate { 3 } else { 1 };
+                    }
+                    other += 1;
+                }
+                tile += THREADS;
+            }
+        }
+        let any_changed = warp::any(changes & 1 != 0);
+        let own_changed = warp::any(changes & 2 != 0);
+        if warp::lane_id() == 0 {
+            unsafe {
+                CHANGED[(thread_index / 32) as usize] =
+                    u32::from(any_changed) | (u32::from(own_changed) << 1);
+            }
+        }
         if thread_index < params.history {
             let mut distance = 0.0f32;
             let mut tile_index = 0u32;
             while tile_index < params.tiles {
                 let block_index = candidate * params.tiles + tile_index;
-                let stride = if params.resident != 0 {
-                    MAX_HISTORY
-                } else {
-                    params.history as usize
-                };
-                let input = block_index as usize * stride as usize + thread_index as usize;
+                let input = block_index as usize * params.history as usize + thread_index as usize;
                 distance += partials[input];
                 tile_index += 1;
             }
@@ -1439,7 +1700,13 @@ pub mod trials {
         thread::sync_threads();
 
         if thread_index == 0 {
-            if unsafe { !distances.read().is_finite() } {
+            let mut changed = 0;
+            let mut index = 0;
+            while index < WARPS {
+                changed |= unsafe { CHANGED[index] };
+                index += 1;
+            }
+            if unsafe { !distances.read().is_finite() } || changed == 1 {
                 unsafe {
                     *scores.get_unchecked_mut(candidate as usize) = f32::NEG_INFINITY;
                 }
@@ -1488,16 +1755,17 @@ pub mod trials {
     #[kernel]
     #[launch_bounds(THREADS)]
     #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
-    pub fn seed_bf16(mut seeds: DisjointSlice<Seed>, root: u64, count: u32) {
+    pub fn seed_bf16(mut seeds: DisjointSlice<Seed>, root: u64, count: u32, correlated: u32) {
         let mut index = thread::threadIdx_x() + thread::blockIdx_x() * THREADS;
         let stride = thread::gridDim_x() * THREADS;
         while index < count {
             let root_low = root as u32;
             let root_high = (root >> 32) as u32;
+            let stream = if correlated == 1 { index / 2 } else { index };
             unsafe {
                 *seeds.get_unchecked_mut(index as usize) = Seed {
-                    low: trial_hash(root_low, root_high, index),
-                    high: trial_hash(root_high, root_low, index ^ 0x9e37_79b9),
+                    low: trial_hash(root_low, root_high, stream),
+                    high: trial_hash(root_high, root_low, stream ^ 0x9e37_79b9),
                 };
             }
             index += stride;
@@ -2093,8 +2361,11 @@ pub mod trials {
     pub fn write_bf16(
         mut rows: DisjointSlice<u16>,
         mut batch: DisjointSlice<u16>,
+        mut changes: DisjointSlice<Bf16Change>,
         state: &[SearchState],
         seeds: &[Seed],
+        reference: &[u16],
+        reference_scales: &[f32],
         selection: &[Selection],
         leaves: &[Bf16Leaf],
         tiles: &[DenseTile],
@@ -2106,8 +2377,13 @@ pub mod trials {
         tile_count: u32,
         coefficient: f32,
         resident: u32,
+        export_batch: u32,
+        verify_only: u32,
+        correlated: u32,
     ) {
         static mut WARP_STATUS: SharedArray<u32, WARPS> = SharedArray::UNINIT;
+        static mut WARP_SQUARED: SharedArray<f32, WARPS> = SharedArray::UNINIT;
+        static mut WARP_CHANGED: SharedArray<f32, WARPS> = SharedArray::UNINIT;
 
         let coefficient = if resident != 0 {
             state[0].length as f32
@@ -2122,7 +2398,13 @@ pub mod trials {
         }
         let tile = tiles[tile_index as usize];
         let leaf = leaves[tile.leaf as usize];
-        let seed = seeds[selection[region as usize].index as usize];
+        let candidate = selection[region as usize].index;
+        let seed = seeds[candidate as usize];
+        let coefficient = if correlated == 1 {
+            candidate_radius(state[0], candidate)
+        } else {
+            coefficient
+        };
         let base_offset = base_slot as usize * row_stride as usize;
         let row_offset = trial_slots[region as usize] as usize * row_stride as usize;
         let rows_ptr = rows.as_mut_ptr() as *const u16;
@@ -2130,41 +2412,72 @@ pub mod trials {
         let lane = warp::lane_id();
         let warp_index = thread_index / 32;
         let mut invalid = resident != 0 && state[0].status != 0;
+        let mut squared = 0.0_f32;
+        let mut changed = 0_u32;
         let mut item = thread_index;
         while item < tile.length {
             let element = u64::from(tile.start + item);
             let index = leaf.offset + element;
-            let value = bf16_seed(
-                unsafe { rows_ptr.add(base_offset + index as usize).read() },
+            let base = unsafe { rows_ptr.add(base_offset + index as usize).read() };
+            let value = bf16_candidate(
+                base,
                 leaf,
                 element,
                 seed,
                 coefficient,
+                reference,
+                if correlated == 1 {
+                    reference_scales[tile.leaf as usize]
+                } else {
+                    1.0
+                },
+                correlated,
+                candidate,
             );
             invalid |= !bf16_finite(value);
+            if verify_only != 0 {
+                invalid |= unsafe { rows_ptr.add(row_offset + index as usize).read() } != value;
+            }
+            let delta = bf16::bf16_decode(value) - bf16::bf16_decode(base);
+            squared += delta * delta;
+            changed += u32::from(value != base);
             unsafe {
-                *rows.get_unchecked_mut(row_offset + index as usize) = value;
-                *batch.get_unchecked_mut(region as usize * row_len as usize + index as usize) =
-                    value;
+                if verify_only == 0 {
+                    *rows.get_unchecked_mut(row_offset + index as usize) = value;
+                    if export_batch != 0 {
+                        *batch.get_unchecked_mut(
+                            region as usize * row_len as usize + index as usize,
+                        ) = value;
+                    }
+                }
             }
             item += THREADS;
         }
         let warp_invalid = warp::any(invalid);
+        let warp_squared = warp::reduce_sum_f32(squared);
+        let warp_changed = warp::reduce_sum_f32(changed as f32);
         if lane == 0 {
             unsafe {
                 WARP_STATUS[warp_index as usize] = u32::from(warp_invalid);
+                WARP_SQUARED[warp_index as usize] = warp_squared;
+                WARP_CHANGED[warp_index as usize] = warp_changed;
             }
         }
         thread::sync_threads();
         if thread_index == 0 {
             let mut block_status = 0;
+            let mut squared = 0.0_f32;
+            let mut changed = 0_u32;
             let mut warp_index = 0;
             while warp_index < WARPS {
                 block_status |= unsafe { WARP_STATUS[warp_index] };
+                squared += unsafe { WARP_SQUARED[warp_index] };
+                changed += unsafe { WARP_CHANGED[warp_index] } as u32;
                 warp_index += 1;
             }
             unsafe {
                 *status.get_unchecked_mut(block as usize) = block_status;
+                *changes.get_unchecked_mut(block as usize) = Bf16Change { squared, changed };
             }
         }
     }
@@ -2173,7 +2486,6 @@ pub mod trials {
     #[launch_bounds(THREADS)]
     #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
     pub fn tell_bf16(
-        mut rows: DisjointSlice<u16>,
         mut history_slots: DisjointSlice<u32>,
         mut outcomes: DisjointSlice<f32>,
         mut variances: DisjointSlice<f32>,
@@ -2185,14 +2497,35 @@ pub mod trials {
         mut accepted: DisjointSlice<u32>,
         mut state: DisjointSlice<SearchState>,
         mut summary: DisjointSlice<TellSummary>,
+        selection: &[Selection],
+        mut best_source: DisjointSlice<u32>,
         params: TellParams,
     ) {
-        static mut CONTROL: SharedArray<u32, 3> = SharedArray::UNINIT;
-
         let thread_index = thread::threadIdx_x();
         if thread_index == 0 {
             let state_ptr = state.as_mut_ptr() as *const SearchState;
             let mut status = tell_validate!(values, trial_variances, accepted, params.trials);
+            if params.paired != 0
+                && (params.correlated != 1
+                    || params.trials != 1
+                    || params.accept > 1
+                    || !params.incumbent_value.is_finite()
+                    || !params.incumbent_variance.is_finite()
+                    || params.incumbent_variance < 0.0)
+            {
+                status |= 1;
+            }
+            if params.paired > 2
+                || (params.paired == 2
+                    && (params.capacity < 2
+                        || params.failure_tolerance == 0
+                        || params.reject_is_failure > 1
+                        || !params.improvement.is_finite()
+                        || !params.improvement_variance.is_finite()
+                        || params.improvement_variance < 0.0))
+            {
+                status |= 1;
+            }
             let mut status_index = 0_u32;
             while status_index < params.status_count {
                 status |= proposal_status[status_index as usize];
@@ -2202,19 +2535,96 @@ pub mod trials {
             let mut restarted = 0_u32;
             if status == 0 {
                 let mut local = unsafe { state_ptr.read() };
-                best_slot = tell_history!(
-                    local,
-                    history_slots,
-                    outcomes,
-                    variances,
-                    trial_slots,
-                    destinations,
-                    values,
-                    trial_variances,
-                    accepted,
-                    params
-                );
-                restarted = tell_adapt!(local, values, history_slots, outcomes, variances, params);
+                // Capture provenance before acceptance or contraction changes the reference radius.
+                let selected_radius = candidate_radius(local, selection[0].index);
+                if params.paired == 2 {
+                    local.best = params.incumbent_value;
+                    local.best_variance = params.incumbent_variance;
+                    if params.accept != 0 {
+                        local.best = values[0];
+                        local.best_variance = trial_variances[0];
+                        best_slot = trial_slots[0];
+                        unsafe { *accepted.get_unchecked_mut(0) = 1 };
+                    }
+                    tell_relativehistory!(
+                        local,
+                        history_slots,
+                        outcomes,
+                        variances,
+                        destinations,
+                        params
+                    );
+                } else if params.paired != 0 {
+                    // Paired measurements choose promotion explicitly. FIFO observations
+                    // remain absolute rewards and never include the incumbent refresh.
+                    local.best = params.incumbent_value;
+                    local.best_variance = params.incumbent_variance;
+                    if params.accept != 0 {
+                        local.best = values[0];
+                        local.best_variance = trial_variances[0];
+                        best_slot = trial_slots[0];
+                        unsafe { *accepted.get_unchecked_mut(0) = 1 };
+                    }
+                    let destination = if local.history == params.capacity {
+                        let slots_ptr = history_slots.as_mut_ptr() as *const u32;
+                        let outcomes_ptr = outcomes.as_mut_ptr() as *const f32;
+                        let variances_ptr = variances.as_mut_ptr() as *const f32;
+                        let oldest = unsafe { slots_ptr.read() };
+                        let mut index = 1_u32;
+                        while index < local.history {
+                            unsafe {
+                                *history_slots.get_unchecked_mut((index - 1) as usize) =
+                                    slots_ptr.add(index as usize).read();
+                                *outcomes.get_unchecked_mut((index - 1) as usize) =
+                                    outcomes_ptr.add(index as usize).read();
+                                *variances.get_unchecked_mut((index - 1) as usize) =
+                                    variances_ptr.add(index as usize).read();
+                            }
+                            index += 1;
+                        }
+                        local.history -= 1;
+                        oldest
+                    } else {
+                        local.history + 1
+                    };
+                    let index = local.history as usize;
+                    unsafe {
+                        *destinations.get_unchecked_mut(0) = destination;
+                        *history_slots.get_unchecked_mut(index) = destination;
+                        *outcomes.get_unchecked_mut(index) = values[0];
+                        *variances.get_unchecked_mut(index) = trial_variances[0];
+                    }
+                    local.history += 1;
+                } else {
+                    best_slot = tell_history!(
+                        local,
+                        history_slots,
+                        outcomes,
+                        variances,
+                        trial_slots,
+                        destinations,
+                        values,
+                        trial_variances,
+                        accepted,
+                        params
+                    );
+                }
+                if params.correlated == 1 {
+                    if params.paired == 2 {
+                        bf16::paired_radius(
+                            &mut local,
+                            selected_radius,
+                            best_slot != u32::MAX,
+                            params.failure_tolerance,
+                            params.reject_is_failure != 0,
+                        );
+                    } else if best_slot != u32::MAX {
+                        local.length = f64::from(selected_radius);
+                    }
+                } else {
+                    restarted =
+                        tell_adapt!(local, values, history_slots, outcomes, variances, params);
+                }
                 local.status = 0;
                 unsafe { *state.get_unchecked_mut(0) = local };
                 unsafe {
@@ -2245,55 +2655,167 @@ pub mod trials {
                 }
             }
             unsafe {
-                CONTROL[0] = best_slot;
-                CONTROL[1] = restarted;
-                CONTROL[2] = status;
+                *best_source.get_unchecked_mut(0) = best_slot;
             }
         }
-        thread::sync_threads();
+    }
 
-        if unsafe { CONTROL[2] } != 0 {
+    #[kernel]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn copy_tellbf16(
+        mut rows: DisjointSlice<u16>,
+        trial_slots: &[u32],
+        destinations: &[u32],
+        summary: &[TellSummary],
+        best_source: &[u32],
+        params: TellParams,
+    ) {
+        if summary[0].status != 0 {
             return;
         }
-        let best_slot = unsafe { CONTROL[0] };
-        if best_slot != u32::MAX {
-            let source = best_slot as usize * params.row_stride as usize;
-            let rows_ptr = rows.as_mut_ptr() as *const u16;
-            let mut index = thread_index as u64;
-            while index < params.row_len {
-                let value = unsafe { rows_ptr.add(source + index as usize).read() };
+        let best_slot = best_source[0];
+        let rows_ptr = rows.as_mut_ptr() as *const u16;
+        let mut index =
+            u64::from(thread::blockIdx_x()) * u64::from(THREADS) + u64::from(thread::threadIdx_x());
+        let stride = u64::from(thread::gridDim_x()) * u64::from(THREADS);
+        // Each thread owns one coordinate across all rows. Preserve trial order
+        // when a small FIFO assigns the same history destination more than once.
+        while index < params.row_len {
+            if best_slot != u32::MAX {
+                let source = u64::from(best_slot) * params.row_stride + index;
+                let value = unsafe { rows_ptr.add(source as usize).read() };
                 unsafe { *rows.get_unchecked_mut(index as usize) = value };
-                index += u64::from(THREADS);
             }
+            let mut trial = 0;
+            while trial < params.trials {
+                let source = u64::from(trial_slots[trial as usize]) * params.row_stride + index;
+                let destination =
+                    u64::from(destinations[trial as usize]) * params.row_stride + index;
+                let value = unsafe { rows_ptr.add(source as usize).read() };
+                unsafe { *rows.get_unchecked_mut(destination as usize) = value };
+                trial += 1;
+            }
+            if summary[0].restarted != 0 {
+                let value = unsafe { rows_ptr.add(index as usize).read() };
+                unsafe { *rows.get_unchecked_mut((params.row_stride + index) as usize) = value };
+            }
+            index += stride;
+        }
+    }
+
+    #[kernel]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn reference_bf16(
+        mut reference: DisjointSlice<u16>,
+        mut partials: DisjointSlice<f32>,
+        reference_scales: &[f32],
+        leaves: &[Bf16Leaf],
+        tiles: &[DenseTile],
+        selection: &[Selection],
+        seeds: &[Seed],
+        accepted: &[u32],
+        summary: &[TellSummary],
+        initial_seed: u64,
+        initialize: u32,
+    ) {
+        static mut SUMS: SharedArray<f32, WARPS> = SharedArray::UNINIT;
+        if initialize == 0 && (summary[0].status != 0 || accepted[0] == 0) {
+            return;
+        }
+        let candidate = if initialize != 0 {
+            0
+        } else {
+            selection[0].index
+        };
+        let seed = if initialize != 0 {
+            initial_seed ^ 0xe703_7ed1_a0b4_28db
+        } else {
+            let seed = seeds[candidate as usize];
+            u64::from(seed.low) | (u64::from(seed.high) << 32)
+        };
+        let block = thread::blockIdx_x() as usize;
+        let tile = tiles[block];
+        let leaf = leaves[tile.leaf as usize];
+        let thread_index = thread::threadIdx_x();
+        let pointer = reference.as_mut_ptr() as *const u16;
+        let mut item = thread_index;
+        let mut sum = 0.0;
+        while item < tile.length {
+            let element = u64::from(tile.start + item);
+            let index = (leaf.offset + element) as usize;
+            let value = if initialize != 0 {
+                dense_normal(seed, leaf.key, element)
+            } else {
+                let noise = dense_normal(seed ^ 0x8ebc_6af0_9c88_c6e3, leaf.key, element);
+                correlated_value(
+                    bf16_decode(unsafe { pointer.add(index).read() }),
+                    reference_scales[tile.leaf as usize],
+                    noise,
+                    candidate,
+                )
+            };
+            let bits = bf16_encode(value);
+            let stored = bf16_decode(bits);
+            sum += stored * stored;
+            unsafe { *reference.get_unchecked_mut(index) = bits };
+            item += THREADS;
+        }
+        let sum = warp::reduce_sum_f32(sum);
+        if warp::lane_id() == 0 {
+            unsafe { SUMS[(thread_index / 32) as usize] = sum };
         }
         thread::sync_threads();
-
-        let mut trial = 0_u32;
-        while trial < params.trials {
-            let source = trial_slots[trial as usize] as usize * params.row_stride as usize;
-            let destinations_ptr = destinations.as_mut_ptr() as *const u32;
-            let destination = unsafe { destinations_ptr.add(trial as usize).read() } as usize
-                * params.row_stride as usize;
-            let rows_ptr = rows.as_mut_ptr() as *const u16;
-            let mut index = thread_index as u64;
-            while index < params.row_len {
-                let value = unsafe { rows_ptr.add(source + index as usize).read() };
-                unsafe { *rows.get_unchecked_mut(destination + index as usize) = value };
-                index += u64::from(THREADS);
+        if thread_index == 0 {
+            let mut total = 0.0;
+            let mut index = 0;
+            while index < WARPS {
+                total += unsafe { SUMS[index] };
+                index += 1;
             }
-            thread::sync_threads();
-            trial += 1;
+            unsafe { *partials.get_unchecked_mut(block) = total };
         }
+    }
 
-        if unsafe { CONTROL[1] } != 0 {
-            let destination = params.row_stride as usize;
-            let rows_ptr = rows.as_mut_ptr() as *const u16;
-            let mut index = thread_index as u64;
-            while index < params.row_len {
-                let value = unsafe { rows_ptr.add(index as usize).read() };
-                unsafe { *rows.get_unchecked_mut(destination + index as usize) = value };
-                index += u64::from(THREADS);
+    #[kernel]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn reference_rmsbf16(
+        partials: &[f32],
+        leaves: &[Bf16Leaf],
+        tile_offsets: &[u32],
+        mut scales: DisjointSlice<f32>,
+        accepted: &[u32],
+        summary: &[TellSummary],
+        initialize: u32,
+    ) {
+        static mut SUMS: SharedArray<f32, WARPS> = SharedArray::UNINIT;
+        if initialize == 0 && (summary[0].status != 0 || accepted[0] == 0) {
+            return;
+        }
+        let leaf = thread::blockIdx_x() as usize;
+        let thread_index = thread::threadIdx_x();
+        let mut tile = tile_offsets[leaf] + thread_index;
+        let mut sum = 0.0;
+        while tile < tile_offsets[leaf + 1] {
+            sum += partials[tile as usize];
+            tile += THREADS;
+        }
+        let sum = warp::reduce_sum_f32(sum);
+        if warp::lane_id() == 0 {
+            unsafe { SUMS[(thread_index / 32) as usize] = sum };
+        }
+        thread::sync_threads();
+        if thread_index == 0 {
+            let mut total = 0.0;
+            let mut index = 0;
+            while index < WARPS {
+                total += unsafe { SUMS[index] };
+                index += 1;
             }
+            let inverse_rms = (leaves[leaf].length as f32 / total).sqrt();
+            unsafe { *scales.get_unchecked_mut(leaf) = inverse_rms };
         }
     }
 

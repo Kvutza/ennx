@@ -1,0 +1,33 @@
+version = 1
+
+[eval]
+name = "optimizer-smoke"
+output = "artifacts/evals/optimizer-smoke.jsonl"
+budget = 16
+num_init = 8
+seeds = [123, 1009]
+
+[[eval.optimizers]]
+name = "turbo-enn"
+kind = "turbo_enn"
+neighbors = 8
+candidates = 128
+
+[[eval.optimizers]]
+name = "turbo-zero"
+kind = "turbo_zero"
+candidates = 128
+
+[[eval.tasks]]
+name = "sphere-8d"
+function = "sphere"
+dimensions = 8
+target = 1e-3
+
+[[eval.tasks]]
+name = "rastrigin-8d"
+function = "rastrigin"
+dimensions = 8
+lower = -5.12
+upper = 5.12
+target = 1.0

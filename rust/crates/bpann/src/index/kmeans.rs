@@ -20,7 +20,7 @@ pub fn kmeans_init(points: &[Vec<f32>], k: usize, rng: &mut impl Rng) -> Vec<Vec
             centroids.push(points[rng.gen_range(0..points.len())].clone());
             continue;
         }
-        let mut pick = rng.gen::<f32>() * sum;
+        let mut pick = rng.r#gen::<f32>() * sum;
         let mut chosen = 0;
         for (i, &d) in dists.iter().enumerate() {
             pick -= d;

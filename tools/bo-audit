@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Bounded diagnostics; does not change the configured training run.
+set -euo pipefail
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$repo_dir"
+if [ "$#" -ne 2 ]; then
+    echo 'Usage: bash tools/bo-audit RESOLVED_STUDY_TOML OUTPUT_ROOT' >&2
+    exit 2
+fi
+config_dir=$(CDPATH= cd -- "$(dirname -- "$1")" && pwd)
+config="$config_dir/$(basename -- "$1")"
+[ -f "$config" ] || { echo "Missing config: $config" >&2; exit 2; }
+mkdir -p -- "$2"
+artifact_root=$(CDPATH= cd -- "$2" && pwd)
+artifact_dir=$(mktemp -d "$artifact_root/run-XXXXXXXX")
+echo "Audit artifacts: $artifact_dir"
+shasum -a 256 "$config" \
+    rust/crates/ennx/src/bf16_metal.rs \
+    rust/crates/ennx/src/bf16_search.metal \
+    rust/crates/ennx/src/bf16_audit.rs \
+    rust/crates/ennx/src/fbt_moe.rs \
+    rust/crates/ennx/src/fbt_ablation.rs > "$artifact_dir/source.sha256"
+for test in history_audit selection_ablation pool_ablation distance_scaling_ablation; do
+    ./buck2w test //rust/crates/ennx:ennx-unit --local-only -j 1 -- \
+        --timeout 900 --test-arg=--ignored --test-arg=--nocapture \
+        --test-arg=--test-threads=1 --test-arg="$test" \
+        --env "ENNX_ABLATION_CONFIG=$config" \
+        --env "ENNX_ABLATION_OUTPUT=$artifact_dir/selection.jsonl" \
+        --env "ENNX_GEOMETRY_OUTPUT=$artifact_dir/geometry.jsonl" \
+        --env "ENNX_POOL_OUTPUT=$artifact_dir/pool.jsonl" \
+        --env "ENNX_SCALING_OUTPUT=$artifact_dir/distance-scaling.jsonl" \
+        2>&1 | tee "$artifact_dir/$test.log"
+done
+python3 scripts/bo_summary.py \
+    --selection "$artifact_dir/selection.jsonl" \
+    --geometry "$artifact_dir/geometry.jsonl" \
+    --same-pool "$artifact_dir/pool.jsonl" \
+    --distance-scaling "$artifact_dir/distance-scaling.jsonl" | tee "$artifact_dir/summary.json"

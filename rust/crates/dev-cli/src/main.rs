@@ -1,13 +1,17 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
+mod eval;
 mod tune;
-use tune::{parse_config, parse_knn, KnnTuneConfig, ProposalTuneConfig};
+use tune::{
+    ExperimentKind, KnnTuneConfig, ProposalTuneConfig, experiment_kind, is_pretrain, parse_config,
+    parse_knn,
+};
 
 const VERSION: &str = "0.2.0";
 #[derive(Debug, Parser)]
@@ -25,19 +29,15 @@ struct Cli {
 
 #[derive(Debug, PartialEq, Eq, Subcommand)]
 enum Action {
-    /// Run a configured experiment.
-    Tune {
-        #[command(subcommand)]
-        target: TuneTarget,
+    /// Evaluate optimizers on paired black-box tasks.
+    Eval {
+        config: PathBuf,
+        /// Override the artifact path declared in the configuration.
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
-}
-
-#[derive(Debug, PartialEq, Eq, Subcommand)]
-enum TuneTarget {
-    /// Run a KNN frontier experiment.
-    Knn { config: PathBuf },
-    /// Run a resident proposal experiment.
-    Proposal { config: PathBuf },
+    /// Run a configured experiment.
+    Tune { config: PathBuf },
 }
 
 fn main() -> ExitCode {
@@ -54,14 +54,83 @@ fn run() -> Result<(), String> {
     let cli = Cli::parse();
     let root = env::current_dir().map_err(|error| error.to_string())?;
     match cli.action {
-        Action::Tune {
-            target: TuneTarget::Knn { config },
-        } => tune_knn(&root, &config)?,
-        Action::Tune {
-            target: TuneTarget::Proposal { config },
-        } => tune_proposal(&root, &config)?,
+        Action::Eval { config, output } => eval::run(&root, &config, output.as_deref())?,
+        Action::Tune { config } => tune(&root, &config)?,
     }
     Ok(())
+}
+
+fn tune(root: &Path, path: &Path) -> Result<(), String> {
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("read config {}: {error}", path.display()))?;
+    match experiment_kind(&text)
+        .map_err(|error| format!("invalid config {}: {error}", path.display()))?
+    {
+        ExperimentKind::Knn => tune_knn(root, path),
+        ExperimentKind::Proposal => tune_proposal(root, path),
+        ExperimentKind::TurboEnn => {
+            let resolved;
+            let path = if is_pretrain(&text)
+                .map_err(|error| format!("invalid config {}: {error}", path.display()))?
+            {
+                resolved = resolve_pretrain(root, path)?;
+                resolved.as_path()
+            } else {
+                path
+            };
+            command(
+                root,
+                "./buck2w",
+                &[
+                    "run",
+                    "//rust/crates/ennx:turbo-enn",
+                    "--",
+                    path.to_str().ok_or("config path is not UTF-8")?,
+                ],
+            )
+        }
+    }
+}
+
+fn resolve_pretrain(root: &Path, path: &Path) -> Result<PathBuf, String> {
+    println!("Resolving the pretraining corpus...");
+    let output = Command::new("uv")
+        .current_dir(root)
+        .args([
+            "run",
+            "--frozen",
+            "--group",
+            "pretrain",
+            "python",
+            "-m",
+            "ops.pretrain",
+            "resolve",
+        ])
+        .arg(path)
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|error| format!("start uv: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "pretraining corpus resolution exited with {}",
+            output.status
+        ));
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|error| format!("pretraining resolver output was not UTF-8: {error}"))?;
+    let resolved = stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .next_back()
+        .ok_or("pretraining resolver did not return a study path")?;
+    let resolved = PathBuf::from(resolved);
+    if !resolved.is_file() {
+        return Err(format!(
+            "pretraining resolver returned missing study {}",
+            resolved.display()
+        ));
+    }
+    Ok(resolved)
 }
 
 fn tune_knn(root: &Path, path: &Path) -> Result<(), String> {

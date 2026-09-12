@@ -176,10 +176,18 @@ fn run() -> Result<(), String> {
     println!("# objective_read_median_s={objective_read_median:.9}");
     println!("# evaluation_median_s={evaluation_median:.9}");
     println!("# update_median_s={update_median:.9}");
-    println!("# transfer_bytes_note=counts benchmark-owned input payloads and scalar evaluation-result readback; it does not include device-driver staging, allocator fragments, or resident row bytes that stay on device");
-    println!("# host_allocations_note=counts explicit benchmark-side vector allocations; it does not include internal device buffer growth");
-    println!("# sync_points_note=counts the proposal, materialize, objective-read, and update stage waits observed by the benchmark");
-    println!("round,proposal_s,materialize_s,objective_read_s,evaluation_s,update_s,full_cycle_s,transfer_bytes,host_allocations,sync_points,index,seed,trial_score,reward,accept");
+    println!(
+        "# transfer_bytes_note=counts benchmark-owned input payloads and scalar evaluation-result readback; it does not include device-driver staging, allocator fragments, or resident row bytes that stay on device"
+    );
+    println!(
+        "# host_allocations_note=counts explicit benchmark-side vector allocations; it does not include internal device buffer growth"
+    );
+    println!(
+        "# sync_points_note=counts the proposal, materialize, objective-read, and update stage waits observed by the benchmark"
+    );
+    println!(
+        "round,proposal_s,materialize_s,objective_read_s,evaluation_s,update_s,full_cycle_s,transfer_bytes,host_allocations,sync_points,index,seed,trial_score,reward,accept"
+    );
     for sample in samples {
         let full_cycle_s = sample.proposal_s
             + sample.materialize_s

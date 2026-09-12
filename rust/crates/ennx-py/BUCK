@@ -12,7 +12,7 @@ app_rust_library(
     crate = "ennx_rust",
     crate_root = "src/lib.rs",
     dlopen_enable = True,
-    edition = "2021",
+    edition = "2024",
     features = ["default", "usearch-native"] + select({
         "//:linux-arm64": ["opencl"],
         "//:linux-x86_64": ["opencl"],
@@ -37,7 +37,7 @@ app_rust_library(
         "//rust:pyo3",
         "//rust:rand",
     ] + select({
-        "//:macos-arm64": ["//buck2/native:openmp-macos"],
+        "//:macos-arm64": ["//buck2/native:openmp-macos", "//rust:metal"],
         "DEFAULT": [],
     }),
 )

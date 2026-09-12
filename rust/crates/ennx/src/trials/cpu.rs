@@ -1,4 +1,4 @@
-use super::{decode_code, make_steps, Ask, Center, LeafStep, Parameter, SparseEdit};
+use super::{Ask, Center, LeafStep, Parameter, SparseEdit, decode_code, make_steps};
 use super::{sparse, tree};
 use crate::util::insert_neighbor;
 use crate::weights::AcquisitionKind;
@@ -32,7 +32,7 @@ impl Cpu {
         let steps = make_steps(leaves, config.length);
         let base = self.read(base_slot).to_vec();
         let draws = if config.acquisition == AcquisitionKind::Thompson {
-            crate::weights::thompson_history_draws(history, config.seed)
+            crate::weights::history_draws(history, config.seed)
         } else {
             Vec::new()
         };

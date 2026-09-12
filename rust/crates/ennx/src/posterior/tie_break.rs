@@ -222,8 +222,8 @@ pub(crate) fn finalize_topk(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_cutoff, faiss_escalation, faiss_resolution, finalize_topk, resolve_cutoff, row_check,
-        tie_overflow, topk_buffers, topk_dists, try_pool, FaissPoolFinalizeCtx, PoolTieScratch,
+        FaissPoolFinalizeCtx, PoolTieScratch, apply_cutoff, faiss_escalation, faiss_resolution,
+        finalize_topk, resolve_cutoff, row_check, tie_overflow, topk_buffers, topk_dists, try_pool,
     };
     use crate::index::IndexDriver;
     use crate::model::ENN;

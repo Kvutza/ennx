@@ -559,8 +559,8 @@ impl MultiTrustRegionState {
 mod tests {
     use super::*;
     use ndarray::array;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn test_001() {
@@ -709,9 +709,10 @@ mod tests {
         let centers = array![[0.5], [0.5]];
         let mut tr = MultiTrustRegionState::new(1, cfg, Some(&centers.view()), &mut rng).unwrap();
 
-        assert!(tr
-            .tell_update(&array![[0.5]].view(), &array![3.0].view())
-            .is_err());
+        assert!(
+            tr.tell_update(&array![[0.5]].view(), &array![3.0].view())
+                .is_err()
+        );
         tr.tell(&array![[0.5]].view(), &array![3.0].view(), Some(&[1]))
             .unwrap();
         assert_eq!(tr.incumbents_y[0], f64::NEG_INFINITY);

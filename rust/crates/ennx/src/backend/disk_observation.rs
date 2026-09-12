@@ -478,11 +478,13 @@ mod behavior_tests {
         .unwrap();
         crate::backend::disk_observation::check_backend(dir.path(), "bpann_disk").unwrap();
         crate::backend::disk_observation::check_dims(4, 1).unwrap();
-        assert!(crate::backend::disk_observation::check_dims(
-            crate::backend::disk_observation::MAX_DIM + 1,
-            1
-        )
-        .is_err());
+        assert!(
+            crate::backend::disk_observation::check_dims(
+                crate::backend::disk_observation::MAX_DIM + 1,
+                1
+            )
+            .is_err()
+        );
         assert_eq!(
             crate::backend::disk_observation::load_rows(dir.path()),
             Some(0)

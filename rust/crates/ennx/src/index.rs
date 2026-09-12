@@ -491,8 +491,8 @@ impl ENNIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::array;
     use ndarray::Array2;
+    use ndarray::array;
 
     fn index_unit(train_x: Array2<f64>, driver: IndexDriver) -> ENNIndex {
         let x_scale = array![1.0, 1.0];

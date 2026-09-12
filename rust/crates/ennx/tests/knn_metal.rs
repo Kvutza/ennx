@@ -1,8 +1,8 @@
 #![cfg(all(target_os = "macos", feature = "metal"))]
 
-use ennx::experimental::{KnnIndex, KnnPlan};
 use ennx::IndexDriver;
-use ndarray::{array, Array2};
+use ennx::experimental::{KnnIndex, KnnPlan};
+use ndarray::{Array2, array};
 
 fn metal_unavailable(error: &str) -> bool {
     error.contains("no default Metal device found")

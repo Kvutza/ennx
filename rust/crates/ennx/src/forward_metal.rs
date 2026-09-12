@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use metal::{Buffer, ComputePipelineState};
 
-use crate::apple_gpu::{thread_group, Runtime};
+use crate::apple_gpu::{Runtime, thread_group};
 use crate::forward_program::{KdaControlRequest, KdaMoeLayerRequest, KdaPackedLinear};
 use crate::trials::{Search, Trial};
 use crate::weights::ComputeDevice;

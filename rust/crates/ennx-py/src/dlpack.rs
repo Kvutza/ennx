@@ -1,6 +1,6 @@
 use std::ffi::{c_char, c_void};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use pyo3::exceptions::{PyBufferError, PyTypeError, PyValueError};
 use pyo3::ffi;
@@ -93,6 +93,12 @@ impl Input {
     }
 
     fn read(source: &Bound<'_, PyAny>, code: u8, bits: u8, name: &str) -> PyResult<Self> {
+        let device: (i32, i32) = source.call_method0("__dlpack_device__")?.extract()?;
+        if device != (CUDA, 0) {
+            return Err(PyValueError::new_err(format!(
+                "{name} input requires CUDA device 0"
+            )));
+        }
         let kwargs = PyDict::new(source.py());
         kwargs.set_item("stream", 1_u64)?;
         kwargs.set_item("max_version", (1_u32, 3_u32))?;
@@ -265,11 +271,10 @@ unsafe extern "C" fn release_legacy(managed: *mut Managed) {
     }
     let context = unsafe { (*managed).context.cast::<LegacyOwner>() };
     if !context.is_null() {
-        Python::attach(|_| {
-            let owner = unsafe { Box::from_raw(context) };
-            owner.lease.release();
-            drop(owner);
-        });
+        let owner = unsafe { Box::from_raw(context) };
+        owner.lease.release();
+        // Py<T> queues decrefs off-GIL; CUDA cleanup must not wait for the GIL.
+        drop(owner);
     }
 }
 
@@ -279,11 +284,9 @@ unsafe extern "C" fn release_versioned(managed: *mut ManagedV1) {
     }
     let context = unsafe { (*managed).context.cast::<VersionOwner>() };
     if !context.is_null() {
-        Python::attach(|_| {
-            let owner = unsafe { Box::from_raw(context) };
-            owner.lease.release();
-            drop(owner);
-        });
+        let owner = unsafe { Box::from_raw(context) };
+        owner.lease.release();
+        drop(owner);
     }
 }
 

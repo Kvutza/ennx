@@ -1,8 +1,8 @@
 //! Golden tests for mathy paths listed in `weak_tests.md` (integration crate tests).
 
 use ennx::{
-    conditional_internals, ENNParams, IndexDriver, ParetoAcquisition, PosteriorComputation,
-    PosteriorFlags, ENN,
+    ENN, ENNParams, IndexDriver, ParetoAcquisition, PosteriorComputation, PosteriorFlags,
+    conditional_internals,
 };
 use ndarray::array;
 use rand::SeedableRng;

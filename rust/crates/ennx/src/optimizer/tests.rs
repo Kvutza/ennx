@@ -1,10 +1,10 @@
 use super::{Optimizer, Telemetry};
-use crate::config::{lhd_only, turbo_zero, ConfigOverrides};
+use crate::config::{ConfigOverrides, lhd_only, turbo_zero};
 use crate::error::ENNError;
 use crate::optimizer_factory::{create_overrides, enn_overrides, lhd_overrides};
 use ndarray::array;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 #[test]
 fn test_optimizercreation() {

@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn range_leaf() {
-        use crate::index::search::{score_page, MmapSearchStore};
+        use crate::index::search::{MmapSearchStore, score_page};
         let (dir, store, scale, _) = ctx_rows(128);
         let mmap_store = MmapSearchStore {
             train_x: &store,

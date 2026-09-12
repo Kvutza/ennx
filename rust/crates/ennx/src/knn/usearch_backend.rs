@@ -50,8 +50,8 @@ fn rerank(
 
 #[cfg(feature = "usearch")]
 mod binding {
-    use super::{usearch_error, IndexError};
-    use usearch::{new_index, Index, IndexOptions, MetricKind, ScalarKind};
+    use super::{IndexError, usearch_error};
+    use usearch::{Index, IndexOptions, MetricKind, ScalarKind, new_index};
 
     pub(super) struct BackendIndex {
         index: Index,
@@ -110,13 +110,13 @@ mod binding {
 
 #[cfg(feature = "usearch-native")]
 mod binding {
-    use super::{usearch_error, IndexError};
-    use std::ffi::{c_char, c_void, CStr};
+    use super::{IndexError, usearch_error};
+    use std::ffi::{CStr, c_char, c_void};
     use std::ptr;
 
     const ERROR_LEN: usize = 512;
 
-    extern "C" {
+    unsafe extern "C" {
         #[link_name = "ennx_usearch_new"]
         fn ennx_new(num_dim: usize, error: *mut c_char, error_capacity: usize) -> *mut c_void;
         #[link_name = "ennx_usearch_destroy"]

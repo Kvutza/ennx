@@ -7,8 +7,8 @@ use numpy::{
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Python wrapper for standardize_y
 #[pyfunction(name = "standardize_y")]

@@ -1,6 +1,6 @@
 //! Trust region implementations for TuRBO optimizer.
 
-use ndarray::{s, Array1, ArrayView1};
+use ndarray::{Array1, ArrayView1, s};
 use thiserror::Error;
 
 /// Errors that can occur in trust region operations.
@@ -12,6 +12,14 @@ pub enum TrustRegionError {
     /// Invalid state for operation.
     #[error("Invalid state: {0}")]
     InvalidState(String),
+}
+
+/// Evidence supplied by an objective evaluation about the local model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustRegionOutcome {
+    Success,
+    Failure,
+    Inconclusive,
 }
 
 /// Configuration for trust region length parameters.
@@ -77,6 +85,7 @@ pub struct TurboTrustRegion {
     hist_ymax: f64,
     /// Optional effective dimension for failure tolerance (defaults to num_dim).
     failure_tolerance_dim: Option<f64>,
+    failure_tolerance_override: Option<i32>,
 }
 
 impl TurboTrustRegion {
@@ -96,6 +105,7 @@ impl TurboTrustRegion {
             hist_ymin: f64::INFINITY,
             hist_ymax: f64::NEG_INFINITY,
             failure_tolerance_dim: None,
+            failure_tolerance_override: None,
         }
     }
 
@@ -126,8 +136,27 @@ impl TurboTrustRegion {
         self.compute_tolerance();
     }
 
+    /// Use an explicit failure budget, independent of dimension and batch size.
+    pub fn set_failure_tolerance(&mut self, failures: usize) -> Result<(), TrustRegionError> {
+        let failures = i32::try_from(failures)
+            .ok()
+            .filter(|&value| value > 0)
+            .ok_or_else(|| {
+                TrustRegionError::InvalidParameter(
+                    "failure tolerance must be in 1..=i32::MAX".into(),
+                )
+            })?;
+        self.failure_tolerance_override = Some(failures);
+        self.compute_tolerance();
+        Ok(())
+    }
+
     /// Compute failure tolerance based on num_arms and num_dim.
     fn compute_tolerance(&mut self) {
+        if let Some(failures) = self.failure_tolerance_override {
+            self.failure_tolerance = Some(failures);
+            return;
+        }
         if let Some(num_arms) = self.num_arms {
             let eff_dim = self.failure_tolerance_dim.unwrap_or(self.num_dim as f64);
             let tolerance = ((4.0 / num_arms as f64).max(eff_dim / num_arms as f64)).ceil() as i32;
@@ -138,6 +167,26 @@ impl TurboTrustRegion {
     /// Get current trust region length.
     pub fn length(&self) -> f64 {
         self.length
+    }
+
+    /// Consecutive improvements required before the region expands.
+    pub fn success_tolerance(&self) -> i32 {
+        self.success_tolerance
+    }
+
+    /// Consecutive non-improvements required before the region contracts.
+    pub fn failure_tolerance(&self) -> i32 {
+        self.failure_tolerance.unwrap_or(4)
+    }
+
+    /// Current consecutive-improvement count.
+    pub fn success_counter(&self) -> i32 {
+        self.success_counter
+    }
+
+    /// Current consecutive-non-improvement count.
+    pub fn failure_counter(&self) -> i32 {
+        self.failure_counter
     }
 
     /// Observation count at last trust-region update.
@@ -379,6 +428,65 @@ impl TurboTrustRegion {
         Ok(())
     }
 
+    /// Update from an explicit model-agreement outcome.
+    ///
+    /// Unlike [`Self::update_batch`], an inconclusive noisy observation neither
+    /// expands nor contracts the region and preserves accumulated evidence.
+    pub fn update_outcome(
+        &mut self,
+        y_new: &ArrayView1<f64>,
+        num_obs: usize,
+        y_incumbent_value: f64,
+        outcome: TrustRegionOutcome,
+    ) -> Result<(), TrustRegionError> {
+        if y_new.is_empty() {
+            return Ok(());
+        }
+        let n = self.prev_obs + y_new.len();
+        if num_obs != n {
+            return Err(TrustRegionError::InvalidParameter(format!(
+                "num_obs {} must equal prev_obs {} + y_new.len() {}",
+                num_obs,
+                self.prev_obs,
+                y_new.len()
+            )));
+        }
+        if !y_incumbent_value.is_finite() {
+            return Err(TrustRegionError::InvalidParameter(
+                "incumbent value must be finite".into(),
+            ));
+        }
+
+        match outcome {
+            TrustRegionOutcome::Success => {
+                self.success_counter += 1;
+                self.failure_counter = 0;
+            }
+            TrustRegionOutcome::Failure => {
+                self.failure_counter += 1;
+                self.success_counter = 0;
+            }
+            TrustRegionOutcome::Inconclusive => {}
+        }
+
+        if self.success_counter >= self.success_tolerance {
+            self.length = (self.length * 2.0).min(self.config.length_max);
+            self.success_counter = 0;
+        } else if self.failure_counter >= self.failure_tolerance() {
+            self.length *= 0.5;
+            self.failure_counter = 0;
+        }
+
+        self.best_value = if self.best_value.is_finite() {
+            self.best_value.max(y_incumbent_value)
+        } else {
+            y_incumbent_value
+        };
+        self.incorporate_hist(y_new);
+        self.prev_obs = n;
+        Ok(())
+    }
+
     /// Compute trust region bounds in 1D.
     ///
     /// Returns (lower_bounds, upper_bounds) for each dimension.
@@ -531,6 +639,97 @@ mod tests {
 
         tr.set_arms(8);
         assert_eq!(tr.failure_tolerance, Some(2));
+    }
+
+    #[test]
+    fn explicit_tolerance_with_negative_rewards() {
+        let mut tr = TurboTrustRegion::new(1_065_494_016, TRLengthConfig::new(0.01, 0.0001, 0.1));
+        tr.set_arms(1);
+        assert_eq!(tr.failure_tolerance(), 1_065_494_016);
+        tr.set_failure_tolerance(4).unwrap();
+        tr.set_dim(1_065_494_016.0);
+        tr.set_arms(8);
+        assert_eq!(tr.failure_tolerance(), 4);
+        assert!(tr.set_failure_tolerance(0).is_err());
+        assert!(tr.set_failure_tolerance(i32::MAX as usize + 1).is_err());
+        assert_eq!(tr.failure_tolerance(), 4);
+
+        let mut values = vec![-12.0];
+        tr.update(&ArrayView1::from(&values), values.len()).unwrap();
+        for value in [-11.0, -10.0, -9.0] {
+            values.push(value);
+            tr.update(&ArrayView1::from(&values), values.len()).unwrap();
+        }
+        assert_eq!(tr.length(), 0.02);
+        for failures in 1..=4 {
+            values.push(-13.0);
+            tr.update(&ArrayView1::from(&values), values.len()).unwrap();
+            assert_eq!(tr.length(), if failures < 4 { 0.02 } else { 0.01 });
+        }
+        tr.restart();
+        assert_eq!(tr.failure_tolerance(), 4);
+        assert_eq!(tr.length(), 0.01);
+    }
+
+    #[test]
+    fn explicit_outcomes_preserve_inconclusive_evidence() {
+        let mut tr = TurboTrustRegion::new(1_065_494_016, TRLengthConfig::new(0.01, 0.0001, 0.1));
+        tr.set_failure_tolerance(4).unwrap();
+
+        tr.update_outcome(
+            &array![-12.0].view(),
+            1,
+            -12.0,
+            TrustRegionOutcome::Inconclusive,
+        )
+        .unwrap();
+        for (observation, value) in [(2, -11.0), (3, -10.0)] {
+            tr.update_outcome(
+                &array![value].view(),
+                observation,
+                value,
+                TrustRegionOutcome::Success,
+            )
+            .unwrap();
+        }
+        assert_eq!(tr.success_counter, 2);
+        assert_eq!(tr.length(), 0.01);
+
+        tr.update_outcome(
+            &array![-10.0].view(),
+            4,
+            -10.0,
+            TrustRegionOutcome::Inconclusive,
+        )
+        .unwrap();
+        assert_eq!(tr.success_counter, 2);
+        assert_eq!(tr.failure_counter, 0);
+        assert_eq!(tr.length(), 0.01);
+
+        tr.update_outcome(&array![-9.0].view(), 5, -9.0, TrustRegionOutcome::Success)
+            .unwrap();
+        assert_eq!(tr.length(), 0.02);
+
+        for (observation, value) in [(6, -13.0), (8, -13.0), (10, -13.0), (12, -13.0)] {
+            tr.update_outcome(
+                &array![value].view(),
+                observation,
+                -9.0,
+                TrustRegionOutcome::Failure,
+            )
+            .unwrap();
+            if observation < 12 {
+                tr.update_outcome(
+                    &array![-9.0].view(),
+                    observation + 1,
+                    -9.0,
+                    TrustRegionOutcome::Inconclusive,
+                )
+                .unwrap();
+            }
+        }
+        assert_eq!(tr.length(), 0.01);
+        assert_eq!(tr.failure_counter, 0);
     }
 
     #[test]

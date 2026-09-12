@@ -112,8 +112,8 @@ impl ENN {
 
 #[cfg(test)]
 mod access_tests {
-    use crate::IndexDriver;
     use crate::ENN;
+    use crate::IndexDriver;
     use ndarray::array;
 
     #[test]

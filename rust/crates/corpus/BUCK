@@ -1,0 +1,33 @@
+load("//buck2:reindeer_rules.bzl", "app_rust_binary")
+
+_DEPS = [
+    "//rust:arrow-array",
+    "//rust:futures",
+    "//rust:opendal",
+    "//rust:parquet",
+    "//rust:parquet_opendal",
+    "//rust:serde",
+    "//rust:serde_json",
+    "//rust:sha2",
+    "//rust:tokio",
+]
+
+app_rust_binary(
+    name = "corpus",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "ennx_corpus",
+    crate_root = "src/main.rs",
+    edition = "2024",
+    deps = _DEPS,
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "corpus-test",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "ennx_corpus_test",
+    crate_root = "src/main.rs",
+    edition = "2024",
+    deps = _DEPS,
+    visibility = ["PUBLIC"],
+)

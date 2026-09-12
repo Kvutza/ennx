@@ -5,8 +5,16 @@ app_rust_binary(
     srcs = glob(["src/**/*.rs"]),
     crate = "dev_cli",
     crate_root = "src/main.rs",
-    edition = "2021",
-    deps = ["//rust:clap", "//rust:serde", "//rust:toml"],
+    edition = "2024",
+    deps = [
+        "//rust:clap",
+        "//rust/crates/ennx:ennx",
+        "//rust:ndarray",
+        "//rust:rand",
+        "//rust:serde",
+        "//rust:serde_json",
+        "//rust:toml",
+    ],
     visibility = ["PUBLIC"],
 )
 
@@ -15,7 +23,15 @@ rust_test(
     srcs = glob(["src/**/*.rs"]),
     crate = "dev_cli_test",
     crate_root = "src/main.rs",
-    edition = "2021",
-    deps = ["//rust:clap", "//rust:serde", "//rust:toml"],
+    edition = "2024",
+    deps = [
+        "//rust:clap",
+        "//rust/crates/ennx:ennx",
+        "//rust:ndarray",
+        "//rust:rand",
+        "//rust:serde",
+        "//rust:serde_json",
+        "//rust:toml",
+    ],
     visibility = ["//buck2/tests:all"],
 )

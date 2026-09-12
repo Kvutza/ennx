@@ -1,5 +1,5 @@
-use super::{check_count, tree, trial_id, Center, Pending, Search, Trial};
-use crate::trials::{cpu, Ask};
+use super::{Center, Pending, Search, Trial, check_count, tree, trial_id};
+use crate::trials::{Ask, cpu};
 
 impl Search {
     pub fn ask_stream(

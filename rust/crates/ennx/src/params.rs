@@ -191,7 +191,7 @@ impl ENNNormal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::{array, ArrayD, IxDyn};
+    use ndarray::{ArrayD, IxDyn, array};
 
     #[test]
     fn test_ennparamsvalid() {

@@ -82,7 +82,7 @@ fn thompson_repeat() {
 }
 
 #[test]
-fn thompson_posterior_noise() {
+fn posterior_noise() {
     let draws = thompson_draws(4, 7);
     let posterior = crate::hash::normal_hash(&[7], &[0, 1, 2, 3], 1).unwrap();
     assert_eq!(
@@ -91,10 +91,7 @@ fn thompson_posterior_noise() {
     );
     assert_eq!(draws, thompson_draws(8, 7)[..4]);
     let history = [(3, 0.0), (1, 0.0), (0, 0.0)];
-    assert_eq!(
-        thompson_history_draws(&history, 7),
-        [draws[3], draws[1], draws[0]]
-    );
+    assert_eq!(history_draws(&history, 7), [draws[3], draws[1], draws[0]]);
 }
 
 fn thompson_config() -> WeightSelectConfig {
@@ -111,7 +108,7 @@ fn thompson_config() -> WeightSelectConfig {
 }
 
 #[test]
-fn thompson_candidate_order_and_batches() {
+fn order_batches() {
     let observations = [0u8, 7, 15, 20];
     let outcomes = [0.0, 0.1, -0.2, 0.3];
     let candidates = [1u8, 6, 12];
@@ -147,7 +144,7 @@ fn thompson_candidate_order_and_batches() {
 }
 
 #[test]
-fn thompson_shared_neighbor_covariance() {
+fn covariance() {
     let config = thompson_config();
     let outcomes = [0.0; 4];
     let mut means = [0.0f64; 3];
@@ -187,7 +184,7 @@ fn thompson_shared_neighbor_covariance() {
 }
 
 #[test]
-fn thompson_draw_normalization_handles_small_weights() {
+fn weight_norm() {
     let config = WeightSelectConfig {
         epistemic_scale: 1.0,
         aleatoric_scale: 0.0,
@@ -268,7 +265,7 @@ fn metal_match() {
 }
 
 #[cfg(any(all(target_os = "macos", feature = "metal"), feature = "opencl"))]
-fn gpu_posterior_matches_reference(device: ComputeDevice) -> Result<(), String> {
+fn posterior_parity(device: ComputeDevice) -> Result<(), String> {
     const OBSERVATIONS: [u8; 4] = [15, 0, 9, 4];
     const OUTCOMES: [f32; 4] = [2.0, -1.0, 0.5, 4.0];
 
@@ -391,8 +388,8 @@ fn gpu_posterior_matches_reference(device: ComputeDevice) -> Result<(), String> 
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[test]
-fn metal_materialized_posterior_is_observation_indexed() {
-    match gpu_posterior_matches_reference(ComputeDevice::Metal) {
+fn metal_ids() {
+    match posterior_parity(ComputeDevice::Metal) {
         Ok(()) => {}
         Err(error) if metal_unavailable4(&error) => {
             eprintln!("skipping Metal posterior test: {error}")
@@ -403,8 +400,8 @@ fn metal_materialized_posterior_is_observation_indexed() {
 
 #[cfg(feature = "opencl")]
 #[test]
-fn opencl_materialized_posterior_is_observation_indexed() {
-    match gpu_posterior_matches_reference(ComputeDevice::OpenCl) {
+fn opencl_ids() {
+    match posterior_parity(ComputeDevice::OpenCl) {
         Ok(()) => {}
         Err(error)
             if error.contains("no OpenCL GPU or CPU device found")

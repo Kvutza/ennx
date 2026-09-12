@@ -221,7 +221,7 @@ pub fn sobol_indices(x: &ArrayView2<f64>, y: &ArrayView1<f64>) -> Array1<f64> {
             let bin_y: Vec<f64> = bin_mask
                 .iter()
                 .enumerate()
-                .filter(|(_, &m)| m)
+                .filter(|&(_, &m)| m)
                 .map(|(i, _)| y[i])
                 .collect();
 

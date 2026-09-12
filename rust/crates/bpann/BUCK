@@ -11,7 +11,7 @@ app_rust_library(
     srcs = glob(["src/**/*.rs"]),
     crate = "bpann",
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2024",
     visibility = ["PUBLIC"],
     deps = [
         "//rust:memmap2",
@@ -29,7 +29,7 @@ rust_test(
     srcs = glob(["src/**/*.rs"]),
     crate = "bpann",
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2024",
     visibility = ["//buck2/tests:all"],
     deps = [
         "//rust:memmap2",

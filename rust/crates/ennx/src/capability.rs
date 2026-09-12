@@ -109,7 +109,7 @@ pub fn matrix() -> Vec<Capability> {
 
 #[cfg(test)]
 mod tests {
-    use super::{matrix, support, Backend, Operation, Support, BACKENDS, OPS};
+    use super::{BACKENDS, Backend, OPS, Operation, Support, matrix, support};
 
     #[test]
     fn complete() {

@@ -10,18 +10,15 @@ pub mod parallel;
 pub mod smnsrch;
 pub mod tuning;
 
-pub use backend::{soft_build, soft_publish, BpannBackend, PAPER_URL, PENDING_HARD, PENDING_SOFT};
+pub use backend::{BpannBackend, PAPER_URL, PENDING_HARD, PENDING_SOFT, soft_build, soft_publish};
 pub use error::BpannError;
 pub use index::{BpannIndex, IncrementalIndex};
-pub use lgnsrch::{search_pending, SearchPendingArgs};
+pub use lgnsrch::{SearchPendingArgs, search_pending};
 pub use observation::{MAX_DIM, MAX_STRIDE};
-pub use smnsrch::{
-    load_or_build_small_n_cache, score_queries_flat, topk_flat_sq_l2, OrderedF32, ScoreQueriesFlat,
-    N_LIMIT,
-};
+pub use smnsrch::{N_LIMIT, OrderedF32, ScoreQueriesFlat, resident_cache, score_queries, topk_l2};
 pub use tuning::{
-    clear_provider, current_tuning, set_provider, BpannTuning, EXHAUSTIVE_LIMIT, INDEX_MIN,
-    SKIP_LIMIT, STRUCTURED_LIMIT,
+    BpannTuning, EXHAUSTIVE_LIMIT, INDEX_MIN, SKIP_LIMIT, STRUCTURED_LIMIT, clear_provider,
+    current_tuning, set_provider,
 };
 
 #[cfg(test)]
@@ -29,7 +26,7 @@ mod acceptance_tests {
     use super::*;
     use crate::distance::sq_l2;
     use crate::index::bpann_k;
-    use ndarray::{array, Array1, Array2};
+    use ndarray::{Array1, Array2, array};
     use rand::Rng;
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
@@ -45,15 +42,15 @@ mod acceptance_tests {
 
     fn synthetic_train(n: usize, d: usize, seed: u64) -> (Array2<f64>, Array2<f64>) {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let x: Array2<f64> = Array2::from_shape_fn((n, d), |_| rng.gen::<f64>());
-        let y: Array2<f64> = Array2::from_shape_fn((n, 1), |_| rng.gen::<f64>());
+        let x: Array2<f64> = Array2::from_shape_fn((n, d), |_| rng.r#gen::<f64>());
+        let y: Array2<f64> = Array2::from_shape_fn((n, 1), |_| rng.r#gen::<f64>());
         (x, y)
     }
 
     fn synthetic_f32(n: usize, d: usize, seed: u64) -> Vec<Vec<f32>> {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         (0..n)
-            .map(|_| (0..d).map(|_| rng.gen::<f32>()).collect())
+            .map(|_| (0..d).map(|_| rng.r#gen::<f32>()).collect())
             .collect()
     }
 

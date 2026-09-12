@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::error::BpannError;
 use crate::index::build::IndexHeader;
-use crate::index::page::{write_index, Page};
+use crate::index::page::{Page, write_index};
 
 #[cfg(test)]
 thread_local! {
@@ -114,8 +114,8 @@ pub(crate) fn persist_files(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::build::BpannIndex;
     use crate::index::LEAF_CAPACITY;
+    use crate::index::build::BpannIndex;
     use tempfile::TempDir;
 
     #[test]

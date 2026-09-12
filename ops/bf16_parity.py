@@ -3,6 +3,7 @@
 import gc
 import math
 import struct
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -106,6 +107,177 @@ def cpu_values(base, leaves, terms):
     return output
 
 
+def cpu_seedvalues(base, leaves, seed, radius):
+    output = list(base)
+    for key, offset, length, scale in leaves:
+        step = f32(f32(scale) * f32(radius))
+        for local in range(length):
+            delta = f32(step * sign(seed, key, local))
+            output[offset + local] = encode(f32(decode(base[offset + local]) + delta))
+    return output
+
+
+def check_descriptions(proposals, batch, base_bits, leaves, radius):
+    descriptions = proposals.describe()
+    assert len(descriptions) == proposals.arms
+    actual = np.array(
+        jax.device_get(jax.lax.bitcast_convert_type(batch, jnp.uint16)), copy=True
+    )
+    assert actual.shape == (proposals.arms, len(base_bits))
+    for arm, (seed, score, observed_radius, changes) in enumerate(descriptions):
+        assert 0 <= seed <= MASK64
+        assert math.isfinite(score)
+        assert observed_radius == f32(radius)
+        expected = cpu_seedvalues(base_bits, leaves, seed, radius)
+        np.testing.assert_array_equal(actual[arm], expected)
+        assert len(changes) == len(leaves)
+        for (_, offset, length, _), (changed, squared) in zip(leaves, changes):
+            count = 0
+            squared_sum = 0.0
+            for index in range(offset, offset + length):
+                count += expected[index] != base_bits[index]
+                delta = f32(decode(expected[index]) - decode(base_bits[index]))
+                squared_sum = f32(squared_sum + f32(delta * delta))
+            assert changed == count
+            # GPU tile reductions may add the FP32 squares in a different order.
+            np.testing.assert_allclose(squared, squared_sum, rtol=3.0e-6, atol=0.0)
+    return actual
+
+
+def check_singlesearch():
+    leaves = [
+        (17, 0, 257, 2.0**-20),
+        (19, 257, 516, 2.0**-7),
+        (23, 773, 257, 0.25),
+    ]
+    # Even/odd mantissas of both signs exercise ties in both directions.
+    base_bits = [0x3FC0, 0x3FC1, 0xBFC0, 0xBFC1] * 258
+    base_bits = base_bits[:1030]
+    base = jax.device_put(jnp.array(base_bits, dtype=jnp.uint16)).view(jnp.bfloat16)
+    search = turbo_enn(
+        base,
+        -0.75,
+        [ParamBlock(*leaf) for leaf in leaves],
+        8,
+        length_init=0.5,
+        failure_tolerance=2,
+    )
+    initial = search.read_best()
+    assert initial.dtype == np.uint16
+    np.testing.assert_array_equal(initial, base_bits)
+    proposals = search.ask(1, 4, 1, 0x123456789ABCDEF0)
+    assert proposals.arms == 1
+    batch = jax.dlpack.from_dlpack(proposals)
+    batch.block_until_ready()
+    assert batch.dtype == jnp.bfloat16
+    accepted = check_descriptions(proposals, batch, base_bits, leaves, 0.5)[0].copy()
+    np.testing.assert_array_equal(accepted[:257], base_bits[:257])
+    assert np.any(accepted[257:773] != np.asarray(base_bits[257:773]))
+    assert np.all((accepted[257:773] & 1) == 0)
+    assert np.all(accepted[773:] != np.asarray(base_bits[773:]))
+
+    # Keep an alias alive after releasing the original single-row export.
+    alias = batch
+    del batch
+    gc.collect()
+    for operation in (
+        partial(search.tell, proposals, [1.0]),
+        partial(search.ask, 1, 4, 1, 43),
+        search.read_best,
+    ):
+        try:
+            operation()
+        except ValueError as error:
+            assert "live JAX proposals" in str(error)
+        else:
+            raise AssertionError("live single-arm export did not hold its lease")
+    del operation, alias
+    gc.collect()
+
+    try:
+        search.read_best()
+    except ValueError as error:
+        assert "pending BF16 round" in str(error)
+    else:
+        raise AssertionError("read_best accepted an unfinished round")
+
+    search.tell(proposals, [1.0])
+    assert search.sync() == [True]
+    assert search.best == 1.0
+    np.testing.assert_array_equal(search.read_best(), accepted)
+    np.testing.assert_array_equal(initial, base_bits)
+
+    # The explicit limit is two, well below the dimension-based default.
+    for seed, expected_length in zip((47, 53, 59, 61), (0.5, 0.25, 0.25, 0.125)):
+        radius = search.length
+        proposals = search.ask(1, 4, 1, seed)
+        batch = jax.dlpack.from_dlpack(proposals)
+        batch.block_until_ready()
+        check_descriptions(proposals, batch, accepted.tolist(), leaves, radius)
+        del batch
+        gc.collect()
+        search.tell(proposals, [0.0])
+        assert search.sync() == [False]
+        assert search.length == expected_length
+        assert search.best == 1.0
+        np.testing.assert_array_equal(search.read_best(), accepted)
+    assert search.restarts == 0
+    assert search.history_len == 6
+
+    proposals = search.ask(1, 4, 1, 67)
+    batch = jax.dlpack.from_dlpack(proposals)
+    expected = check_descriptions(proposals, batch, accepted.tolist(), leaves, 0.125)
+    del proposals, search
+    gc.collect()
+    # The DLPack consumer must retain both the proposal and its resident owner.
+    np.testing.assert_array_equal(
+        jax.device_get(jax.lax.bitcast_convert_type(batch, jnp.uint16)), expected
+    )
+    del batch
+    gc.collect()
+
+
+def check_export(sampler="independent"):
+    import torch
+
+    class LegacyExport:
+        def __init__(self, proposals):
+            self.proposals = proposals
+
+        def __dlpack_device__(self):
+            return self.proposals.__dlpack_device__()
+
+        def __dlpack__(self, stream=None, **kwargs):
+            return self.proposals.__dlpack__(stream=stream)
+
+    for value, delayed in ((0.5, False), (float("nan"), False), (0.5, True)):
+        base = jnp.ones(16, dtype=jnp.bfloat16)
+        search = turbo_enn(base, 0.0, [ParamBlock(17, 0, 16, 1.0)], 2, sampler=sampler)
+        proposals = search.ask(1, 4, 1, 123)
+        stream = torch.cuda.Stream()
+        complete = torch.cuda.Event()
+        with torch.cuda.stream(stream):
+            tensor = torch.from_dlpack(LegacyExport(proposals))
+            if delayed:
+                torch.cuda._sleep(2_000_000_000)
+            tensor.fill_(value)
+            complete.record()
+        if not delayed:
+            stream.synchronize()
+        del tensor
+        gc.collect()
+        if delayed:
+            assert not complete.query(), "delayed write finished before the race check"
+        search.tell(proposals, [1.0])
+        assert complete.query()
+        try:
+            search.sync()
+        except ValueError as error:
+            assert "proposal or rewards are invalid" in str(error)
+        else:
+            raise AssertionError("tell accepted a consumer-modified BF16 proposal")
+
+
 def check_search(base, dimensions, leaves):
     base_value = -0.75
     base_variance = 0.04
@@ -130,6 +302,8 @@ def check_search(base, dimensions, leaves):
     batch.block_until_ready()
     assert batch.shape == (proposals.arms, dimensions)
     assert bool(jnp.all(jnp.isfinite(batch)).block_until_ready())
+    base_bits = jax.device_get(jax.lax.bitcast_convert_type(base, jnp.uint16)).tolist()
+    check_descriptions(proposals, batch, base_bits, leaves, 0.8)
 
     try:
         search.tell(proposals, [1.0, 0.5], [0.01, 0.09])
@@ -138,6 +312,7 @@ def check_search(base, dimensions, leaves):
     else:
         raise AssertionError("live JAX proposals did not hold their leases")
 
+    batch.delete()
     del batch
     gc.collect()
     search.tell(proposals, [1.0, 0.5], [0.01, 0.09])
@@ -447,12 +622,16 @@ def main() -> None:
         raise AssertionError(f"BF16 perturbation overflow was accepted: {bits}")
 
     proposals = check_search(base, len(base_bits), leaves)
+    check_singlesearch()
+    check_export()
     check_knn()
 
     print(
         f"BF16_PARITY ok=true exact={size} proposals={proposals} "
         "leases=true noise=true profile=true validation=true knn=true weighted=true "
-        "batch=true draws=true conditional=true device_tell=true"
+        "batch=true draws=true conditional=true device_tell=true "
+        "nearest=true describe=true single_arm=true read_best=true failure_tolerance=true "
+        "mutation_rejected=true"
     )
 
 

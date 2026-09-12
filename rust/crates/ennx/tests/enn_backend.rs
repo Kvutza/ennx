@@ -1,6 +1,6 @@
 //! Integration tests for EnnBackend dispatch and disk storage.
 
-use ennx::{EnnStorage, IndexDriver, ENN};
+use ennx::{ENN, EnnStorage, IndexDriver};
 use ndarray::array;
 use tempfile::TempDir;
 

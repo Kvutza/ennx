@@ -362,7 +362,7 @@ pub(crate) fn thompson_draws(count: usize, seed: u64) -> Vec<f32> {
 }
 
 /// Resident histories can reorder rows; their storage slots identify observations.
-pub(crate) fn thompson_history_draws(history: &[(usize, f32)], seed: u64) -> Vec<f32> {
+pub(crate) fn history_draws(history: &[(usize, f32)], seed: u64) -> Vec<f32> {
     history
         .iter()
         .map(|&(slot, _)| crate::hash::normal_metric(seed, slot as i64, 0) as f32)

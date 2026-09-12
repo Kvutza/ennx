@@ -1,8 +1,8 @@
 //! Optimization strategies for ask/tell pattern.
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
-use rand::seq::SliceRandom;
 use rand::RngCore;
+use rand::seq::SliceRandom;
 
 use crate::util::argmax_tie;
 

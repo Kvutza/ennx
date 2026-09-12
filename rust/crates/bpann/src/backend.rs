@@ -7,10 +7,10 @@ use ndarray::{Array1, Array2, ArrayView2};
 
 use crate::error::BpannError;
 use crate::index::{BpannIndex, IncrementalIndex};
-use crate::lgnsrch::{search_pending, SearchPendingArgs};
+use crate::lgnsrch::{SearchPendingArgs, search_pending};
 use crate::mmap_store::MmapColumnStore;
-use crate::observation::{self as obs, TrainRows, INDEX_BACKEND, MAX_DIM, MAX_STRIDE};
-use crate::smnsrch::{score_queries_flat, ScoreQueriesFlat, N_LIMIT};
+use crate::observation::{self as obs, INDEX_BACKEND, MAX_DIM, MAX_STRIDE, TrainRows};
+use crate::smnsrch::{N_LIMIT, ScoreQueriesFlat, score_queries};
 
 pub const PAPER_URL: &str = "https://arxiv.org/abs/2511.15557";
 pub use crate::tuning::{PENDING_HARD, PENDING_SOFT};
@@ -339,8 +339,8 @@ impl BpannBackend {
 
         // Small-N: resident flat f32 cache + heap top-k (shared across queries).
         if total <= N_LIMIT {
-            let flat = crate::smnsrch::load_or_build_small_n_cache(self, total)?;
-            let per_query = score_queries_flat(
+            let flat = crate::smnsrch::resident_cache(self, total)?;
+            let per_query = score_queries(
                 &query_rows,
                 &ScoreQueriesFlat {
                     flat: &flat,

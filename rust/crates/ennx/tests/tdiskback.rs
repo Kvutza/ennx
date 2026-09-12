@@ -2,7 +2,7 @@
 
 use ennx::backend::EnnStorage;
 use ennx::candidates::CandidateRV;
-use ennx::config::{turbo_enn, CandidateConfig, OptimizerConfig, SurrogateConfig};
+use ennx::config::{CandidateConfig, OptimizerConfig, SurrogateConfig, turbo_enn};
 use ennx::index::IndexDriver;
 use ennx::optimizer::Optimizer;
 use ennx::strategy::Strategy;
@@ -56,7 +56,7 @@ fn synthetic_y(x: &ArrayView2<f64>, rng: &mut StdRng) -> Array2<f64> {
     let mut y = Array2::zeros((n, 1));
     for i in 0..n {
         let sq = x.row(i).iter().map(|v| v * v).sum::<f64>();
-        y[[i, 0]] = sq + 0.01 * rng.gen::<f64>();
+        y[[i, 0]] = sq + 0.01 * rng.r#gen::<f64>();
     }
     y
 }

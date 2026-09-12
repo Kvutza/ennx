@@ -1,6 +1,6 @@
 use ndarray::array;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 use crate::config::turbo_enn;
 use crate::fitter::ENNFitter;
@@ -152,16 +152,20 @@ fn morbo_ranges() {
     let ymax_before = morbo.y_max().expect("y_max").to_owned();
     let _ = opt.ask(2, &mut rng).unwrap();
     let morbo_after = opt.trust_region().morbo().expect("morbo");
-    assert!(morbo_after
-        .y_min()
-        .unwrap()
-        .iter()
-        .zip(ymin_before.iter())
-        .all(|(a, b)| (a - b).abs() < 1e-12));
-    assert!(morbo_after
-        .y_max()
-        .unwrap()
-        .iter()
-        .zip(ymax_before.iter())
-        .all(|(a, b)| (a - b).abs() < 1e-12));
+    assert!(
+        morbo_after
+            .y_min()
+            .unwrap()
+            .iter()
+            .zip(ymin_before.iter())
+            .all(|(a, b)| (a - b).abs() < 1e-12)
+    );
+    assert!(
+        morbo_after
+            .y_max()
+            .unwrap()
+            .iter()
+            .zip(ymax_before.iter())
+            .all(|(a, b)| (a - b).abs() < 1e-12)
+    );
 }

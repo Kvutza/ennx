@@ -43,7 +43,7 @@ def test_history(config):
         assert len(loop._seen) == 1
 
 
-def test_plain_import_is_light():
+def test_import():
     result = subprocess.run(
         [
             sys.executable,

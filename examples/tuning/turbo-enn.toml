@@ -1,0 +1,10 @@
+version = 1
+study = "end_to_end"
+acquisition = "thompson"
+trust_region_kind = "turbo"
+length_init = 0.01
+length_min = 0.0001
+length_max = 0.1
+output = "../../results/turbo-enn"
+rounds = 3
+target_round_ms = 1000

@@ -5,7 +5,6 @@
 docs_allowed = ["./"]
 duplication_enabled = true
 min_similarity = 0.9
-orphan_module_enabled = false
 
 [test]
 test_coverage_threshold = 0

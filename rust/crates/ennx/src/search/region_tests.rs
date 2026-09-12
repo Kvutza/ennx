@@ -2,6 +2,9 @@ use super::region::TrustRegion;
 use crate::trust_region::TRLengthConfig;
 use crate::weights::ComputeDevice;
 
+#[cfg(feature = "opencl")]
+use super::opencl_unavailable;
+
 fn compare(device: ComputeDevice) {
     for config in [
         TRLengthConfig::default(),
@@ -73,11 +76,4 @@ fn opencl_region() {
         Err(error) => panic!("{error}"),
     }
     compare(ComputeDevice::OpenCl);
-}
-
-#[cfg(feature = "opencl")]
-fn opencl_unavailable(error: &str) -> bool {
-    error.contains("OpenCL platform")
-        || error.contains("OpenCL GPU")
-        || error.contains("failed to enumerate OpenCL")
 }

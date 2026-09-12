@@ -1,12 +1,12 @@
 //! Candidate generation for trust region optimization.
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use rand::distributions::Uniform;
 use rand::Rng;
 use rand::RngCore;
+use rand::distributions::Uniform;
 use serde::{Deserialize, Serialize};
-use sobol::params::JoeKuoD6;
 use sobol::Sobol;
+use sobol::params::JoeKuoD6;
 use std::sync::OnceLock;
 
 use crate::error::ENNError;
@@ -186,7 +186,7 @@ fn generate_raasp<R: Rng + ?Sized>(
             candidates[[i, j]] = x_center[j];
         }
         for _ in 0..num_pert {
-            let r: f64 = rng.gen();
+            let r: f64 = rng.r#gen();
             let dim_to_perturb = raasp_cdf(&cdf, r, num_dim);
             let dist = Uniform::new(lower[dim_to_perturb], upper[dim_to_perturb]);
             candidates[[i, dim_to_perturb]] = rng.sample(dist);
@@ -294,7 +294,7 @@ pub fn generate_lhd<R: Rng + ?Sized>(
             let bin = perm[i];
             let bin_start = bin as f64 / num_samples as f64;
             let bin_end = (bin + 1) as f64 / num_samples as f64;
-            let offset: f64 = rng.gen();
+            let offset: f64 = rng.r#gen();
             let unit = bin_start + offset * (bin_end - bin_start);
             result[[i, j]] = lower + unit * range;
         }
@@ -307,8 +307,8 @@ pub fn generate_lhd<R: Rng + ?Sized>(
 mod tests {
     use super::*;
     use ndarray::array;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn test_tofromunit() {
@@ -517,10 +517,11 @@ mod tests {
         let out = run();
         let out2 = run();
         assert_eq!(out.shape(), &[3, 3]);
-        assert!(out
-            .iter()
-            .zip(out2.iter())
-            .all(|(a, b)| (a - b).abs() < 1e-15));
+        assert!(
+            out.iter()
+                .zip(out2.iter())
+                .all(|(a, b)| (a - b).abs() < 1e-15)
+        );
         assert!(out.iter().all(|&v| (0.0..=1.0).contains(&v)));
     }
 

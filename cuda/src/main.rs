@@ -257,7 +257,7 @@ fn resident_parity() -> AppResult<()> {
         }
     }
 
-    bf16_score_parity()?;
+    bf16_scoreparity()?;
     println!(
         "RESIDENT ok=true target=sm_75 history={} candidates={} choice=passed bf16=passed",
         history_rows.len(),
@@ -266,7 +266,7 @@ fn resident_parity() -> AppResult<()> {
     Ok(())
 }
 
-fn bf16_score_parity() -> AppResult<()> {
+fn bf16_scoreparity() -> AppResult<()> {
     let context = CudaContext::new(0)?;
     let stream = context.default_stream();
     // SAFETY: the generated bindings load the matching embedded kernel artifact.
@@ -285,6 +285,7 @@ fn bf16_score_parity() -> AppResult<()> {
         acquisition: 1,
         tiles: 1,
         resident: 0,
+        correlated: 0,
     };
     let outcomes = [0.5_f32, 10.0, -0.25];
     let variances = [8.0_f32, 0.5, 0.125];
@@ -296,12 +297,14 @@ fn bf16_score_parity() -> AppResult<()> {
     let variances_device = DeviceBuffer::from_host(&stream, &variances)?;
     let draws_device = DeviceBuffer::from_host(&stream, &draws)?;
     let state = DeviceBuffer::<SearchState>::zeroed(&stream, 1)?;
+    let tile_status = DeviceBuffer::<u32>::zeroed(&stream, 2)?;
     let mut scores = DeviceBuffer::<f32>::zeroed(&stream, 2)?;
     let launch = module.prepare_score_bf16(LaunchConfig1D::new(2, 256, 0))?;
     module.score_bf16(
         &stream,
         &launch,
         &partials,
+        &tile_status,
         &outcomes_device,
         &variances_device,
         &state,

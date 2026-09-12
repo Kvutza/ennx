@@ -1,12 +1,12 @@
-use crate::py_parameter::{parameters, PyParameter};
+use crate::py_parameter::{PyParameter, parameters};
+use ennx::TRLengthConfig;
 use ennx::experimental::{
-    apply_dense, apply_sparse, blocks_words, dense_dist2, dense_linear, draw_sparse, merge_values,
-    missing_words, select_weights, sparse_union, sparse_xor, take_words, AcquisitionKind,
-    BpannHistory, ComputeDevice, DenseLeaf, DenseLinear, DenseTerm, DenseView, SearchConfig,
-    WeightBlock, WeightSelectConfig,
+    AcquisitionKind, BpannHistory, ComputeDevice, DenseLeaf, DenseLinear, DenseTerm, DenseView,
+    SearchConfig, WeightBlock, WeightSelectConfig, apply_dense, apply_sparse, blocks_words,
+    dense_dist2, dense_linear, draw_sparse, merge_values, missing_words, select_weights,
+    sparse_union, sparse_xor, take_words,
 };
 use ennx::search::{self, Trial};
-use ennx::TRLengthConfig;
 use numpy::{
     Element, IntoPyArray, PyArray1, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods,
 };
@@ -18,9 +18,9 @@ use pyo3::types::PyList;
 type PyObject = Py<PyAny>;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
-use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
 use std::sync::Arc;
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]
 use ennx::experimental::ParamBuffer;

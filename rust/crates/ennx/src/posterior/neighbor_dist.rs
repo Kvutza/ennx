@@ -36,8 +36,8 @@ pub(crate) fn row_query(model: &ENN, x_row: ArrayView1<f64>) -> Vec<f64> {
 
 #[cfg(test)]
 mod tests {
-    use crate::model::ENN;
     use crate::IndexDriver;
+    use crate::model::ENN;
     use ndarray::array;
 
     #[test]

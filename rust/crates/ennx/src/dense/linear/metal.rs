@@ -8,7 +8,7 @@ extern crate metal as metal_crate;
 use metal_crate::ComputePipelineState;
 
 use super::DenseView;
-use crate::apple_gpu::{thread_group, Runtime};
+use crate::apple_gpu::{Runtime, thread_group};
 use crate::dense::DenseTerm;
 
 const SOURCE: &str = concat!(

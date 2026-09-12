@@ -1,10 +1,10 @@
 //! Shared disk backend streaming smoke test body.
 
-use ennx::{EnnStorage, IndexDriver, ENN};
+use ennx::{ENN, EnnStorage, IndexDriver};
 use ndarray::Array2;
 use rand::Rng;
-use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+use rand_chacha::rand_core::SeedableRng;
 use tempfile::TempDir;
 
 const STREAMING_SEED: u64 = 99;
@@ -19,9 +19,9 @@ fn random_batch(rng: &mut ChaCha8Rng, rows: usize, d: usize) -> (Array2<f64>, Ar
     let mut y = Array2::zeros((rows, 1));
     for i in 0..rows {
         for j in 0..d {
-            x[[i, j]] = rng.gen::<f64>();
+            x[[i, j]] = rng.r#gen::<f64>();
         }
-        y[[i, 0]] = rng.gen::<f64>();
+        y[[i, 0]] = rng.r#gen::<f64>();
     }
     (x, y)
 }
@@ -75,7 +75,7 @@ pub fn run_search(driver: IndexDriver) {
     assert_eq!(model.len(), STREAMING_N);
     model.index_access().ensure_sync().expect("sync");
 
-    let query = Array2::from_shape_fn((3, STREAMING_D), |(_, _)| rng.gen::<f64>());
+    let query = Array2::from_shape_fn((3, STREAMING_D), |(_, _)| rng.r#gen::<f64>());
     let idx = model.neighbors(&query.view(), 5, false).expect("neighbors");
     assert_eq!(idx.nrows(), 3);
     for r in 0..3 {

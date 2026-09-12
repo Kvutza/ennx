@@ -224,22 +224,30 @@ mod tests {
 
         assert_eq!(mu_light.shape(), full.mu.shape());
         assert_eq!(se_light.shape(), full.se.shape());
-        assert!((mu_light - &full.mu)
-            .mapv(f64::abs)
-            .iter()
-            .all(|&d| d < 1e-12));
-        assert!((se_light - &full.se)
-            .mapv(f64::abs)
-            .iter()
-            .all(|&d| d < 1e-12));
-        assert!((se_epi_light - &full.se_epi)
-            .mapv(f64::abs)
-            .iter()
-            .all(|&d| d < 1e-12));
-        assert!((se_ale_light - &full.se_ale)
-            .mapv(f64::abs)
-            .iter()
-            .all(|&d| d < 1e-12));
+        assert!(
+            (mu_light - &full.mu)
+                .mapv(f64::abs)
+                .iter()
+                .all(|&d| d < 1e-12)
+        );
+        assert!(
+            (se_light - &full.se)
+                .mapv(f64::abs)
+                .iter()
+                .all(|&d| d < 1e-12)
+        );
+        assert!(
+            (se_epi_light - &full.se_epi)
+                .mapv(f64::abs)
+                .iter()
+                .all(|&d| d < 1e-12)
+        );
+        assert!(
+            (se_ale_light - &full.se_ale)
+                .mapv(f64::abs)
+                .iter()
+                .all(|&d| d < 1e-12)
+        );
         assert_eq!(idx_light, index_array(&full.idx));
     }
 

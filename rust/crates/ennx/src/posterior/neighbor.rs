@@ -9,7 +9,7 @@ use crate::params::{ENNParams, PosteriorFlags};
 
 use super::neighbor_dist::{row_query, squared_l2};
 use super::tie_break::{
-    finalize_topk, topk_buffers, topk_dists, FaissPoolFinalizeCtx, PoolTieScratch,
+    FaissPoolFinalizeCtx, PoolTieScratch, finalize_topk, topk_buffers, topk_dists,
 };
 
 fn distance_matrix(
@@ -419,7 +419,7 @@ mod tests {
     use super::{batched_threshold, use_batch};
     use crate::index::IndexDriver;
     use crate::model::ENN;
-    use ndarray::{array, Array2};
+    use ndarray::{Array2, array};
 
     #[test]
     fn faiss_threshold() {

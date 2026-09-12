@@ -5,8 +5,8 @@ use std::sync::Arc;
 use metal::{ComputePipelineState, MTLSize};
 
 use super::{
-    acquisition_code, thompson_draws, AcquisitionKind, WeightBlock, WeightSelectConfig,
-    WeightSelectResult,
+    AcquisitionKind, WeightBlock, WeightSelectConfig, WeightSelectResult, acquisition_code,
+    thompson_draws,
 };
 use crate::apple_gpu::Runtime;
 

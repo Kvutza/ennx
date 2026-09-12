@@ -8,7 +8,7 @@ pub mod sync_forest;
 
 pub use build::{BpannIndex, IndexHeader, LEAF_CAPACITY};
 pub use search::{
-    bpann_k, bpann_mmap, bpann_topk, search_leaves, search_only, search_refinement,
-    MmapSearchStore, TraversalLog,
+    MmapSearchStore, TraversalLog, bpann_k, bpann_mmap, bpann_topk, search_leaves, search_only,
+    search_refinement,
 };
 pub use sync::IncrementalIndex;

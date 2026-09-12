@@ -24,7 +24,7 @@ fn sq_f64(a: &[f32], b: &[f32]) -> f64 {
 
 fn rand_vec(rng: &mut ChaCha8Rng, len: usize, scale: f32) -> Vec<f32> {
     (0..len)
-        .map(|_| (rng.gen::<f32>() - 0.5) * 2.0 * scale)
+        .map(|_| (rng.r#gen::<f32>() - 0.5) * 2.0 * scale)
         .collect()
 }
 
@@ -105,7 +105,7 @@ fn l2_properties() {
 
         // Translation invariance: shifting both vectors by the same constant
         // leaves the squared distance unchanged (up to f32 rounding).
-        let c = (rng.gen::<f32>() - 0.5) * 20.0;
+        let c = (rng.r#gen::<f32>() - 0.5) * 20.0;
         let a_shift: Vec<f32> = a.iter().map(|&v| v + c).collect();
         let b_shift: Vec<f32> = b.iter().map(|&v| v + c).collect();
         let shifted = l2_f32(&a_shift, &b_shift);

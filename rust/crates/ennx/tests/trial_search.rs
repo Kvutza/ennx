@@ -1,13 +1,13 @@
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use ennx::experimental::BpannHistory;
 use ennx::experimental::{
-    apply_dense, dense_linear, AcquisitionKind, ComputeDevice, DenseLeaf, DenseLinear, DenseTerm,
-    DenseView, SearchCenter, SearchConfig,
+    AcquisitionKind, ComputeDevice, DenseLeaf, DenseLinear, DenseTerm, DenseView, SearchCenter,
+    SearchConfig, apply_dense, dense_linear,
 };
 use ennx::search::Parameter;
 use ennx::search::Search;
 #[cfg(all(target_os = "macos", feature = "metal"))]
-use ndarray::{array, Axis};
+use ndarray::{Axis, array};
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use tempfile::TempDir;
 

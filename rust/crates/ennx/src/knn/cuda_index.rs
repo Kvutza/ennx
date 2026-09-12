@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use ndarray::{Array2, Array3, ArrayView1, ArrayView2};
 
-use super::{flatten_f32, pad_k, CudaParam, KnnBatch, KnnPosterior, KnnProfile};
+use super::{CudaParam, KnnBatch, KnnPosterior, KnnProfile, flatten_f32, pad_k};
 use crate::draw::DrawInternals;
 use crate::index::IndexError;
 

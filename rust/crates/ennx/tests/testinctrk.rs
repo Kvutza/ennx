@@ -1,4 +1,4 @@
-use ennx::incumbent_tracker::{enn_k, tracker_surrogate, IncumbentTracker};
+use ennx::incumbent_tracker::{IncumbentTracker, enn_k, tracker_surrogate};
 use ndarray::array;
 
 #[test]

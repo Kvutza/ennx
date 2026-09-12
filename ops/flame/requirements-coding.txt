@@ -1,0 +1,4 @@
+# Only needed to prepare the fixed, checkpoint-tokenized coding corpus.
+click==8.5.0
+requests==2.32.4
+tokenizers==0.21.4

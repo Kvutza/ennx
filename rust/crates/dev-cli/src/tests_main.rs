@@ -8,19 +8,29 @@ fn parse(args: &[&str]) -> Result<Action, clap::Error> {
 #[test]
 fn ordinary_options() {
     assert_eq!(
-        parse(&["tune", "knn", "knn.toml"]).unwrap(),
-        Action::Tune {
-            target: TuneTarget::Knn {
-                config: "knn.toml".into()
-            }
+        parse(&["eval", "suite.toml"]).unwrap(),
+        Action::Eval {
+            config: "suite.toml".into(),
+            output: None,
         }
     );
     assert_eq!(
-        parse(&["tune", "proposal", "proposal.toml"]).unwrap(),
+        parse(&["eval", "suite.toml", "--output", "run.jsonl"]).unwrap(),
+        Action::Eval {
+            config: "suite.toml".into(),
+            output: Some("run.jsonl".into()),
+        }
+    );
+    assert_eq!(
+        parse(&["tune", "knn.toml"]).unwrap(),
         Action::Tune {
-            target: TuneTarget::Proposal {
-                config: "proposal.toml".into()
-            }
+            config: "knn.toml".into()
+        }
+    );
+    assert_eq!(
+        parse(&["tune", "proposal.toml"]).unwrap(),
+        Action::Tune {
+            config: "proposal.toml".into()
         }
     );
     assert_eq!(
@@ -47,17 +57,43 @@ fn malformed_work() {
         vec!["fmt"],
         vec!["test"],
         vec!["wheel"],
+        vec!["eval"],
         vec!["tune"],
-        vec!["tune", "knn"],
-        vec!["tune", "proposal"],
-        vec!["tune", "knn", "--config"],
+        vec!["tune", "--config"],
         vec!["tune", "other", "knn.toml"],
-        vec!["tune", "knn", "a", "b"],
-        vec!["tune", "proposal", "a", "b"],
+        vec!["tune", "a", "b"],
         vec!["--help", "unexpected"],
     ] {
         assert!(parse(&args).is_err(), "accepted {args:?}");
     }
+}
+
+#[test]
+fn experiment_dispatch() {
+    assert_eq!(experiment_kind("version=1\n[knn]"), Ok(ExperimentKind::Knn));
+    assert_eq!(
+        experiment_kind(
+            "version=1\n[proposal]\noutput='x'\nelements=1\nhistory=1\ncandidates=1\nrounds=1"
+        ),
+        Ok(ExperimentKind::Proposal)
+    );
+    assert_eq!(
+        experiment_kind("version=1\n[proposal]\ndistribution='gaussian'"),
+        Ok(ExperimentKind::TurboEnn)
+    );
+    assert_eq!(
+        experiment_kind("version=1\nacquisition='thompson'"),
+        Ok(ExperimentKind::TurboEnn)
+    );
+    assert_eq!(experiment_kind("version=1"), Ok(ExperimentKind::TurboEnn));
+    assert!(experiment_kind(
+        "version=1\n[knn]\n[proposal]\noutput='x'\nelements=1\nhistory=1\ncandidates=1\nrounds=1"
+    )
+    .is_err());
+    assert!(is_pretrain("version=1\nstudy='pretrain'").unwrap());
+    assert!(is_pretrain("version=1\n[study]\nkind='pretrain'").unwrap());
+    assert!(is_pretrain("version=1\n[pretrain]").unwrap());
+    assert!(!is_pretrain("version=1\nstudy='end_to_end'").unwrap());
 }
 
 #[test]
@@ -148,12 +184,16 @@ rows = 8_192
         parse_knn(text).unwrap().points,
         ["small:1024:32:16:10", "large:8192:32:16:10"]
     );
-    assert!(parse_knn(&text.replace("large", "small"))
-        .unwrap_err()
-        .contains("unique"));
-    assert!(parse_knn(&text.replace("rows = 1_024", "row = 1_024"))
-        .unwrap_err()
-        .contains("unknown field"));
+    assert!(
+        parse_knn(&text.replace("large", "small"))
+            .unwrap_err()
+            .contains("unique")
+    );
+    assert!(
+        parse_knn(&text.replace("rows = 1_024", "row = 1_024"))
+            .unwrap_err()
+            .contains("unknown field")
+    );
 }
 
 #[test]

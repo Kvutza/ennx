@@ -8,8 +8,16 @@ mod region;
 mod region_tests;
 #[cfg(test)]
 mod view_tests;
+
+#[cfg(all(test, feature = "opencl"))]
+fn opencl_unavailable(error: &str) -> bool {
+    error.contains("OpenCL platform")
+        || error.contains("OpenCL GPU")
+        || error.contains("failed to enumerate OpenCL")
+}
+
 pub use self::region::TrustRegion;
-pub use crate::trials::{device_views, DeviceView, Parameter, Search, Trial};
+pub use crate::trials::{DeviceView, Parameter, Search, Trial, device_views};
 
 use crate::trials::Ask;
 use crate::trust_region::TRLengthConfig;

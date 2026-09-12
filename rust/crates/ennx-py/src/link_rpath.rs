@@ -11,6 +11,19 @@ pub fn emit_args() {
     if !cfg!(target_os = "linux") {
         return;
     }
+    for name in ["CUDA_HOME", "CUDA_PATH", "CARGO_FEATURE_NATIVE_FLAME"] {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
+    if std::env::var_os("CARGO_FEATURE_NATIVE_FLAME").is_some() {
+        let cuda = std::env::var_os("CUDA_HOME")
+            .or_else(|| std::env::var_os("CUDA_PATH"))
+            .unwrap_or_else(|| "/usr/local/cuda".into());
+        println!(
+            "cargo:rustc-cdylib-link-arg=-Wl,-rpath,{}",
+            PathBuf::from(cuda).join("lib64").display()
+        );
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-rpath,$ORIGIN/../nvidia/cu13/lib");
+    }
     if let Ok(prefix) = std::env::var("CONDA_PREFIX") {
         let lib = PathBuf::from(prefix).join("lib");
         if blas_present(&lib) {

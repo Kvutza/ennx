@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ennx._rust import row_loglik as rust_rows
 from ennx._rust import subsample_loglik as _rust_subsample_loglik
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ def subsample_loglik(
     rng: Generator,
     y_std: np.ndarray | None = None,
 ) -> list[float]:
-    """Compute subsample log-likelihood using Rust backend."""
+    """Score complete training arrays in model row order; use row_loglik for subsets."""
     from .enn_class import ENN as PyENN
 
     x_array = np.asarray(x, dtype=float)
@@ -56,6 +57,28 @@ def subsample_loglik(
         P,
         seed,
         y_std_arr,
+    )
+
+
+def row_loglik(
+    model: ENN,
+    rows: list[int],
+    *,
+    paramss: list[ENNParams],
+    P: int = 10,
+    rng: Generator,
+    y_std: np.ndarray | None = None,
+) -> list[float]:
+    """Score held-out model row IDs without ambiguous coordinate matching."""
+    return rust_rows(
+        model.rust_backend,
+        rows,
+        [p.k_neighbors for p in paramss],
+        [p.epistemic_scale for p in paramss],
+        [p.aleatoric_scale for p in paramss],
+        P,
+        int(rng.integers(0, 2**63 - 1)),
+        None if y_std is None else np.asarray(y_std, dtype=float).ravel(),
     )
 
 

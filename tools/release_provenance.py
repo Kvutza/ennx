@@ -55,7 +55,7 @@ def verify_checkout(root: Path, tag: str, commit: str) -> None:
         raise ValueError("release checkout contains modified tracked files")
 
 
-def expected_wheel_names(version: str, platform_tags: tuple[str, ...]) -> set[str]:
+def wheel_names(version: str, platform_tags: tuple[str, ...]) -> set[str]:
     return {
         f"ennx-{version}-{abi}-{abi}-{platform_tag}.whl"
         for abi in PYTHON_ABIS
@@ -70,7 +70,7 @@ def verify_wheels(
     if not wheels:
         raise ValueError("no release wheels found")
     actual = {wheel.name for wheel in wheels}
-    expected = expected_wheel_names(version, platform_tags)
+    expected = wheel_names(version, platform_tags)
     if actual != expected:
         missing = sorted(expected - actual)
         unexpected = sorted(actual - expected)

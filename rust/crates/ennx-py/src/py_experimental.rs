@@ -1,4 +1,4 @@
-use crate::py_parameter::{parameters, PyParameter};
+use crate::py_parameter::{PyParameter, parameters};
 use ennx::experimental::{
     AcquisitionKind, ComputeDevice, ForwardProgram, PackedModel, ResidentBoState, ResidentRound,
     SearchConfig,

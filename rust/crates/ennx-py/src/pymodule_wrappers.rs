@@ -47,6 +47,7 @@ pub fn pymodule_model(m: &Bound<'_, PyModule>) -> PyResult<()> {
 pub fn pymodule_fit(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::py_fitter::PyENNStatefulFitter>()?;
     m.add_function(wrap_pyfunction!(crate::py_fit::subsample_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::py_fit::rows_py, m)?)?;
     Ok(())
 }
 
@@ -54,6 +55,17 @@ pub fn pymodule_fit(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pymodule]
 #[pyo3(name = "experimental")]
 pub fn pymodule_experimental(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "native-flame"))]
+    m.add_class::<crate::py_flame::PyFlameEvaluator>()?;
+    #[cfg(all(target_os = "macos", feature = "metal"))]
+    {
+        m.add_class::<crate::py_metal::PyMetalWeights>()?;
+        m.add_class::<crate::py_metal::PyMetalFlameEvaluator>()?;
+        m.add_class::<crate::py_qwen::PyMetalQwenEvaluator>()?;
+        m.add_class::<crate::py_metal::PyMetalParamBlock>()?;
+        m.add_class::<crate::py_metal::PyMetalSearchState>()?;
+        m.add_class::<crate::py_metal::PyMetalProposals>()?;
+    }
     m.add_class::<crate::py_experimental::PyModelPackage>()?;
     m.add_class::<crate::py_experimental::PyResidentBoSession>()?;
     #[cfg(all(target_os = "macos", feature = "metal"))]

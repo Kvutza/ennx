@@ -3,6 +3,7 @@ members = [
     "cuda",
     "cuda/kernels",
     "rust/crates/bpann",
+    "rust/crates/corpus",
     "rust/crates/dev-cli",
     "rust/crates/ennx",
     "rust/crates/ennx-py",
@@ -12,7 +13,7 @@ resolver = "2"
 
 [workspace.package]
 version = "0.2.0"
-edition = "2021"
+edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 authors = ["ENNX Contributors"]
@@ -30,6 +31,7 @@ pyo3 = { version = "0.29", features = ["extension-module"] }
 rand = "0.8"
 rand_distr = "0.4"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "1.0"
 toml = "0.8"
 cuda-core = "0.3.1"

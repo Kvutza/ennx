@@ -1,9 +1,9 @@
 use ennx::config::turbo_zero;
-use ennx::optimizer::obs_access::{stack_rows, ObsAccess};
 use ennx::optimizer::Optimizer;
+use ennx::optimizer::obs_access::{ObsAccess, stack_rows};
 use ndarray::array;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 #[test]
 fn observation_access() {

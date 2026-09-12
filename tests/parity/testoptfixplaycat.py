@@ -23,7 +23,7 @@ def test_catalogfixturenames():
     assert len(EXPECTED_OPTIMIZER_FIXTURE_NAMES) == 21
 
 
-def test_catalog_files():
+def test_catalogfiles():
     actual = {
         path.stem
         for subdir in ("optimizer", "morbo")
@@ -51,6 +51,6 @@ def test_001():
 @pytest.mark.parametrize(
     "name", ["missing_seed0", "teucboneseed0.json", "../teucboneseed0"]
 )
-def test_unknown_fixture(name):
+def test_fixture(name):
     with pytest.raises(ValueError, match="unknown fixture name"):
         entry_name(name)

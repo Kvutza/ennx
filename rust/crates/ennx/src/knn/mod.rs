@@ -771,7 +771,7 @@ pub(crate) fn pad_k(
     idx: Array2<i64>,
     search_k: usize,
 ) -> (Array2<f64>, Array2<i64>) {
-    use ndarray::{concatenate, Axis};
+    use ndarray::{Axis, concatenate};
     let k_eff = dist2s.ncols();
     if k_eff >= search_k {
         return (dist2s, idx);
@@ -978,9 +978,11 @@ mod knn_backend {
             Ok(_) => panic!("expected USearch feature error"),
             Err(error) => error,
         };
-        assert!(error
-            .to_string()
-            .contains("usearch or usearch-native feature"));
+        assert!(
+            error
+                .to_string()
+                .contains("usearch or usearch-native feature")
+        );
     }
 
     #[test]

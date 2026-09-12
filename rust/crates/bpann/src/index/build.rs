@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::BpannError;
 use crate::index::kmeans::{PartitionNode, PartitionTree};
-use crate::index::page::{write_index, Page};
+use crate::index::page::{Page, write_index};
 use crate::index::persist_atomic::skip_bytes;
 use crate::tuning::current_tuning;
 
@@ -562,7 +562,7 @@ mod tests {
 
     #[test]
     fn needs_provider() {
-        use crate::tuning::{clear_provider, set_provider, BpannTuning};
+        use crate::tuning::{BpannTuning, clear_provider, set_provider};
 
         clear_provider();
         // Defaults: 100 rows is exhaustive → no skip edges.

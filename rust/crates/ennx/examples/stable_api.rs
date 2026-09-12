@@ -1,4 +1,4 @@
-use ennx::prelude::{ENNParams, IndexDriver, PosteriorComputation, PosteriorFlags, ENN};
+use ennx::prelude::{ENN, ENNParams, IndexDriver, PosteriorComputation, PosteriorFlags};
 use ndarray::array;
 
 fn main() -> Result<(), String> {

@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use metal::{Buffer, ComputePipelineState, MTLSize};
 
-use super::{make_steps, make_tiles, Ask, Center, LeafStep, Parameter, SparseEdit, Tile};
-use crate::apple_gpu::{thread_group, Runtime};
+use super::{Ask, Center, LeafStep, Parameter, SparseEdit, Tile, make_steps, make_tiles};
+use crate::apple_gpu::{Runtime, thread_group};
 
 const THREADS: u64 = 256;
 const HISTORY_BATCH: usize = 8;
@@ -1508,7 +1508,7 @@ mod posterior_tests {
     use super::*;
 
     #[test]
-    fn resident_noise_uses_slots_and_stays_finite() {
+    fn noise_slots() {
         let leaves = [Parameter::new(0, 1, 8, 1.0, 1.0, 1.0).unwrap()];
         let mut engine = match Engine::new(&[128], &leaves, 8) {
             Ok(engine) => engine,
@@ -1625,7 +1625,7 @@ mod posterior_tests {
         };
         let history = [(4, 0.0), (6, 0.0), (1, 0.0)];
         engine.sync_draws(config);
-        let expected = crate::weights::thompson_history_draws(&history, config.seed);
+        let expected = crate::weights::history_draws(&history, config.seed);
         let draws = read_slice::<f32>(&engine.scratch.draws, 8);
         assert_eq!([draws[4], draws[6], draws[1]].as_slice(), expected);
     }

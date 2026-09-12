@@ -7,8 +7,8 @@ use crate::strategy::Strategy;
 use crate::trregncfg::TrustRegionConfig;
 use crate::trust_region::TRLengthConfig;
 use ndarray::array;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 fn morbo_obs(seed: u64) -> Optimizer {
     let bounds = array![[0.0, 1.0], [0.0, 1.0]];

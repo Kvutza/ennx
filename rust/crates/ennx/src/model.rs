@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::backend::{EnnBackend, EnnStorage};
 use crate::error::ENNError;
-use crate::index::{disk_driver, IndexDriver};
+use crate::index::{IndexDriver, disk_driver};
 
 type InitStats = (
     Array1<f64>,
@@ -719,9 +719,11 @@ mod tests {
             .add(&array![[2.0]].view(), &array![[0.6]].view(), None)
             .unwrap();
         assert!((model.natural_y(2).unwrap()[0] - 0.6).abs() < 1e-12);
-        assert!(model
-            .add(&array![[3.0]].view(), &array![[1.0]].view(), None)
-            .is_err());
+        assert!(
+            model
+                .add(&array![[3.0]].view(), &array![[1.0]].view(), None)
+                .is_err()
+        );
 
         let posterior = model
             .posterior(

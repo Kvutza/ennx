@@ -11,15 +11,18 @@ use cuda_core::{
 use cuda_host::embedded::{ArtifactPayloadKind, EmbeddedModuleError, OwnedArtifactBundle};
 use ennx_cuda_kernels::trials;
 pub use ennx_cuda_kernels::{
-    BatchValue, Bf16Leaf, Bf16Score, CenterStep, DenseLeaf, DenseLinearParams, DenseTerm,
-    DenseTile, KNN_K, Leaf, MAX_DEPTH, MAX_HISTORY, SearchState, Seed, Selection, SparseEdit,
-    THREADS, TellParams, TellSummary, Tile,
+    BatchValue, Bf16Change, Bf16Leaf, Bf16Score, CenterStep, DenseLeaf, DenseLinearParams,
+    DenseTerm, DenseTile, KNN_K, Leaf, MAX_DEPTH, MAX_HISTORY, SearchState, Seed, Selection,
+    SparseEdit, THREADS, TellParams, TellSummary, Tile,
 };
 
 pub type CudaResult<T> = Result<T, String>;
 
+#[cfg(feature = "native-flame")]
+pub mod flame;
+
 mod bf16_search;
-pub use bf16_search::{Bf16SearchEngine, TellOutput};
+pub use bf16_search::{Bf16SearchEngine, ProposalDescription, TellOutput};
 mod knn;
 pub use knn::{
     BatchOutput, BatchSpec, CudaIndex, DrawOutput, KnnProfile, PosteriorOutput, PosteriorSpec,

@@ -4,6 +4,9 @@ version = "0.2.0"
 edition = "2024"
 publish = false
 
+[features]
+native-flame = []
+
 [dependencies]
 cuda-core.workspace = true
 cuda-host.workspace = true

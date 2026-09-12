@@ -1,0 +1,17 @@
+#!/bin/sh
+# Retained diagnostic test adapter. Complete rounds use the typed native runner.
+set -eu
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$repo_dir"
+[ "$#" -eq 1 ] || { echo 'Use tools/fbt-bo --check or --gemm' >&2; exit 2; }
+case "$1" in
+    --check) filter=gpu_scorer ;;
+    --gemm) filter=bench_gemm_layouts ;;
+    *) echo 'Use tools/fbt-bo --check or --gemm' >&2; exit 2 ;;
+esac
+[ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || {
+    echo 'This BO experiment requires Apple silicon macOS' >&2; exit 1;
+}
+exec ./buck2w test //rust/crates/ennx:ennx-unit --local-only -j 1 \
+    -- --timeout 600 --test-arg=--ignored --test-arg=--nocapture \
+    --test-arg=--test-threads=1 --test-arg="$filter"

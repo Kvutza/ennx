@@ -1,23 +1,5 @@
 load("@prelude//rust:rust_toolchain.bzl", "PanicRuntime", "RustToolchainInfo")
-
-# Official channel-rust-1.96.0.toml, released 2026-05-28.
-_ARCHIVES = {
-    "aarch64-apple-darwin": (
-        "1bb7b0bad1d2a42fc4173ede6dd460de2774fc1858a8369329d3e081e4e3426c",
-        "439c4f71060b913e00db3a2e01340b2da0aa49978b843e36871f3250267c63f8",
-        "5ebcd03b05f70b0ffc330fd884b24e34189281ab6cc8b4c9ac5f1e32b0fdd85c",
-    ),
-    "aarch64-unknown-linux-gnu": (
-        "76b1a6e8dd1636e364d4bbba685485ff44eee5ff6434add089bab4c703c7e19d",
-        "538e85452709687797d990579a491ff9b02f8bffba4a5d54cfa945e28868053e",
-        "f0304a59688cccc77da29bbfbb96cb29407b4fdc152337f8de198d81a01eac05",
-    ),
-    "x86_64-unknown-linux-gnu": (
-        "7d7fa1d0cfb0fab71a956bb78f41107202c17f30ab56c45288e869a37fd9633d",
-        "c09c7c646248f14f473f5f7a029af15ee57c3a9f9bc93dfa72d9621938586b82",
-        "9b0b89c67d5ce8195e1c8733587a63e326353fdda65f62455a64fa03e25659f2",
-    ),
-}
+load(":rust_pins.bzl", "RUST_ARCHIVES", "RUST_DATE", "RUST_EDITION")
 
 def _sysroot_impl(ctx):
     compiler = ctx.attrs.compiler[DefaultInfo].default_outputs[0]
@@ -59,7 +41,7 @@ def _rust_toolchain_impl(ctx):
             clippy_driver = RunInfo(args = [sysroot.project("bin/clippy-driver")]),
             sysroot_path = sysroot,
             rustc_target_triple = ctx.attrs.triple,
-            default_edition = "2021",
+            default_edition = RUST_EDITION,
             panic_runtime = PanicRuntime("unwind"),
             rustc_flags = flags,
             rustc_binary_flags = ["-Clto=thin"] if profile == "release" else [],
@@ -78,12 +60,12 @@ _rust_toolchain = rule(
 )
 
 def pinned_rust_toolchain(name):
-    for triple, hashes in _ARCHIVES.items():
+    for triple, hashes in RUST_ARCHIVES.items():
         for component, checksum in zip(["rustc", "rust-std", "clippy"], hashes):
-            archive = "{}-1.96.0-{}".format(component, triple)
+            archive = "{}-nightly-{}".format(component, triple)
             native.http_archive(
                 name = archive,
-                urls = ["https://static.rust-lang.org/dist/2026-05-28/{}.tar.xz".format(archive)],
+                urls = ["https://static.rust-lang.org/dist/{}/{}.tar.xz".format(RUST_DATE, archive)],
                 sha256 = checksum,
                 strip_prefix = archive + "/" + ({"rustc": "rustc", "rust-std": "rust-std-" + triple, "clippy": "clippy-preview"}[component]),
             )
@@ -96,9 +78,9 @@ def pinned_rust_toolchain(name):
     })
     _rust_sysroot(
         name = name + "-sysroot",
-        compiler = select_map(triple, lambda value: ":rustc-1.96.0-" + value, recurse = True),
-        std = select_map(triple, lambda value: ":rust-std-1.96.0-" + value, recurse = True),
-        clippy = select_map(triple, lambda value: ":clippy-1.96.0-" + value, recurse = True),
+        compiler = select_map(triple, lambda value: ":rustc-nightly-" + value, recurse = True),
+        std = select_map(triple, lambda value: ":rust-std-nightly-" + value, recurse = True),
+        clippy = select_map(triple, lambda value: ":clippy-nightly-" + value, recurse = True),
     )
     _rust_toolchain(
         name = name,

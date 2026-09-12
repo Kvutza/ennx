@@ -1,0 +1,50 @@
+version = 1
+
+[pretrain]
+model = "fbt_pisa1_moe_v1"
+corpus = "stack_v3_python_pilot_v1"
+
+[rounds]
+count = 96
+reps = 1
+target_ms = 1000
+
+[perturbation]
+distribution = "gaussian"
+
+[acquisition]
+method = "ucb"
+beta = 0.5
+
+[surrogate]
+method = "enn"
+distance_scaling = "global"
+neighbors = 32
+fit_neighbors = true
+epistemic_scale = 0.05
+aleatoric_scale = 0.05
+y_scale = 1.0
+fit_candidates = 64
+fit_samples = 64
+
+[trust-region]
+method = "reliability"
+shape = "tensor_family_learned"
+length_init = 0.01
+length_min = 0.0001
+length_max = 0.1
+
+[trust-region.reliability]
+local_scale_neighbors = 8
+evidence_decay = 0.9
+progress_decay = 0.8
+confidence_z = 1.0
+reliability_threshold = 0.6
+progress_threshold = 0.1
+minimum_evidence = 4.0
+target_step_ratio = 0.5
+density_gain = 0.25
+expand_factor = 1.25
+shrink_factor = 0.8
+stagnation_patience = 8
+escape_rounds = 4

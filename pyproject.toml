@@ -1,0 +1,14 @@
+[project]
+name = "ennx-workspace"
+version = "0.0.0"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[dependency-groups]
+pretrain = [
+    "datasets==4.1.1",
+    "tokenizers==0.21.4",
+]
+
+[tool.uv]
+package = false

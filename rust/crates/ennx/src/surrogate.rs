@@ -465,8 +465,8 @@ impl Surrogate for ENNSurrogate {
 mod tests {
     use super::*;
     use ndarray::array;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn test_001() {

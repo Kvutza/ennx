@@ -2,13 +2,13 @@ use std::ptr;
 
 use opencl3::command_queue::CommandQueue;
 use opencl3::context::Context;
-use opencl3::device::{get_all_devices, Device, CL_DEVICE_TYPE_CPU, CL_DEVICE_TYPE_GPU};
+use opencl3::device::{CL_DEVICE_TYPE_CPU, CL_DEVICE_TYPE_GPU, Device, get_all_devices};
 use opencl3::kernel::{ExecuteKernel, Kernel};
-use opencl3::memory::{Buffer, ClMem, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE};
+use opencl3::memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, ClMem};
 use opencl3::program::Program;
-use opencl3::types::{cl_mem_flags, CL_BLOCKING};
+use opencl3::types::{CL_BLOCKING, cl_mem_flags};
 
-use super::{make_steps, make_tiles, Ask, Center, LeafStep, Parameter, SparseEdit, Tile};
+use super::{Ask, Center, LeafStep, Parameter, SparseEdit, Tile, make_steps, make_tiles};
 
 const THREADS: usize = 256;
 const SOURCE: &str = include_str!("trials.cl");
@@ -1733,7 +1733,7 @@ mod posterior_tests {
     use super::*;
 
     #[test]
-    fn resident_noise_uses_slots_and_stays_finite() {
+    fn noise_slots() {
         let leaves = [Parameter::new(0, 1, 8, 1.0, 1.0, 1.0).unwrap()];
         let mut engine = match Engine::new(&[128], &leaves, 8) {
             Ok(engine) => engine,
@@ -1742,7 +1742,7 @@ mod posterior_tests {
                     || error.contains("CL_PLATFORM_NOT_FOUND_KHR")
                     || error.contains("failed to enumerate OpenCL") =>
             {
-                return
+                return;
             }
             Err(error) => panic!("{error}"),
         };
@@ -1885,7 +1885,7 @@ mod posterior_tests {
         };
         let history = [(4, 0.0), (6, 0.0), (1, 0.0)];
         engine.fill_draws(config).unwrap();
-        let expected = crate::weights::thompson_history_draws(&history, config.seed);
+        let expected = crate::weights::history_draws(&history, config.seed);
         let mut actual = [0.0f32; 8];
         unsafe {
             engine

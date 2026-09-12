@@ -104,11 +104,15 @@ run_test() {
     echo "All checks passed."
 }
 
+run_toolchain() {
+    exec python3 tools/rust-toolchain "$@"
+}
+
 case "${1:-}" in
     "" | -h | --help | help)
         if [ "$#" -le 1 ]; then
             cat <<'EOF'
-Build, verify, and tune ENNX through Buck2
+Build, verify, tune, and evaluate ENNX through Buck2
 
 Usage: ./ennx <COMMAND>
 
@@ -116,6 +120,8 @@ Commands:
   build  Build the library, CLI, tests, and Python wheels
   test   Run Rust and kernel tests
   fmt    Format the repository or check formatting without edits
+  toolchain  Check or synchronize the managed Rust toolchain
+  eval   Evaluate optimizers on paired black-box tasks
   tune   Run a configured experiment
   dev    Format, build, and test
   help   Print this message or the help of the given subcommand(s)
@@ -129,8 +135,19 @@ EOF
         if [ "${1:-}" = help ]; then
             shift
             case "${1:-}" in
-                build | test | fmt | tune)
+                "" | -h | --help | help)
+                    exec "$0" --help
+                    ;;
+                build | test | fmt | toolchain)
                     exec "$0" "$1" --help
+                    ;;
+                eval)
+                    shift
+                    exec "$0" eval --help "$@"
+                    ;;
+                tune)
+                    shift
+                    exec "$0" tune help "$@"
                     ;;
                 dev)
                     cat <<'EOF'
@@ -156,7 +173,7 @@ EOF
         fi
         ;;
     build)
-        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ]; then
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ] || [ "${2:-}" = help ]; then
             cat <<'EOF'
 Build the library, CLI, tests, and Python wheels
 
@@ -174,7 +191,7 @@ EOF
         exit 0
         ;;
     test)
-        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ]; then
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ] || [ "${2:-}" = help ]; then
             cat <<'EOF'
 Run Rust and kernel tests
 
@@ -191,7 +208,7 @@ EOF
         exit 0
         ;;
     fmt)
-        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ]; then
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ] || [ "${2:-}" = help ]; then
             cat <<'EOF'
 Format the repository or check formatting without edits
 
@@ -220,58 +237,60 @@ EOF
                 ;;
         esac
         ;;
-    tune)
+    toolchain)
         if [ "${2:-}" = -h ] || [ "${2:-}" = --help ] || [ "${2:-}" = help ]; then
             cat <<'EOF'
-Run a configured experiment
+Check or synchronize the managed Rust toolchain
 
-Usage: ./ennx tune <COMMAND>
+Usage: ./ennx toolchain <COMMAND>
 
 Commands:
-  knn       Run a KNN frontier experiment
-  proposal  Run a resident proposal experiment
-  help      Print this message or the help of the given subcommand(s)
+  check                       Check every managed toolchain declaration
+  sync [nightly-YYYY-MM-DD]   Synchronize declarations, optionally upgrading Rust
 
 Options:
   -h, --help  Print help
 EOF
             exit 0
         fi
-        if [ "${3:-}" = -h ] || [ "${3:-}" = --help ]; then
-            case "${2:-}" in
-                knn)
-                    cat <<'EOF'
-Run a KNN frontier experiment
+        shift
+        run_toolchain "$@"
+        ;;
+    tune)
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ] || [ "${2:-}" = help ]; then
+            cat <<'EOF'
+Run a configured experiment
 
-Usage: ./ennx tune knn <CONFIG>
+Usage: ./ennx tune <CONFIG>
 
 Arguments:
-  <CONFIG>  TOML config path
+  <CONFIG>  TOML configuration for pretraining, TuRBO-ENN, KNN, or proposal tuning
 
 Options:
   -h, --help  Print help
 EOF
-                    exit 0
-                    ;;
-                proposal)
-                    cat <<'EOF'
-Run a resident proposal experiment
+            exit 0
+        fi
+        ;;
+    eval)
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ] || [ "${2:-}" = help ]; then
+            cat <<'EOF'
+Evaluate optimizers on paired black-box tasks
 
-Usage: ./ennx tune proposal <CONFIG>
+Usage: ./ennx eval <CONFIG> [--output <JSONL>]
 
 Arguments:
-  <CONFIG>  TOML config path
+  <CONFIG>  TOML evaluation-suite configuration
 
 Options:
-  -h, --help  Print help
+      --output <JSONL>  Override the artifact path in the configuration
+  -h, --help            Print help
 EOF
-                    exit 0
-                    ;;
-            esac
+            exit 0
         fi
         ;;
     dev)
-        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ]; then
+        if [ "${2:-}" = -h ] || [ "${2:-}" = --help ] || [ "${2:-}" = help ]; then
             cat <<'EOF'
 Format, build, and test
 

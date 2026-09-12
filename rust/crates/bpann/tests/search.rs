@@ -12,7 +12,7 @@ use tempfile::TempDir;
 fn synth(n: usize, d: usize, seed: u64) -> Vec<Vec<f32>> {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     (0..n)
-        .map(|_| (0..d).map(|_| rng.gen::<f32>()).collect())
+        .map(|_| (0..d).map(|_| rng.r#gen::<f32>()).collect())
         .collect()
 }
 

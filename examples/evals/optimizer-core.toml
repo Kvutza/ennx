@@ -1,0 +1,61 @@
+version = 1
+
+[eval]
+name = "optimizer-core-v1"
+output = "artifacts/evals/optimizer-core-v1.jsonl"
+budget = 128
+num_init = 16
+seeds = [123, 1009, 2027, 3253, 4001, 5003, 6007, 7001, 8009, 9001]
+
+[[eval.optimizers]]
+name = "turbo-enn"
+kind = "turbo_enn"
+neighbors = 10
+candidates = 1024
+
+[[eval.optimizers]]
+name = "turbo-zero"
+kind = "turbo_zero"
+candidates = 1024
+
+[[eval.tasks]]
+name = "sphere-16d"
+function = "sphere"
+dimensions = 16
+target = 1e-3
+
+[[eval.tasks]]
+name = "rotated-ellipsoid-16d"
+function = "ellipsoid"
+dimensions = 16
+target = 1.0
+
+[[eval.tasks]]
+name = "rosenbrock-16d"
+function = "rosenbrock"
+dimensions = 16
+lower = -3.0
+upper = 3.0
+target = 1.0
+
+[[eval.tasks]]
+name = "rastrigin-16d"
+function = "rastrigin"
+dimensions = 16
+lower = -5.12
+upper = 5.12
+target = 5.0
+
+[[eval.tasks]]
+name = "ackley-noisy-32d"
+function = "ackley"
+dimensions = 32
+noise_std = 0.05
+target = 0.1
+
+[[eval.tasks]]
+name = "sparse-sphere-4096d"
+function = "sparse_sphere"
+dimensions = 4096
+active_dimensions = 16
+target = 1e-3

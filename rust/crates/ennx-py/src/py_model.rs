@@ -59,7 +59,7 @@ impl PyENN {
             _ => {
                 return Err(PyValueError::new_err(format!(
                     "Unknown index_driver: {index_driver}"
-                )))
+                )));
             }
         };
         let storage = match enn_storage {
@@ -70,7 +70,7 @@ impl PyENN {
             Some(other) => {
                 return Err(PyValueError::new_err(format!(
                     "Unknown enn_storage: {other}"
-                )))
+                )));
             }
         };
         let work_dir = work_dir.map(PathBuf::from);

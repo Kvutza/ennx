@@ -8,8 +8,8 @@ extern crate metal as metal_crate;
 use metal_crate::ComputePipelineState;
 
 use super::{DenseLeaf, DenseTerm};
-use crate::apple_gpu::{thread_group, Runtime};
-use crate::dense::{tiles, DenseTile};
+use crate::apple_gpu::{Runtime, thread_group};
+use crate::dense::{DenseTile, tiles};
 
 const SOURCE: &str = concat!(
     include_str!("../ops.metal"),

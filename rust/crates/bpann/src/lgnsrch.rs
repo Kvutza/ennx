@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use crate::backend::BpannBackend;
 use crate::distance::bpann_f32;
 use crate::error::BpannError;
-use crate::index::{bpann_mmap, MmapSearchStore};
+use crate::index::{MmapSearchStore, bpann_mmap};
 use crate::merge::{merge_candidates, merge_dist};
 use crate::parallel::use_rayon;
 

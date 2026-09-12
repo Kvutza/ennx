@@ -1,6 +1,6 @@
 use crate::weights::ComputeDevice;
 
-use super::{has_direction, sign, validate_leaves, validate_terms, DenseLeaf, DenseTerm};
+use super::{DenseLeaf, DenseTerm, has_direction, sign, validate_leaves, validate_terms};
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 extern crate metal as metal_crate;
@@ -330,12 +330,13 @@ mod tests {
         .unwrap();
         tree.materialize(&[DenseTerm::new(17, 1.0e-6).unwrap()])
             .unwrap();
-        assert!(tree
-            .candidate()
-            .unwrap()
-            .iter()
-            .zip(base)
-            .all(|(candidate, base)| *candidate != base));
+        assert!(
+            tree.candidate()
+                .unwrap()
+                .iter()
+                .zip(base)
+                .all(|(candidate, base)| *candidate != base)
+        );
     }
 
     #[cfg(feature = "opencl")]

@@ -35,13 +35,7 @@ impl Ord for OrderedF32 {
 }
 
 /// k-smallest squared-L2 neighbors against a flat `N·D` f32 matrix (max-heap of size k).
-pub fn topk_flat_sq_l2(
-    query: &[f32],
-    flat: &[f32],
-    n: usize,
-    d: usize,
-    k: usize,
-) -> Vec<(u32, f32)> {
+pub fn topk_l2(query: &[f32], flat: &[f32], n: usize, d: usize, k: usize) -> Vec<(u32, f32)> {
     assert_eq!(query.len(), d);
     assert_eq!(flat.len(), n * d);
     if k == 0 || n == 0 {
@@ -74,7 +68,7 @@ pub fn topk_flat_sq_l2(
     out
 }
 
-/// Parameters for [`score_queries_flat`].
+/// Parameters for [`score_queries`].
 pub struct ScoreQueriesFlat<'a> {
     pub flat: &'a [f32],
     pub total: usize,
@@ -87,7 +81,7 @@ pub struct ScoreQueriesFlat<'a> {
 }
 
 /// Score every query against a flat train matrix; return per-query (dists, ids).
-pub fn score_queries_flat(
+pub fn score_queries(
     query_rows: &[Vec<f64>],
     args: &ScoreQueriesFlat<'_>,
 ) -> Vec<(Vec<f64>, Vec<i64>)> {
@@ -104,7 +98,7 @@ pub fn score_queries_flat(
     let score_query = |query_buf: &Vec<f64>| {
         let mut query_f32 = Vec::with_capacity(num_dim);
         bpann_f32(query_buf, scale_x, x_scale, &mut query_f32);
-        let leg = topk_flat_sq_l2(&query_f32, flat, total, num_dim, pool_k);
+        let leg = topk_l2(&query_f32, flat, total, num_dim, pool_k);
         let merged = merge_dist(&leg, &[], k_eff, pool_k, exclude_nearest);
         let mut dist_row = vec![0.0; k_eff];
         let mut idx_row = vec![0; k_eff];
@@ -123,7 +117,7 @@ pub fn score_queries_flat(
 }
 
 /// Load or build the resident flat f32 train cache for small-N search.
-pub fn load_or_build_small_n_cache(
+pub fn resident_cache(
     backend: &crate::backend::BpannBackend,
     n: usize,
 ) -> Result<std::sync::Arc<[f32]>, crate::error::BpannError> {
@@ -163,9 +157,9 @@ mod tests {
 
     #[test]
     fn test_002() {
-        assert!(topk_flat_sq_l2(&[0.0], &[], 0, 1, 1).is_empty());
+        assert!(topk_l2(&[0.0], &[], 0, 1, 1).is_empty());
         let flat = [0.0f32, 1.0, 2.0];
-        let hits = topk_flat_sq_l2(&[0.0], &flat, 3, 1, 2);
+        let hits = topk_l2(&[0.0], &flat, 3, 1, 2);
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].0, 0);
         assert_eq!(hits[1].0, 1);
@@ -176,7 +170,7 @@ mod tests {
     fn test_003() {
         // rows: (0,0), (3,0), (1,0) — nearest to (0,0) is id 0 then 2
         let flat = [0.0f32, 0.0, 3.0, 0.0, 1.0, 0.0];
-        let hits = topk_flat_sq_l2(&[0.0, 0.0], &flat, 3, 2, 2);
+        let hits = topk_l2(&[0.0, 0.0], &flat, 3, 2, 2);
         assert_eq!(hits.iter().map(|h| h.0).collect::<Vec<_>>(), vec![0, 2]);
         assert!((hits[0].1 - 0.0).abs() < 1e-6);
         assert!((hits[1].1 - 1.0).abs() < 1e-6);
@@ -185,7 +179,7 @@ mod tests {
     #[test]
     fn test_004() {
         let flat = [0.0f32, 0.0, 1.0, 0.0, 4.0, 0.0];
-        let out = score_queries_flat(
+        let out = score_queries(
             &[vec![0.0, 0.0]],
             &ScoreQueriesFlat {
                 flat: &flat,
@@ -208,11 +202,11 @@ mod tests {
             crate::backend::BpannBackend::new_empty(dir.path().to_path_buf(), 1, 1).unwrap();
         b.append_rows(&array![[0.0]].view(), &array![[0.0]].view(), None)
             .unwrap();
-        let c1 = load_or_build_small_n_cache(&b, 1).unwrap();
+        let c1 = resident_cache(&b, 1).unwrap();
         assert_eq!(c1.len(), 1);
         b.append_rows(&array![[5.0]].view(), &array![[1.0]].view(), None)
             .unwrap();
-        let c2 = load_or_build_small_n_cache(&b, 2).unwrap();
+        let c2 = resident_cache(&b, 2).unwrap();
         assert_eq!(c2.len(), 2);
         assert!((c2[1] - 5.0).abs() < 1e-5);
     }

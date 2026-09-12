@@ -1,6 +1,6 @@
 use crate::util::insert_neighbor;
 
-use super::{make_steps, materialize, score, trial_distance, Ask, Parameter};
+use super::{Ask, Parameter, make_steps, materialize, score, trial_distance};
 
 const MAX_DEPTH: usize = 8;
 
@@ -61,7 +61,7 @@ pub(super) fn cpu_ask(
         center_rows.push(materialize(parent, leaves, &steps, center.seed));
     }
     let draws = if config.acquisition == crate::weights::AcquisitionKind::Thompson {
-        crate::weights::thompson_history_draws(history, config.seed)
+        crate::weights::history_draws(history, config.seed)
     } else {
         Vec::new()
     };
@@ -91,7 +91,7 @@ pub(super) fn cpu_ask(
 
 #[cfg(test)]
 mod tests {
-    use super::{check, Center};
+    use super::{Center, check};
 
     #[test]
     fn valid_centers() {

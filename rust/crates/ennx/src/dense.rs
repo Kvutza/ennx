@@ -19,7 +19,7 @@ mod bf16;
 mod linear;
 
 pub use bf16::ParamBuffer;
-pub use linear::{linear, DenseLinear, DenseView};
+pub use linear::{DenseLinear, DenseView, linear};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -409,10 +409,11 @@ mod tests {
         let terms = [DenseTerm::new(0x1234_5678_9abc_def0, 0.01).unwrap()];
         let result = apply(&base, &leaves(), &terms, ComputeDevice::Cpu).unwrap();
         assert_eq!(result.changed, base.len());
-        assert!(base
-            .iter()
-            .zip(result.values)
-            .all(|(left, right)| *left != right));
+        assert!(
+            base.iter()
+                .zip(result.values)
+                .all(|(left, right)| *left != right)
+        );
     }
 
     #[test]

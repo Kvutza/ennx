@@ -30,6 +30,7 @@ ENN = _ext.model.ENN
 ENNParams = _ext.model.ENNParams
 ENNStatefulFitter = _ext.fit.ENNStatefulFitter
 subsample_loglik = _ext.fit.subsample_loglik
+row_loglik = _ext.fit.row_loglik
 Optimizer = _ext.optimizer.Optimizer
 Telemetry = _ext.optimizer.Telemetry
 MultiTrustRegion = _ext.optimizer.MultiTrustRegion
@@ -51,42 +52,55 @@ weight_int4_select_ucb = _ext.optimizer.weight_int4_select_ucb
 weight_select_ucb = _ext.optimizer.weight_select_ucb
 ModelPackage = _ext.experimental.ModelPackage
 NativeKdaModel = getattr(_ext.experimental, "NativeKdaModel", None)
+FlameEvaluator = getattr(_ext.experimental, "FlameEvaluator", None)
+MetalFlameEvaluator = getattr(_ext.experimental, "MetalFlameEvaluator", None)
+MetalQwenEvaluator = getattr(_ext.experimental, "MetalQwenEvaluator", None)
+MetalWeights = getattr(_ext.experimental, "MetalWeights", None)
+MetalParamBlock = getattr(_ext.experimental, "MetalParamBlock", None)
+MetalSearchState = getattr(_ext.experimental, "MetalSearchState", None)
 ResidentBoSession = _ext.experimental.ResidentBoSession
 
 
 __all__ = [
+    "ENN",
     "BpannHistory",
-    "ParamBuffer",
-    "ParamBlock",
-    "SearchState",
-    "Proposals",
     "DenseLinear",
     "ENNParams",
     "ENNStatefulFitter",
-    "ENN",
+    "FlameEvaluator",
+    "MetalFlameEvaluator",
+    "MetalParamBlock",
+    "MetalQwenEvaluator",
+    "MetalSearchState",
+    "MetalWeights",
     "ModelPackage",
     "MultiTrustRegion",
     "NativeKdaModel",
     "Optimizer",
+    "ParamBlock",
+    "ParamBuffer",
+    "Proposals",
     "ResidentBoSession",
+    "SearchState",
     "Telemetry",
-    "pareto_arms",
-    "sobol_indices",
-    "create_optimizer",
-    "enn_optimizer",
-    "enn_tr",
-    "create_zero",
     "create_lhd",
+    "create_optimizer",
+    "create_zero",
     "dense_apply",
     "dense_dist2",
     "dense_linear",
+    "enn_optimizer",
+    "enn_tr",
     "ensure_config_file",
     "hypervolume2d_max",
     "normal_hash",
     "pareto2d_max",
+    "pareto_arms",
     "quantize_e2m1",
     "quantize_int4",
+    "row_loglik",
     "set_path",
+    "sobol_indices",
     "sobol_sequence",
     "standardize_y",
     "subsample_loglik",
