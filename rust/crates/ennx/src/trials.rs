@@ -196,6 +196,7 @@ pub struct Ask {
     pub y_scale: f32,
     pub beta: f32,
     pub acquisition: AcquisitionKind,
+    /// Sampled-function seed; resident observation slots identify shared Thompson noise.
     pub seed: u64,
 }
 
@@ -549,6 +550,8 @@ impl Search {
     ///
     /// BPANN affects only shortlist retrieval. Candidate generation, exact
     /// squared distance, ENN prediction, and acquisition remain unchanged.
+    /// Each call replaces resident history, so Thompson draws need not agree
+    /// across calls with different candidate-dependent shortlists.
     pub fn ask_indexed<F>(
         &mut self,
         history: &BpannHistory,
@@ -743,6 +746,8 @@ impl Search {
     /// `rows` is packed row-major using this search's quantized row layout.
     /// The shortlist is allowed to contain at most `history_capacity()` rows;
     /// one additional device slot remains free for the next generated trial.
+    /// Replacement assigns new row identities for Thompson draws; keeping the
+    /// function seed does not preserve samples across history replacements.
     pub fn replace_history(&mut self, rows: &[u8], values: &[f32]) -> Result<(), String> {
         if !self.pending.is_empty() {
             return Err("tell must finish the pending trial before replacing history".to_string());
@@ -793,6 +798,7 @@ impl Search {
     ///
     /// The resolver may regenerate a row from a seed/checkpoint archive. Rows
     /// are released after being copied into their device slots.
+    /// Reloading assigns row identities by resident slot, not `ObservationId`.
     pub fn indexed_history<F>(
         &mut self,
         observations: &[IndexedObservation],

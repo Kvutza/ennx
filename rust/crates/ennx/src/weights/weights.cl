@@ -158,6 +158,15 @@ __kernel void score_weight_neighbors(
     if (thread_index == 0u) {
         float weight_sum = 0.0f;
         float weighted_outcome = 0.0f;
+        float squared_weight_sum = 0.0f;
+        float weighted_noise = 0.0f;
+        float reference_weight = 1.0f;
+        if (params.acquisition == 1u) {
+            float variance = 1.0e-9f
+                + params.epistemic_scale * nearest_distances[0]
+                + params.aleatoric_scale;
+            reference_weight = fmax(1.0f / fmax(variance, 1.0e-12f), 1.17549435e-38f);
+        }
         for (uint k = 0u; k < params.neighbors; ++k) {
             float variance = 1.0e-9f
                 + params.epistemic_scale * nearest_distances[k]
@@ -165,11 +174,19 @@ __kernel void score_weight_neighbors(
             float weight = 1.0f / fmax(variance, 1.0e-12f);
             weight_sum += weight;
             weighted_outcome += weight * outcomes[nearest_indices[k]];
+            if (params.acquisition == 1u) {
+                // Ratios to the strongest weight avoid underflow in the squared norm.
+                float draw_weight = weight / reference_weight;
+                squared_weight_sum += draw_weight * draw_weight;
+                weighted_noise += draw_weight * thompson_draws[nearest_indices[k]];
+            }
         }
         float mean = weighted_outcome / fmax(weight_sum, 1.0e-12f);
         float se = sqrt(1.0f / fmax(weight_sum, 1.0e-12f)) * params.y_scale;
         if (params.acquisition == 1u) {
-            scores[candidate_index] = mean + se * thompson_draws[candidate_index];
+            // Shared observation noise gives a consistent posterior across candidates.
+            float normalized_noise = weighted_noise / fmax(sqrt(squared_weight_sum), 1.0e-12f);
+            scores[candidate_index] = mean + se * normalized_noise;
         } else if (params.acquisition == 2u) {
             scores[candidate_index] = mean + se;
         } else {

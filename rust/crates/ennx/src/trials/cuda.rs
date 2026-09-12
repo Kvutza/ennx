@@ -36,7 +36,7 @@ impl Engine {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let outcomes = history.iter().map(|&(_, value)| value).collect::<Vec<_>>();
-        let draws = crate::weights::thompson_draws(seeds.len(), config.seed);
+        let draws = crate::weights::thompson_history_draws(history, config.seed);
         let steps = make_steps(leaves, config.length)
             .into_iter()
             .map(cuda_leaf)
@@ -81,7 +81,7 @@ impl Engine {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let outcomes = history.iter().map(|&(_, value)| value).collect::<Vec<_>>();
-        let draws = crate::weights::thompson_draws(seeds.len(), config.seed);
+        let draws = crate::weights::thompson_history_draws(history, config.seed);
         let steps = make_steps(leaves, config.length)
             .into_iter()
             .map(cuda_leaf)
@@ -180,7 +180,7 @@ impl Engine {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let outcomes = history.iter().map(|&(_, value)| value).collect::<Vec<_>>();
-        let draws = crate::weights::thompson_draws(seeds.len(), config.seed);
+        let draws = crate::weights::thompson_history_draws(history, config.seed);
         let steps = make_steps(leaves, config.length)
             .into_iter()
             .map(cuda_leaf)

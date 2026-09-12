@@ -130,6 +130,7 @@ pub(super) struct Engine {
     queue: CommandQueue,
     rows: Buffer<u8>,
     row_bytes: usize,
+    slots: usize,
     tile_count: usize,
     distance: Kernel,
     base_distance: Kernel,
@@ -255,7 +256,7 @@ impl Engine {
             )?,
             outcomes: buffer(&context, super::MAX_HISTORY, CL_MEM_READ_WRITE, "outcomes")?,
             seeds: buffer(&context, 1, CL_MEM_READ_ONLY, "seeds")?,
-            draws: buffer(&context, 1, CL_MEM_READ_ONLY, "draws")?,
+            draws: buffer(&context, slots, CL_MEM_READ_ONLY, "draws")?,
             scores: buffer(&context, 1, CL_MEM_READ_WRITE, "scores")?,
             partials: buffer(
                 &context,
@@ -312,6 +313,7 @@ impl Engine {
             queue,
             rows,
             row_bytes,
+            slots,
             tile_count: tiles.len(),
             distance,
             base_distance,
@@ -364,13 +366,13 @@ impl Engine {
                 high: (seed >> 32) as u32,
             })
             .collect();
-        let draws = crate::weights::thompson_draws(seeds.len(), config.seed);
         let steps = if self.region.is_some() {
             Vec::new()
         } else {
             make_steps(leaves, config.length)
         };
-        self.write_inputs(&history_slots, &outcomes, &seeds, &draws, &steps)?;
+        self.write_inputs(&history_slots, &outcomes, &seeds, &steps)?;
+        self.fill_draws(config)?;
 
         let params = Params {
             row_bytes: to_u32(self.row_bytes, "row bytes")?,
@@ -416,6 +418,7 @@ impl Engine {
                 .set_arg(&self.scratch.draws)
                 .set_arg(&self.scratch.scores)
                 .set_arg(params.as_ref())
+                .set_arg(&self.scratch.history_slots)
                 .set_global_work_size(seeds.len() * THREADS)
                 .set_local_work_size(THREADS)
                 .enqueue_nd_range(&self.queue)
@@ -501,9 +504,9 @@ impl Engine {
         } else {
             make_steps(leaves, config.length)
         };
-        self.write_static(&history_slots, &outcomes, &[], &steps)?;
+        self.write_static(&history_slots, &outcomes, &steps)?;
         self.fill_seeds(base_seed, count)?;
-        self.fill_draws(count, config)?;
+        self.fill_draws(config)?;
 
         let params = Params {
             row_bytes: to_u32(self.row_bytes, "row bytes")?,
@@ -549,6 +552,7 @@ impl Engine {
                 .set_arg(&self.scratch.draws)
                 .set_arg(&self.scratch.scores)
                 .set_arg(params.as_ref())
+                .set_arg(&self.scratch.history_slots)
                 .set_global_work_size(count * THREADS)
                 .set_local_work_size(THREADS)
                 .enqueue_nd_range(&self.queue)
@@ -652,25 +656,19 @@ impl Engine {
                 high: (seed >> 32) as u32,
             })
             .collect();
-        let draws = if self.state.is_some() {
-            Vec::new()
-        } else {
-            crate::weights::thompson_draws(seeds.len(), config.seed)
-        };
         let steps = if self.region.is_some() {
             Vec::new()
         } else {
             make_steps(leaves, config.length)
         };
-        self.write_inputs(&history_slots, &outcomes, &seeds, &draws, &steps)?;
+        self.write_inputs(&history_slots, &outcomes, &seeds, &steps)?;
+        self.fill_draws(config)?;
         if self.state.is_none() {
             unsafe {
                 self.queue
                     .enqueue_write_buffer(&mut self.scratch.edits, CL_BLOCKING, 0, edits, &[])
                     .map_err(|error| format!("failed to write OpenCL sparse edits: {error}"))?;
             }
-        } else {
-            self.fill_draws(seeds.len(), config)?;
         }
 
         let params = Params {
@@ -855,9 +853,9 @@ impl Engine {
         } else {
             make_steps(leaves, config.length)
         };
-        self.write_static(&history_slots, &outcomes, &[], &steps)?;
+        self.write_static(&history_slots, &outcomes, &steps)?;
         self.fill_seeds(base_seed, count)?;
-        self.fill_draws(count, config)?;
+        self.fill_draws(config)?;
 
         let params = Params {
             row_bytes: to_u32(self.row_bytes, "row bytes")?,
@@ -1192,23 +1190,18 @@ impl Engine {
                 high: (seed >> 32) as u32,
             })
             .collect();
-        let draws = if base_seed.is_none() {
-            crate::weights::thompson_draws(seeds.len(), config.seed)
-        } else {
-            Vec::new()
-        };
         let steps = if self.region.is_some() {
             Vec::new()
         } else {
             make_steps(leaves, config.length)
         };
         if let Some(seed) = base_seed {
-            self.write_static(&history_slots, &outcomes, &draws, &steps)?;
+            self.write_static(&history_slots, &outcomes, &steps)?;
             self.fill_seeds(seed, total_candidates)?;
-            self.fill_draws(total_candidates, config)?;
         } else {
-            self.write_inputs(&history_slots, &outcomes, &packed_seeds, &draws, &steps)?;
+            self.write_inputs(&history_slots, &outcomes, &packed_seeds, &steps)?;
         }
+        self.fill_draws(config)?;
         let center_count = match tree {
             Some((centers, region_centers)) => {
                 self.write_centers(centers, region_centers, seeds_per_region)?;
@@ -1319,7 +1312,6 @@ impl Engine {
         }
         let capacity = count.next_power_of_two();
         self.scratch.seeds = buffer(&self.context, capacity, CL_MEM_READ_ONLY, "seeds")?;
-        self.scratch.draws = buffer(&self.context, capacity, CL_MEM_READ_ONLY, "draws")?;
         self.scratch.scores = buffer(&self.context, capacity, CL_MEM_READ_WRITE, "scores")?;
         self.scratch.choice = buffer(&self.context, capacity, CL_MEM_READ_WRITE, "choices")?;
         self.scratch.selected_scores = buffer(
@@ -1392,6 +1384,7 @@ impl Engine {
                 .set_arg(&self.scratch.draws)
                 .set_arg(&self.scratch.scores)
                 .set_arg(params)
+                .set_arg(&self.scratch.history_slots)
                 .set_global_work_size(candidates * THREADS)
                 .set_local_work_size(THREADS)
                 .enqueue_nd_range(&self.queue)
@@ -1506,10 +1499,9 @@ impl Engine {
         history_slots: &[u32],
         outcomes: &[f32],
         seeds: &[Seed],
-        draws: &[f32],
         leaves: &[LeafStep],
     ) -> Result<(), String> {
-        self.write_static(history_slots, outcomes, draws, leaves)?;
+        self.write_static(history_slots, outcomes, leaves)?;
         unsafe {
             self.queue
                 .enqueue_write_buffer(&mut self.scratch.seeds, CL_BLOCKING, 0, seeds, &[])
@@ -1522,7 +1514,6 @@ impl Engine {
         &mut self,
         history_slots: &[u32],
         outcomes: &[f32],
-        draws: &[f32],
         leaves: &[LeafStep],
     ) -> Result<(), String> {
         // Borrowed host slices must remain alive until each upload completes,
@@ -1557,11 +1548,6 @@ impl Engine {
                     )
                     .map_err(|error| format!("failed to write OpenCL outcomes: {error}"))?;
             }
-            if !draws.is_empty() {
-                self.queue
-                    .enqueue_write_buffer(&mut self.scratch.draws, CL_BLOCKING, 0, draws, &[])
-                    .map_err(|error| format!("failed to write OpenCL Thompson draws: {error}"))?;
-            }
         }
         self.sync_leaves(leaves)?;
         self.uploaded_history = history_slots
@@ -1590,11 +1576,12 @@ impl Engine {
         Ok(())
     }
 
-    fn fill_draws(&mut self, count: usize, config: Ask) -> Result<(), String> {
+    fn fill_draws(&mut self, config: Ask) -> Result<(), String> {
         if config.acquisition != crate::weights::AcquisitionKind::Thompson {
             return Ok(());
         }
-        let draws = crate::weights::thompson_draws(count, config.seed);
+        // Cover every resident slot without reading device-managed history.
+        let draws = crate::weights::thompson_draws(self.slots, config.seed);
         unsafe {
             self.queue
                 .enqueue_write_buffer(&mut self.scratch.draws, CL_BLOCKING, 0, &draws, &[])
@@ -1738,5 +1725,174 @@ impl Engine {
                 .map_err(|error| error.to_string())?;
         }
         Ok(word[0])
+    }
+}
+
+#[cfg(test)]
+mod posterior_tests {
+    use super::*;
+
+    #[test]
+    fn resident_noise_uses_slots_and_stays_finite() {
+        let leaves = [Parameter::new(0, 1, 8, 1.0, 1.0, 1.0).unwrap()];
+        let mut engine = match Engine::new(&[128], &leaves, 8) {
+            Ok(engine) => engine,
+            Err(error)
+                if error.contains("no OpenCL GPU or CPU device")
+                    || error.contains("CL_PLATFORM_NOT_FOUND_KHR")
+                    || error.contains("failed to enumerate OpenCL") =>
+            {
+                return
+            }
+            Err(error) => panic!("{error}"),
+        };
+        for (slot, value) in [(1, 129), (4, 131), (6, 132)] {
+            engine.write(slot, &[value]).unwrap();
+        }
+        let centers = [
+            Center {
+                parent: None,
+                seed: 3,
+            },
+            Center {
+                parent: Some(0),
+                seed: 5,
+            },
+        ];
+        let edits = [SparseEdit {
+            leaf: 0,
+            element: 0,
+        }; 4];
+        for aleatoric_scale in [0.05, 1.0e25] {
+            let config = Ask {
+                length: 0.0,
+                neighbors: 2,
+                acquisition: crate::weights::AcquisitionKind::Thompson,
+                seed: 0x1234_5678_9abc_def0,
+                aleatoric_scale,
+                ..Ask::default()
+            };
+            // The nearest rows occupy slots 1 and 4, regardless of history order.
+            // Compute the reference norm in f64 so tiny squared weights survive.
+            let weights = [1.0f32, 9.0].map(|distance| {
+                f64::from(1.0 / (1.0e-9 + config.epistemic_scale * distance + aleatoric_scale))
+            });
+            let noise = [1, 4]
+                .map(|slot| f64::from(crate::hash::normal_metric(config.seed, slot, 0) as f32));
+            let z = (weights[0] * noise[0] + weights[1] * noise[1])
+                / (weights[0] * weights[0] + weights[1] * weights[1]).sqrt();
+            let se = (1.0 / (weights[0] + weights[1]).max(1.0e-12)).sqrt();
+            let expected = (se * z) as f32;
+            let check = |score: f32| {
+                assert!(score.is_finite());
+                assert!(
+                    (score - expected).abs() < 2.0e-5 * expected.abs().max(1.0),
+                    "score={score}, expected={expected}"
+                );
+            };
+            for history in [
+                [(6, 0.0), (1, 0.0), (4, 0.0)],
+                [(4, 0.0), (6, 0.0), (1, 0.0)],
+            ] {
+                for seeds in [&[7u64][..], &[13, 7, 13, 11][..]] {
+                    let (index, score) = engine
+                        .ask(0, &history, 7, seeds, &leaves, config, false)
+                        .unwrap();
+                    assert_eq!(index, 0);
+                    check(score);
+                    let (index, score) = engine
+                        .ask_sparse(
+                            0,
+                            &history,
+                            7,
+                            seeds,
+                            &edits[..seeds.len()],
+                            1,
+                            &leaves,
+                            config,
+                        )
+                        .unwrap();
+                    assert_eq!(index, 0);
+                    check(score);
+                }
+                check(
+                    engine
+                        .ask_stream(0, &history, 7, 19, 2, &leaves, config, false)
+                        .unwrap()
+                        .2,
+                );
+                check(
+                    engine
+                        .sparse_stream(0, &history, 7, 19, 2, 1, &leaves, config)
+                        .unwrap()
+                        .2,
+                );
+                for (_, score) in engine
+                    .regions_stream(0, &history, 2, 2, 19, &leaves, config)
+                    .unwrap()
+                {
+                    check(score);
+                }
+                for (_, score) in engine
+                    .centers_stream(0, &history, 2, &centers, &[0, 1], 19, &leaves, config)
+                    .unwrap()
+                {
+                    check(score);
+                }
+            }
+        }
+
+        // A device-managed search supplies no host history to the draw upload.
+        engine.start_state(3, 0.0).unwrap();
+        unsafe {
+            engine
+                .queue
+                .enqueue_write_buffer(
+                    engine.state.as_mut().unwrap(),
+                    CL_BLOCKING,
+                    0,
+                    &[0u32, 3],
+                    &[],
+                )
+                .unwrap();
+            engine
+                .queue
+                .enqueue_write_buffer(
+                    &mut engine.scratch.history_slots,
+                    CL_BLOCKING,
+                    0,
+                    &[4u32, 6, 1],
+                    &[],
+                )
+                .unwrap();
+            engine
+                .queue
+                .enqueue_write_buffer(
+                    &mut engine.scratch.outcomes,
+                    CL_BLOCKING,
+                    0,
+                    &[0.0f32; 3],
+                    &[],
+                )
+                .unwrap();
+        }
+        let config = Ask {
+            length: 0.0,
+            neighbors: 2,
+            acquisition: crate::weights::AcquisitionKind::Thompson,
+            seed: 42,
+            ..Ask::default()
+        };
+        let history = [(4, 0.0), (6, 0.0), (1, 0.0)];
+        engine.fill_draws(config).unwrap();
+        let expected = crate::weights::thompson_history_draws(&history, config.seed);
+        let mut actual = [0.0f32; 8];
+        unsafe {
+            engine
+                .queue
+                .enqueue_read_buffer(&engine.scratch.draws, CL_BLOCKING, 0, &mut actual, &[])
+                .unwrap();
+        }
+        assert_eq!([actual[4], actual[6], actual[1]].as_slice(), expected);
     }
 }

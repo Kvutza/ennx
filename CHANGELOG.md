@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+Thompson sampling in weight selection and resident search now shares noise
+across candidates through their observed neighbors, using the ENN posterior
+draw construction. For fixed history and function seed, sampled scores are
+stable across candidate reordering, duplication, and batching. Seeded search
+results change from the previous independent per-candidate sampler.
+
 ## 0.2.0 — 2026-09-10
 
 Breaking release. Renamed APIs have no compatibility aliases.

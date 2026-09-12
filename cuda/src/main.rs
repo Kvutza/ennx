@@ -2,11 +2,11 @@ use std::error::Error;
 use std::io;
 use std::time::Instant;
 
-use cuda_core::{CudaContext, CudaStream, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, CudaStream, DeviceBuffer, LaunchConfig, LaunchConfig1D};
 use ennx_cuda::{
     Ask as ResidentAsk, Leaf as ResidentLeaf, MAX_HISTORY, Tile as ResidentTile, TrialEngine,
 };
-use ennx_cuda_kernels::trials;
+use ennx_cuda_kernels::{Bf16Score, SearchState, trials};
 
 type AppResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -142,7 +142,7 @@ fn resident_parity() -> AppResult<()> {
     let history_slots = [0_u32, 1, 2, 3];
     let outcomes = [-0.75_f32, 1.25, 0.5, 2.0];
     let seeds = [3_u64, 17, 0xdead_beef_cafe_babe, u64::MAX - 9, 99, 1001];
-    let draws = [0.1_f32, -0.5, 0.8, -0.2, 0.0, 0.3];
+    let draws = [0.1_f32, -0.5, 0.8, -0.2];
 
     for acquisition in [0_u32, 1, 2] {
         let config = ResidentAsk {
@@ -155,8 +155,7 @@ fn resident_parity() -> AppResult<()> {
         };
         let expected_scores = seeds
             .iter()
-            .enumerate()
-            .map(|(i, &seed)| {
+            .map(|&seed| {
                 cpu_score(
                     &base,
                     &history_rows,
@@ -164,7 +163,7 @@ fn resident_parity() -> AppResult<()> {
                     &leaves,
                     &steps,
                     seed,
-                    draws[i],
+                    &draws,
                     config,
                 )
             })
@@ -199,7 +198,7 @@ fn resident_parity() -> AppResult<()> {
         }
         for (index, (&expected, &actual)) in expected_scores.iter().zip(&scores).enumerate() {
             let tolerance = 2.0e-5 * expected.abs().max(1.0);
-            if (expected - actual).abs() > tolerance {
+            if !actual.is_finite() || (expected - actual).abs() > tolerance {
                 return Err(io::Error::other(format!(
                     "resident score {index} mismatch for acq={acquisition}: expected {expected}, got {actual}, tolerance={tolerance}"
                 ))
@@ -211,13 +210,156 @@ fn resident_parity() -> AppResult<()> {
             .map_err(|error| io::Error::other(format!("resident trial read: {error}")))?;
         let expected = expected_row(&base, &leaves, length, seeds[choice])?;
         compare_rows(&expected, &actual, seeds[choice], length)?;
+
+        if acquisition == 1 {
+            let mut orders = vec![vec![5, 4, 3, 2, 1, 0], vec![2, 3, 4, 5, 0, 1]];
+            for index in 0..seeds.len() {
+                orders.push(vec![index]);
+                orders.push(vec![index; 3]);
+            }
+            // Reuse the same observations and draws, including when history exceeds
+            // the candidate count. Trial slot 4 is outside the unchanged history.
+            for order in orders {
+                let candidates = order.iter().map(|&index| seeds[index]).collect::<Vec<_>>();
+                let (actual_choice, actual_scores) = engine
+                    .ask_scores(
+                        0,
+                        &history_slots,
+                        &outcomes,
+                        4,
+                        &candidates,
+                        &draws,
+                        &steps,
+                        config,
+                        false,
+                    )
+                    .map_err(|error| io::Error::other(format!("resident coherent ask: {error}")))?;
+                let expected_choice = (0..order.len()).fold(0, |best, index| {
+                    if scores[order[index]] > scores[order[best]] {
+                        index
+                    } else {
+                        best
+                    }
+                });
+                if actual_scores.len() != order.len()
+                    || actual_choice != expected_choice
+                    || actual_scores
+                        .iter()
+                        .zip(&order)
+                        .any(|(&actual, &index)| actual.to_bits() != scores[index].to_bits())
+                {
+                    return Err(io::Error::other(format!(
+                        "resident Thompson coherence mismatch: order={order:?}, expected_choice={expected_choice}, actual_choice={actual_choice}, original_scores={scores:?}, actual_scores={actual_scores:?}"
+                    ))
+                    .into());
+                }
+            }
+        }
     }
 
+    bf16_score_parity()?;
     println!(
-        "RESIDENT ok=true target=sm_75 history={} candidates={} choice=passed",
+        "RESIDENT ok=true target=sm_75 history={} candidates={} choice=passed bf16=passed",
         history_rows.len(),
         seeds.len()
     );
+    Ok(())
+}
+
+fn bf16_score_parity() -> AppResult<()> {
+    let context = CudaContext::new(0)?;
+    let stream = context.default_stream();
+    // SAFETY: the generated bindings load the matching embedded kernel artifact.
+    let module = unsafe { trials::load(&context) }?;
+    let params = Bf16Score {
+        row_stride: 1,
+        coefficient: 1.0,
+        epistemic_scale: 0.7,
+        aleatoric_scale: 0.05,
+        y_scale: 1.7,
+        beta: 1.2,
+        history: 3,
+        candidates: 2,
+        base_slot: 0,
+        neighbors: 2,
+        acquisition: 1,
+        tiles: 1,
+        resident: 0,
+    };
+    let outcomes = [0.5_f32, 10.0, -0.25];
+    let variances = [8.0_f32, 0.5, 0.125];
+    let draws = [0.1_f32, -0.5, 0.8];
+    // Duplicate queries select observations 0 and 2. Observation 0 is nearer,
+    // but observation 2 has the strongest weight because its variance is lower.
+    let partials = DeviceBuffer::from_host(&stream, &[1.0_f32, 9.0, 2.0, 1.0, 9.0, 2.0])?;
+    let outcomes_device = DeviceBuffer::from_host(&stream, &outcomes)?;
+    let variances_device = DeviceBuffer::from_host(&stream, &variances)?;
+    let draws_device = DeviceBuffer::from_host(&stream, &draws)?;
+    let state = DeviceBuffer::<SearchState>::zeroed(&stream, 1)?;
+    let mut scores = DeviceBuffer::<f32>::zeroed(&stream, 2)?;
+    let launch = module.prepare_score_bf16(LaunchConfig1D::new(2, 256, 0))?;
+    module.score_bf16(
+        &stream,
+        &launch,
+        &partials,
+        &outcomes_device,
+        &variances_device,
+        &state,
+        &draws_device,
+        &mut scores,
+        params,
+    )?;
+    let scores = scores.to_host_vec(&stream)?;
+
+    let mut weight_sum = 0.0_f64;
+    let mut weighted_value = 0.0_f64;
+    let mut weighted_noise = 0.0_f64;
+    let mut squared_weight_sum = 0.0_f64;
+    for (distance, index) in [(1.0, 0), (2.0, 2)] {
+        let weight = 1.0
+            / (1.0e-9
+                + f64::from(params.epistemic_scale) * distance
+                + f64::from(params.aleatoric_scale)
+                + f64::from(variances[index]));
+        weight_sum += weight;
+        weighted_value += weight * f64::from(outcomes[index]);
+        weighted_noise += weight * f64::from(draws[index]);
+        squared_weight_sum += weight * weight;
+    }
+    let se = f64::from(params.y_scale) / weight_sum.sqrt();
+    let expected = weighted_value / weight_sum + se * weighted_noise / squared_weight_sum.sqrt();
+    if scores[0].to_bits() != scores[1].to_bits()
+        || scores.iter().any(|&score| {
+            !score.is_finite()
+                || (f64::from(score) - expected).abs() > 2.0e-5 * expected.abs().max(1.0)
+        })
+    {
+        return Err(io::Error::other(format!(
+            "BF16 Thompson score mismatch: expected {expected}, duplicate scores={scores:?}"
+        ))
+        .into());
+    }
+
+    let launch = module.prepare_draw_bf16(LaunchConfig1D::new(1, 256, 0))?;
+    let mut sampled = DeviceBuffer::<f32>::zeroed(&stream, 3)?;
+    let mut original = Vec::new();
+    for slots in [[11_u32, 3, 27], [27, 11, 3]] {
+        let slots = DeviceBuffer::from_host(&stream, &slots)?;
+        module.draw_bf16(&stream, &launch, &mut sampled, &slots, &state, 42, 3, 0)?;
+        let actual = sampled.to_host_vec(&stream)?;
+        if original.is_empty() {
+            original = actual;
+        } else if actual != [original[2], original[0], original[1]]
+            || actual.iter().any(|draw| !draw.is_finite())
+            || actual.iter().all(|&draw| draw == actual[0])
+        {
+            return Err(io::Error::other(format!(
+                "BF16 Thompson draw slot mismatch: original={original:?}, reordered={actual:?}"
+            ))
+            .into());
+        }
+    }
+    context.check_err()?;
     Ok(())
 }
 
@@ -251,7 +393,7 @@ fn cpu_score(
     leaves: &[Leaf],
     steps: &[ResidentLeaf],
     seed: u64,
-    draw: f32,
+    draws: &[f32],
     config: ResidentAsk,
 ) -> f32 {
     let mut nearest = vec![(f32::INFINITY, 0_usize); config.neighbors];
@@ -265,21 +407,30 @@ fn cpu_score(
             nearest.pop();
         }
     }
-    let mut weight_sum = 0.0_f32;
-    let mut weighted_value = 0.0_f32;
+    let mut weight_sum = 0.0_f64;
+    let mut weighted_value = 0.0_f64;
+    let mut weighted_noise = 0.0_f64;
+    let mut weight_squared_sum = 0.0_f64;
     for &(distance, history_index) in &nearest {
-        let variance = 1.0e-9 + config.epistemic_scale * distance + config.aleatoric_scale;
+        let variance = 1.0e-9
+            + f64::from(config.epistemic_scale) * f64::from(distance)
+            + f64::from(config.aleatoric_scale);
         let weight = 1.0 / variance.max(1.0e-12);
         weight_sum += weight;
-        weighted_value += weight * outcomes[history_index];
+        weighted_value += weight * f64::from(outcomes[history_index]);
+        if config.acquisition == 1 {
+            weighted_noise += weight * f64::from(draws[history_index]);
+            weight_squared_sum += weight * weight;
+        }
     }
     let mean = weighted_value / weight_sum.max(1.0e-12);
-    let se = (1.0 / weight_sum.max(1.0e-12)).sqrt() * config.y_scale;
-    match config.acquisition {
-        1 => mean + se * draw,
+    let se = (1.0 / weight_sum.max(1.0e-12)).sqrt() * f64::from(config.y_scale);
+    let score = match config.acquisition {
+        1 => mean + se * weighted_noise / weight_squared_sum.sqrt(),
         2 => mean + se,
-        _ => mean + config.beta * se,
-    }
+        _ => mean + f64::from(config.beta) * se,
+    };
+    score as f32
 }
 
 fn cpu_distance(
@@ -449,7 +600,7 @@ fn trial_benchmark(args: &[String]) -> AppResult<()> {
     let seeds = (0..candidates)
         .map(|index| 0x9e37_79b9_7f4a_7c15_u64.wrapping_mul(index as u64 + 1))
         .collect::<Vec<_>>();
-    let draws = (0..candidates)
+    let draws = (0..history)
         .map(|index| ((index.wrapping_mul(29) % 97) as f32 - 48.0) / 24.0)
         .collect::<Vec<_>>();
     let config = ResidentAsk {

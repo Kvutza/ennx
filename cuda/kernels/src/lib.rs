@@ -1281,6 +1281,15 @@ pub mod trials {
             }
             let mut weight_sum = 0.0_f32;
             let mut weighted_value = 0.0_f32;
+            let mut weighted_noise = 0.0_f32;
+            let mut weight_squared_sum = 0.0_f32;
+            let reference_weight = if acquisition == 1 {
+                let distance = unsafe { NEAREST_DISTANCES[0] };
+                let variance = 1.0e-9 + epistemic_scale * distance + aleatoric_scale;
+                (1.0_f32 / variance.max(1.0e-12)).max(f32::MIN_POSITIVE)
+            } else {
+                1.0
+            };
             k = 0;
             while k < neighbors {
                 let distance = unsafe { NEAREST_DISTANCES[k as usize] };
@@ -1289,12 +1298,18 @@ pub mod trials {
                 let weight = 1.0 / variance.max(1.0e-12);
                 weight_sum += weight;
                 weighted_value += weight * outcome;
+                if acquisition == 1 {
+                    let index = unsafe { NEAREST_INDICES[k as usize] } as usize;
+                    let draw_weight = weight / reference_weight;
+                    weighted_noise += draw_weight * draws[index];
+                    weight_squared_sum += draw_weight * draw_weight;
+                }
                 k += 1;
             }
             let mean = weighted_value / weight_sum.max(1.0e-12);
             let se = (1.0 / weight_sum.max(1.0e-12)).sqrt() * y_scale;
             let score = match acquisition {
-                1 => mean + se * draws[candidate as usize],
+                1 => mean + se * (weighted_noise / weight_squared_sum.sqrt().max(1.0e-12)),
                 2 => mean + se,
                 _ => mean + beta * se,
             };
@@ -1437,7 +1452,6 @@ pub mod trials {
                 outcomes,
                 variances,
                 draws,
-                candidate,
                 params,
             );
             unsafe {
@@ -1449,12 +1463,23 @@ pub mod trials {
     #[kernel]
     #[launch_bounds(THREADS)]
     #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
-    pub fn draw_bf16(mut draws: DisjointSlice<f32>, seed: u64, count: u32) {
+    pub fn draw_bf16(
+        mut draws: DisjointSlice<f32>,
+        history_slots: &[u32],
+        state: &[SearchState],
+        seed: u64,
+        mut count: u32,
+        resident: u32,
+    ) {
+        if resident != 0 {
+            count = state[0].history;
+        }
         let mut index = thread::threadIdx_x() + thread::blockIdx_x() * THREADS;
         let stride = thread::gridDim_x() * THREADS;
         while index < count {
             unsafe {
-                *draws.get_unchecked_mut(index as usize) = draw_normal(seed, index, 0) as f32;
+                *draws.get_unchecked_mut(index as usize) =
+                    draw_normal(seed, history_slots[index as usize], 0) as f32;
             }
             index += stride;
         }
@@ -1633,6 +1658,15 @@ pub mod trials {
             }
             let mut weight_sum = 0.0_f32;
             let mut weighted_value = 0.0_f32;
+            let mut weighted_noise = 0.0_f32;
+            let mut weight_squared_sum = 0.0_f32;
+            let reference_weight = if acquisition == 1 {
+                let distance = unsafe { NEAREST_DISTANCES[0] };
+                let variance = 1.0e-9 + epistemic_scale * distance + aleatoric_scale;
+                (1.0_f32 / variance.max(1.0e-12)).max(f32::MIN_POSITIVE)
+            } else {
+                1.0
+            };
             k = 0;
             while k < neighbors {
                 let distance = unsafe { NEAREST_DISTANCES[k as usize] };
@@ -1641,12 +1675,18 @@ pub mod trials {
                 let weight = 1.0 / variance.max(1.0e-12);
                 weight_sum += weight;
                 weighted_value += weight * outcome;
+                if acquisition == 1 {
+                    let index = unsafe { NEAREST_INDICES[k as usize] } as usize;
+                    let draw_weight = weight / reference_weight;
+                    weighted_noise += draw_weight * draws[index];
+                    weight_squared_sum += draw_weight * draw_weight;
+                }
                 k += 1;
             }
             let mean = weighted_value / weight_sum.max(1.0e-12);
             let se = (1.0 / weight_sum.max(1.0e-12)).sqrt() * y_scale;
             let score = match acquisition {
-                1 => mean + se * draws[candidate as usize],
+                1 => mean + se * (weighted_noise / weight_squared_sum.sqrt().max(1.0e-12)),
                 2 => mean + se,
                 _ => mean + beta * se,
             };

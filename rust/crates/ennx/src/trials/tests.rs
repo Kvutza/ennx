@@ -256,6 +256,212 @@ fn cpu_thompson() {
     );
 }
 
+#[derive(Clone, Copy, Debug)]
+enum ThompsonRoute {
+    Dense,
+    Sparse,
+    Tree,
+}
+
+fn thompson_search(device: ComputeDevice) -> Search {
+    let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
+    let rows = [
+        base,
+        [0x77, 0x98, 0x0a, 101, 120, 140, 160],
+        [0x65, 0x87, 0x09, 99, 119, 139, 159],
+        [0x87, 0xa9, 0x0b, 102, 122, 142, 162],
+        [0x54, 0x76, 0x08, 97, 117, 137, 157],
+    ];
+    let mut search = Search::new(&base, 0.0, leaves(), 5, device).unwrap();
+    search
+        .replace_history(&rows.concat(), &[0.2, -0.4, 1.3, 0.7, -0.9])
+        .unwrap();
+    search
+}
+
+fn thompson_select(
+    device: ComputeDevice,
+    route: ThompsonRoute,
+    seeds: &[u64],
+    config: Ask,
+) -> (usize, f32) {
+    // Every comparison starts with identical history slots, without tell or replacement
+    // between queries changing the identities of the sampled observations.
+    let mut search = thompson_search(device);
+    match route {
+        ThompsonRoute::Dense => {
+            let trial = search.ask(seeds, config).unwrap();
+            (trial.index, trial.score)
+        }
+        ThompsonRoute::Sparse => {
+            let trial = search.ask_sparse(seeds, 2, config).unwrap();
+            (trial.index, trial.score)
+        }
+        ThompsonRoute::Tree => search
+            .ask_centers(
+                1,
+                seeds.len(),
+                &[
+                    Center {
+                        parent: None,
+                        seed: 3,
+                    },
+                    Center {
+                        parent: Some(0),
+                        seed: 5,
+                    },
+                ],
+                &[1],
+                seeds,
+                config,
+            )
+            .unwrap()[0],
+    }
+}
+
+fn coherent_thompson(device: ComputeDevice, route: ThompsonRoute) {
+    let seeds = [7, 11, 13];
+    for draw_seed in [0, 0xfeed_beef, 0x1234_5678_9abc_def0] {
+        let config = Ask {
+            acquisition: AcquisitionKind::Thompson,
+            neighbors: 3,
+            length: 1.0,
+            y_scale: 2.0,
+            seed: draw_seed,
+            ..Ask::default()
+        };
+        let scores: Vec<f32> = seeds
+            .iter()
+            .map(|&seed| thompson_select(device, route, &[seed], config).1)
+            .collect();
+        let best =
+            scores.iter().enumerate().fold(
+                0,
+                |best, (index, &score)| {
+                    if score > scores[best] {
+                        index
+                    } else {
+                        best
+                    }
+                },
+            );
+        for order in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
+            let reordered = order.map(|index| seeds[index]);
+            let (index, score) = thompson_select(device, route, &reordered, config);
+            assert_eq!(
+                score, scores[order[index]],
+                "batch/singleton mismatch: {device:?} {route:?}, seed {draw_seed}"
+            );
+            assert_eq!(score, scores[best], "reorder changed the winning score");
+            let expected = order
+                .iter()
+                .position(|&i| scores[i] == scores[best])
+                .unwrap();
+            assert_eq!(index, expected, "ties must select the first candidate");
+        }
+        for (index, &seed) in seeds.iter().enumerate() {
+            let duplicate = thompson_select(device, route, &[seed; 3], config);
+            assert_eq!(duplicate, (0, scores[index]), "duplicate candidates differ");
+        }
+        if device != ComputeDevice::Cpu {
+            for (index, &seed) in seeds.iter().enumerate() {
+                let expected = thompson_select(ComputeDevice::Cpu, route, &[seed], config).1;
+                assert!(
+                    (scores[index] - expected).abs() < 1e-5,
+                    "CPU/GPU mismatch: {device:?} {route:?}, {expected} vs {}",
+                    scores[index]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn cpu_thompson_coherent_dense() {
+    coherent_thompson(ComputeDevice::Cpu, ThompsonRoute::Dense);
+}
+
+#[test]
+fn cpu_thompson_coherent_sparse() {
+    coherent_thompson(ComputeDevice::Cpu, ThompsonRoute::Sparse);
+}
+
+#[test]
+fn cpu_thompson_coherent_tree() {
+    coherent_thompson(ComputeDevice::Cpu, ThompsonRoute::Tree);
+}
+
+#[test]
+fn cpu_thompson_shared_noise_moments() {
+    let history = [(11, 0.0), (3, 0.0), (27, 0.0), (8, 0.0)];
+    let neighborhoods = [
+        [(1.0, 0), (3.0, 1)],
+        [(1.0, 1), (3.0, 2)],
+        [(1.0, 2), (3.0, 3)],
+    ];
+    let mut sums = [0.0f64; 3];
+    let mut squares = [0.0f64; 3];
+    let mut products = [0.0f64; 2];
+    let count = 8192;
+    for seed in 0..count {
+        let config = Ask {
+            acquisition: AcquisitionKind::Thompson,
+            neighbors: 2,
+            epistemic_scale: 1.0,
+            aleatoric_scale: 0.0,
+            y_scale: 2.0,
+            seed,
+            ..Ask::default()
+        };
+        let draws = crate::weights::thompson_history_draws(&history, seed);
+        let samples =
+            neighborhoods.map(|nearest| f64::from(cpu::score(&nearest, &history, &draws, config)));
+        for index in 0..3 {
+            sums[index] += samples[index];
+            squares[index] += samples[index] * samples[index];
+        }
+        products[0] += samples[0] * samples[1];
+        products[1] += samples[0] * samples[2];
+    }
+    let means = sums.map(|sum| sum / count as f64);
+    // Weights 1 and 1/3 give posterior variance 4 / (1 + 1/3) = 3.
+    // The overlapping pair has noise correlation (1/3) / (1 + 1/9) = 0.3.
+    for index in 0..3 {
+        assert!(means[index].abs() < 0.08, "biased marginal: {means:?}");
+        let variance = squares[index] / count as f64 - means[index] * means[index];
+        assert!(
+            (variance - 3.0).abs() < 0.15,
+            "marginal variance: {variance}"
+        );
+    }
+    for (index, expected) in [0.9, 0.0].into_iter().enumerate() {
+        let covariance = products[index] / count as f64 - means[0] * means[index + 1];
+        assert!(
+            (covariance - expected).abs() < 0.12,
+            "shared-noise covariance: expected {expected}, got {covariance}"
+        );
+    }
+}
+
+#[test]
+fn cpu_thompson_history_slots_survive_reorder() {
+    let history = [(11, 0.5), (3, -0.25), (27, 1.0)];
+    let reordered = [history[2], history[0], history[1]];
+    let config = Ask {
+        acquisition: AcquisitionKind::Thompson,
+        neighbors: 2,
+        seed: 0xfeed_beef,
+        ..Ask::default()
+    };
+    let draws = crate::weights::thompson_history_draws(&history, config.seed);
+    let reordered_draws = crate::weights::thompson_history_draws(&reordered, config.seed);
+    assert_eq!(reordered_draws, [draws[2], draws[0], draws[1]]);
+    assert_eq!(
+        cpu::score(&[(0.5, 0), (2.0, 2)], &history, &draws, config),
+        cpu::score(&[(0.5, 1), (2.0, 0)], &reordered, &reordered_draws, config)
+    );
+}
+
 #[test]
 fn cpu_sparse2() {
     sparse_stream(ComputeDevice::Cpu);
@@ -414,6 +620,25 @@ fn metal_thompson() {
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[test]
+fn metal_thompson_coherent() {
+    let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
+    match Search::new(&base, 0.0, leaves(), 5, ComputeDevice::Metal) {
+        Ok(_) => {
+            for route in [
+                ThompsonRoute::Dense,
+                ThompsonRoute::Sparse,
+                ThompsonRoute::Tree,
+            ] {
+                coherent_thompson(ComputeDevice::Metal, route);
+            }
+        }
+        Err(error) if metal_unavailable(&error) => {}
+        Err(error) => panic!("{error}"),
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "metal"))]
+#[test]
 fn metal_sparse2() {
     let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
     match Search::new(&base, 0.0, leaves(), 4, ComputeDevice::Metal) {
@@ -538,6 +763,25 @@ fn opencl_thompson() {
             ComputeDevice::OpenCl,
             crate::weights::AcquisitionKind::Thompson,
         ),
+        Err(error) if opencl_unavailable(&error) => {}
+        Err(error) => panic!("{error}"),
+    }
+}
+
+#[cfg(feature = "opencl")]
+#[test]
+fn opencl_thompson_coherent() {
+    let base = [0x76, 0x98, 0x0a, 100, 120, 140, 160];
+    match Search::new(&base, 0.0, leaves(), 5, ComputeDevice::OpenCl) {
+        Ok(_) => {
+            for route in [
+                ThompsonRoute::Dense,
+                ThompsonRoute::Sparse,
+                ThompsonRoute::Tree,
+            ] {
+                coherent_thompson(ComputeDevice::OpenCl, route);
+            }
+        }
         Err(error) if opencl_unavailable(&error) => {}
         Err(error) => panic!("{error}"),
     }

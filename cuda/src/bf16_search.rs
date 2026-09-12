@@ -99,11 +99,11 @@ impl Bf16Scratch {
                 DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
             self.outcomes = DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
             self.variances = DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
+            self.draws = DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
             self.history_capacity = history_capacity;
         }
         if candidate_capacity > self.candidate_capacity {
             self.seeds = DeviceBuffer::zeroed(stream, candidate_capacity).map_err(cuda_error)?;
-            self.draws = DeviceBuffer::zeroed(stream, candidate_capacity).map_err(cuda_error)?;
             self.scores = DeviceBuffer::zeroed(stream, candidate_capacity).map_err(cuda_error)?;
             self.candidate_capacity = candidate_capacity;
         }
@@ -716,10 +716,7 @@ impl Bf16SearchEngine {
             .runtime
             .module
             .prepare_draw_bf16(LaunchConfig1D::new(
-                to_u32(
-                    shape.candidates.div_ceil(THREADS as usize),
-                    "BF16 draw blocks",
-                )?,
+                to_u32(input.history.div_ceil(THREADS as usize), "BF16 draw blocks")?,
                 THREADS,
                 0,
             ))
@@ -778,8 +775,11 @@ impl Bf16SearchEngine {
                 &self.runtime.stream,
                 &draw_launch,
                 &mut self.scratch.draws,
+                &self.scratch.history_slots,
+                &self.state,
                 input.draw_seed,
-                candidates,
+                params.history,
+                params.resident,
             )
             .map_err(cuda_error)?;
         self.runtime

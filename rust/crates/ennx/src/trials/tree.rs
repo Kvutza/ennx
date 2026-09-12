@@ -60,7 +60,11 @@ pub(super) fn cpu_ask(
         let parent = center.parent.map_or(root, |index| &center_rows[index]);
         center_rows.push(materialize(parent, leaves, &steps, center.seed));
     }
-    let draws = crate::weights::thompson_draws(seeds.len(), config.seed);
+    let draws = if config.acquisition == crate::weights::AcquisitionKind::Thompson {
+        crate::weights::thompson_history_draws(history, config.seed)
+    } else {
+        Vec::new()
+    };
     let mut results = Vec::with_capacity(region_centers.len());
     for (region, &center) in region_centers.iter().enumerate() {
         let start = region * seeds_per_region;
@@ -75,7 +79,7 @@ pub(super) fn cpu_ask(
                     trial_distance(&center_rows[center], row, leaves, &steps, seeds[index]);
                 insert_neighbor(&mut nearest, distance, observation);
             }
-            let value = score(&nearest, history, draws[index], config);
+            let value = score(&nearest, history, &draws, config);
             if value > best.1 {
                 best = (index, value);
             }

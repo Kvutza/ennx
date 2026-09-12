@@ -103,7 +103,10 @@ impl UCBAcquisition {
     }
 }
 
-/// Thompson sampling acquisition optimizer.
+/// Independent Gaussian marginal sampling from supplied means and standard errors.
+///
+/// This helper has no neighbor information and cannot preserve ENN posterior
+/// correlations. The optimizer uses `ENN::posterior_draw` for that purpose.
 pub struct ThompsonAcquisition;
 
 impl ThompsonAcquisition {
