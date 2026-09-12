@@ -2,7 +2,7 @@ use std::error::Error;
 use std::io;
 use std::time::Instant;
 
-use cuda_core::{CudaContext, CudaStream, DeviceBuffer, LaunchConfig, LaunchConfig1D};
+use cuda_core::{CudaContext, CudaStream, DeviceBuffer, LaunchConfig1D, simt::LaunchConfig};
 use ennx_cuda::{
     Ask as ResidentAsk, Leaf as ResidentLeaf, MAX_HISTORY, Tile as ResidentTile, TrialEngine,
 };

@@ -175,7 +175,7 @@ impl Bf16SearchEngine {
         validate_bf16(len, leaves)?;
         let mut engine = Self::allocate(len, leaves, slots)?;
         unsafe {
-            cuda_core::memory::memcpy_dtod_async(
+            cuda_core::simt::memory::memcpy_dtod_async(
                 engine.rows.cu_deviceptr(),
                 pointer,
                 row_bytes(len)?,
@@ -341,7 +341,7 @@ impl Bf16SearchEngine {
             .checked_mul(size_of::<f32>())
             .ok_or("CUDA BF16 tell byte count overflow")?;
         unsafe {
-            cuda_core::memory::memcpy_dtod_async(
+            cuda_core::simt::memory::memcpy_dtod_async(
                 self.tell_values.cu_deviceptr(),
                 values,
                 bytes,
@@ -349,7 +349,7 @@ impl Bf16SearchEngine {
             )
             .map_err(cuda_error)?;
             if let Some(pointer) = variances {
-                cuda_core::memory::memcpy_dtod_async(
+                cuda_core::simt::memory::memcpy_dtod_async(
                     self.tell_variances.cu_deviceptr(),
                     pointer,
                     bytes,
@@ -357,7 +357,7 @@ impl Bf16SearchEngine {
                 )
                 .map_err(cuda_error)?;
             } else {
-                cuda_core::memory::memset_d8_async(
+                cuda_core::simt::memory::memset_d8_async(
                     self.tell_variances.cu_deviceptr(),
                     0,
                     bytes,
@@ -391,7 +391,7 @@ impl Bf16SearchEngine {
             .checked_mul(size_of::<f32>())
             .ok_or("CUDA BF16 tell byte count overflow")?;
         unsafe {
-            cuda_core::memory::memcpy_dtod_async(
+            cuda_core::simt::memory::memcpy_dtod_async(
                 self.tell_values.cu_deviceptr(),
                 values,
                 bytes,
@@ -399,7 +399,7 @@ impl Bf16SearchEngine {
             )
             .map_err(cuda_error)?;
             if let Some(pointer) = variances {
-                cuda_core::memory::memcpy_dtod_async(
+                cuda_core::simt::memory::memcpy_dtod_async(
                     self.tell_variances.cu_deviceptr(),
                     pointer,
                     bytes,
@@ -407,7 +407,7 @@ impl Bf16SearchEngine {
                 )
                 .map_err(cuda_error)?;
             } else {
-                cuda_core::memory::memset_d8_async(
+                cuda_core::simt::memory::memset_d8_async(
                     self.tell_variances.cu_deviceptr(),
                     0,
                     bytes,
@@ -880,7 +880,7 @@ impl Bf16SearchEngine {
             return Ok(());
         }
         unsafe {
-            cuda_core::memory::memcpy_dtod_async(
+            cuda_core::simt::memory::memcpy_dtod_async(
                 self.row_pointer(destination)?,
                 self.row_pointer(source)?,
                 row_bytes(self.row_len)?,
@@ -894,7 +894,7 @@ impl Bf16SearchEngine {
         self.check_slot(slot)?;
         let mut output = Vec::<u16>::with_capacity(self.row_len);
         unsafe {
-            cuda_core::memory::memcpy_dtoh_async(
+            cuda_core::simt::memory::memcpy_dtoh_async(
                 output.as_mut_ptr(),
                 self.row_pointer(slot)?,
                 row_bytes(self.row_len)?,
@@ -936,7 +936,7 @@ impl Bf16SearchEngine {
                 .checked_add(offset as u64)
                 .ok_or("CUDA BF16 batch pointer overflow")?;
             unsafe {
-                cuda_core::memory::memcpy_dtod_async(
+                cuda_core::simt::memory::memcpy_dtod_async(
                     destination,
                     self.row_pointer(slot as usize)?,
                     bytes,
@@ -1014,7 +1014,7 @@ impl Bf16SearchEngine {
 
     fn clear_status(&self, count: usize) -> CudaResult<()> {
         unsafe {
-            cuda_core::memory::memset_d8_async(
+            cuda_core::simt::memory::memset_d8_async(
                 self.scratch.status.cu_deviceptr(),
                 0,
                 count

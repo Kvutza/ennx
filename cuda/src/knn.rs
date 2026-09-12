@@ -483,7 +483,7 @@ impl CudaIndex {
                     .checked_mul(size_of::<f32>())
                     .ok_or("CUDA index copy size overflow")?;
                 unsafe {
-                    cuda_core::memory::memcpy_dtod_async(
+                    cuda_core::simt::memory::memcpy_dtod_async(
                         next.cu_deviceptr(),
                         self.rows.cu_deviceptr(),
                         used_bytes,
@@ -1367,7 +1367,7 @@ fn copy_at<T: DeviceCopy>(
         .checked_mul(size_of::<T>())
         .ok_or("CUDA copy byte offset overflow")?;
     unsafe {
-        cuda_core::memory::memcpy_htod_async(
+        cuda_core::simt::memory::memcpy_htod_async(
             buffer.cu_deviceptr() + byte_offset as u64,
             values.as_ptr(),
             size_of_val(values),

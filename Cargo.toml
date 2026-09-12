@@ -32,9 +32,9 @@ rand_distr = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 toml = "0.8"
-cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
-cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
-cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "1f4d813719012d384f2db12b88efc9314c8bf50c" }
+cuda-core = "0.3.1"
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "6abfaa091e29a6275c1943895bfbc97efa306e98" }
+cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "6abfaa091e29a6275c1943895bfbc97efa306e98" }
 
 [profile.dev]
 opt-level = 1
