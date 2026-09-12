@@ -175,7 +175,7 @@ impl Engine {
             )?,
             outcomes: shared(&runtime, super::MAX_HISTORY * size_of::<f32>(), "outcomes")?,
             seeds: shared(&runtime, size_of::<Seed>(), "seeds")?,
-            draws: shared(&runtime, size_of::<f32>(), "draws")?,
+            draws: shared(&runtime, slots * size_of::<f32>(), "draws")?,
             scores: shared(&runtime, size_of::<f32>(), "scores")?,
             partials: shared(
                 &runtime,
@@ -268,7 +268,7 @@ impl Engine {
         self.sync_history(history)?;
         self.sync_steps(&steps);
         self.write_seeds(seeds);
-        self.sync_draws(seeds.len(), config);
+        self.sync_draws(config);
 
         let params = Params {
             row_stride: to_u32(self.row_stride, "row stride")?,
@@ -314,6 +314,7 @@ impl Engine {
         encoder.set_buffer(2, Some(&self.scratch.draws), 0);
         encoder.set_buffer(3, Some(&self.scratch.scores), 0);
         set_params(&encoder, 4, &params);
+        encoder.set_buffer(5, Some(&self.scratch.history_slots), 0);
         encoder.dispatch_thread_groups(
             MTLSize {
                 width: seeds.len() as u64,
@@ -392,7 +393,7 @@ impl Engine {
         self.sync_history(history)?;
         self.sync_steps(&steps);
         self.fill_seeds(base_seed, count)?;
-        self.fill_draws(count, config)?;
+        self.sync_draws(config);
 
         let params = Params {
             row_stride: to_u32(self.row_stride, "row stride")?,
@@ -438,6 +439,7 @@ impl Engine {
         encoder.set_buffer(2, Some(&self.scratch.draws), 0);
         encoder.set_buffer(3, Some(&self.scratch.scores), 0);
         set_params(&encoder, 4, &params);
+        encoder.set_buffer(5, Some(&self.scratch.history_slots), 0);
         encoder.dispatch_thread_groups(
             MTLSize {
                 width: count as u64,
@@ -535,10 +537,8 @@ impl Engine {
         self.sync_history(history)?;
         self.sync_steps(&steps);
         self.write_seeds(seeds);
-        if self.state.is_some() {
-            self.fill_draws(seeds.len(), config)?;
-        } else {
-            self.sync_draws(seeds.len(), config);
+        self.sync_draws(config);
+        if self.state.is_none() {
             copy_to(&self.scratch.edits, edits);
         }
 
@@ -695,7 +695,7 @@ impl Engine {
         self.sync_history(history)?;
         self.sync_steps(&steps);
         self.fill_seeds(base_seed, count)?;
-        self.fill_draws(count, config)?;
+        self.sync_draws(config);
 
         let params = Params {
             row_stride: to_u32(self.row_stride, "row stride")?,
@@ -998,12 +998,11 @@ impl Engine {
         };
         self.sync_history(history)?;
         self.sync_steps(&steps);
+        self.sync_draws(config);
         if let Some(seed) = base_seed {
             self.fill_seeds(seed, total_candidates)?;
-            self.fill_draws(total_candidates, config)?;
         } else {
             self.write_seeds(seeds);
-            self.sync_draws(seeds.len(), config);
         }
 
         let params = Params {
@@ -1050,6 +1049,7 @@ impl Engine {
         encoder.set_buffer(2, Some(&self.scratch.draws), 0);
         encoder.set_buffer(3, Some(&self.scratch.scores), 0);
         set_params(&encoder, 4, &params);
+        encoder.set_buffer(5, Some(&self.scratch.history_slots), 0);
         encoder.dispatch_thread_groups(
             MTLSize {
                 width: total_candidates as u64,
@@ -1146,11 +1146,6 @@ impl Engine {
             &self.runtime,
             capacity.saturating_mul(size_of::<Seed>()),
             "seeds",
-        )?;
-        self.scratch.draws = shared(
-            &self.runtime,
-            capacity.saturating_mul(size_of::<f32>()),
-            "draws",
         )?;
         self.scratch.scores = shared(
             &self.runtime,
@@ -1260,9 +1255,11 @@ impl Engine {
         self.resident.steps.extend_from_slice(steps);
     }
 
-    fn sync_draws(&self, count: usize, config: Ask) {
+    fn sync_draws(&self, config: Ask) {
         if config.acquisition == crate::weights::AcquisitionKind::Thompson {
-            let draws = crate::weights::thompson_draws(count, config.seed);
+            // Cover every resident slot without reading device-managed history.
+            let slots = self.scratch.draws.length() as usize / size_of::<f32>();
+            let draws = crate::weights::thompson_draws(slots, config.seed);
             copy_to(&self.scratch.draws, &draws);
         }
     }
@@ -1302,14 +1299,6 @@ impl Engine {
         encoder.end_encoding();
         command.commit();
         command.wait_until_completed();
-        Ok(())
-    }
-
-    fn fill_draws(&self, count: usize, config: Ask) -> Result<(), String> {
-        if config.acquisition != crate::weights::AcquisitionKind::Thompson {
-            return Ok(());
-        }
-        self.sync_draws(count, config);
         Ok(())
     }
 
@@ -1511,5 +1500,133 @@ impl Engine {
     pub(super) fn state_word(&self, index: usize) -> Result<u32, String> {
         let state = self.state.as_ref().ok_or("search state is not resident")?;
         Ok(unsafe { state.contents().cast::<u32>().add(index).read() })
+    }
+}
+
+#[cfg(test)]
+mod posterior_tests {
+    use super::*;
+
+    #[test]
+    fn resident_noise_uses_slots_and_stays_finite() {
+        let leaves = [Parameter::new(0, 1, 8, 1.0, 1.0, 1.0).unwrap()];
+        let mut engine = match Engine::new(&[128], &leaves, 8) {
+            Ok(engine) => engine,
+            Err(error) if error.contains("no default Metal device found") => return,
+            Err(error) => panic!("{error}"),
+        };
+        for (slot, value) in [(1, 129), (4, 131), (6, 132)] {
+            engine.write(slot, &[value]);
+        }
+        let centers = [
+            Center {
+                parent: None,
+                seed: 3,
+            },
+            Center {
+                parent: Some(0),
+                seed: 5,
+            },
+        ];
+        let edits = [SparseEdit {
+            leaf: 0,
+            element: 0,
+        }; 4];
+        for aleatoric_scale in [0.05, 1.0e25] {
+            let config = Ask {
+                length: 0.0,
+                neighbors: 2,
+                acquisition: crate::weights::AcquisitionKind::Thompson,
+                seed: 0x1234_5678_9abc_def0,
+                aleatoric_scale,
+                ..Ask::default()
+            };
+            // The nearest rows occupy slots 1 and 4, regardless of history order.
+            // Compute the reference norm in f64 so tiny squared weights survive.
+            let weights = [1.0f32, 9.0].map(|distance| {
+                f64::from(1.0 / (1.0e-9 + config.epistemic_scale * distance + aleatoric_scale))
+            });
+            let noise = [1, 4]
+                .map(|slot| f64::from(crate::hash::normal_metric(config.seed, slot, 0) as f32));
+            let z = (weights[0] * noise[0] + weights[1] * noise[1])
+                / (weights[0] * weights[0] + weights[1] * weights[1]).sqrt();
+            let se = (1.0 / (weights[0] + weights[1]).max(1.0e-12)).sqrt();
+            let expected = (se * z) as f32;
+            let check = |score: f32| {
+                assert!(score.is_finite());
+                assert!(
+                    (score - expected).abs() < 2.0e-5 * expected.abs().max(1.0),
+                    "score={score}, expected={expected}"
+                );
+            };
+            for history in [
+                [(6, 0.0), (1, 0.0), (4, 0.0)],
+                [(4, 0.0), (6, 0.0), (1, 0.0)],
+            ] {
+                for seeds in [&[7u64][..], &[13, 7, 13, 11][..]] {
+                    let (index, score) = engine
+                        .ask(0, &history, 7, seeds, &leaves, config, false)
+                        .unwrap();
+                    assert_eq!(index, 0);
+                    check(score);
+                    let (index, score) = engine
+                        .ask_sparse(
+                            0,
+                            &history,
+                            7,
+                            seeds,
+                            &edits[..seeds.len()],
+                            1,
+                            &leaves,
+                            config,
+                        )
+                        .unwrap();
+                    assert_eq!(index, 0);
+                    check(score);
+                }
+                check(
+                    engine
+                        .ask_stream(0, &history, 7, 19, 2, &leaves, config, false)
+                        .unwrap()
+                        .2,
+                );
+                check(
+                    engine
+                        .sparse_stream(0, &history, 7, 19, 2, 1, &leaves, config)
+                        .unwrap()
+                        .2,
+                );
+                for (_, score) in engine
+                    .regions_stream(0, &history, 2, 2, 19, &leaves, config)
+                    .unwrap()
+                {
+                    check(score);
+                }
+                for (_, score) in engine
+                    .centers_stream(0, &history, 2, &centers, &[0, 1], 19, &leaves, config)
+                    .unwrap()
+                {
+                    check(score);
+                }
+            }
+        }
+
+        // A device-managed search supplies no host history to the draw upload.
+        engine.start_state(3, 0.0).unwrap();
+        copy_to(engine.state.as_ref().unwrap(), &[0u32, 3]);
+        copy_to(&engine.scratch.history_slots, &[4u32, 6, 1]);
+        copy_to(&engine.scratch.outcomes, &[0.0f32; 3]);
+        let config = Ask {
+            length: 0.0,
+            neighbors: 2,
+            acquisition: crate::weights::AcquisitionKind::Thompson,
+            seed: 42,
+            ..Ask::default()
+        };
+        let history = [(4, 0.0), (6, 0.0), (1, 0.0)];
+        engine.sync_draws(config);
+        let expected = crate::weights::thompson_history_draws(&history, config.seed);
+        let draws = read_slice::<f32>(&engine.scratch.draws, 8);
+        assert_eq!([draws[4], draws[6], draws[1]].as_slice(), expected);
     }
 }

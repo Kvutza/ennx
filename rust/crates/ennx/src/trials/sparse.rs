@@ -45,7 +45,11 @@ pub(super) fn sparse_select(
     leaves: &[Parameter],
     config: Ask,
 ) -> (usize, f32) {
-    let draws = crate::weights::thompson_draws(seeds.len(), config.seed);
+    let draws = if config.acquisition == crate::weights::AcquisitionKind::Thompson {
+        crate::weights::thompson_history_draws(history, config.seed)
+    } else {
+        Vec::new()
+    };
     let base_distances = rows
         .iter()
         .map(|row| row_distance(base, row, leaves))
@@ -67,7 +71,7 @@ pub(super) fn sparse_select(
             );
             insert_neighbor(&mut nearest, distance.max(0.0), observation);
         }
-        let value = score(&nearest, history, draws[index], config);
+        let value = score(&nearest, history, &draws, config);
         if value > best.1 || (value == best.1 && index < best.0) {
             best = (index, value);
         }

@@ -223,13 +223,13 @@ impl Scratch {
             self.history_slots =
                 DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
             self.outcomes = DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
+            self.draws = DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
             self.base_distances =
                 DeviceBuffer::zeroed(stream, history_capacity).map_err(cuda_error)?;
             self.history_capacity = history_capacity;
         }
         if candidate_capacity > self.candidate_capacity {
             self.seeds = DeviceBuffer::zeroed(stream, candidate_capacity).map_err(cuda_error)?;
-            self.draws = DeviceBuffer::zeroed(stream, candidate_capacity).map_err(cuda_error)?;
             self.scores = DeviceBuffer::zeroed(stream, candidate_capacity).map_err(cuda_error)?;
             self.selection =
                 DeviceBuffer::zeroed(stream, candidate_capacity).map_err(cuda_error)?;
@@ -414,8 +414,11 @@ impl TrialEngine {
         if history_slots.len() != outcomes.len() {
             return Err("CUDA sparse history slots and outcomes differ in length".to_string());
         }
-        if seeds.is_empty() || seeds.len() != draws.len() || num_pert == 0 {
-            return Err("CUDA sparse candidates, draws, and num_pert are invalid".to_string());
+        if seeds.is_empty() || num_pert == 0 {
+            return Err("CUDA sparse candidates and num_pert are invalid".to_string());
+        }
+        if config.acquisition == 1 && draws.len() != history_slots.len() {
+            return Err("CUDA sparse draws must match history length".to_string());
         }
         if edits.len() != seeds.len().saturating_mul(num_pert) {
             return Err("CUDA sparse edit count does not match candidates".to_string());
@@ -460,7 +463,9 @@ impl TrialEngine {
         )?;
         copy_prefix(&self.scratch.outcomes, outcomes, &self.runtime.stream)?;
         copy_prefix(&self.scratch.seeds, &packed_seeds, &self.runtime.stream)?;
-        copy_prefix(&self.scratch.draws, draws, &self.runtime.stream)?;
+        if config.acquisition == 1 {
+            copy_prefix(&self.scratch.draws, draws, &self.runtime.stream)?;
+        }
         copy_prefix(&self.scratch.edits, edits, &self.runtime.stream)?;
         copy_prefix(&self.leaves, leaves, &self.runtime.stream)?;
 
@@ -640,10 +645,11 @@ impl TrialEngine {
         if history_slots.len() != outcomes.len() {
             return Err("CUDA trial history slots and outcomes differ in length".to_string());
         }
-        if seeds.is_empty() || seeds.len() != draws.len() {
-            return Err(
-                "CUDA trial seeds and draws must be non-empty and equal length".to_string(),
-            );
+        if seeds.is_empty() {
+            return Err("CUDA trial seeds must be non-empty".to_string());
+        }
+        if config.acquisition == 1 && draws.len() != history_slots.len() {
+            return Err("CUDA trial draws must match history length".to_string());
         }
         if regions == 0 || candidates_per_region == 0 {
             return Err("CUDA multi-region search requires non-zero dimensions".to_string());
@@ -705,7 +711,9 @@ impl TrialEngine {
         )?;
         copy_prefix(&self.scratch.outcomes, outcomes, &self.runtime.stream)?;
         copy_prefix(&self.scratch.seeds, &packed_seeds, &self.runtime.stream)?;
-        copy_prefix(&self.scratch.draws, draws, &self.runtime.stream)?;
+        if config.acquisition == 1 {
+            copy_prefix(&self.scratch.draws, draws, &self.runtime.stream)?;
+        }
         copy_prefix(&self.leaves, leaves, &self.runtime.stream)?;
         if !centers.is_empty() {
             let candidate_centers = region_centers

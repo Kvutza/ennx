@@ -1,7 +1,3 @@
-use rand::distributions::Distribution;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rand_distr::StandardNormal;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 use std::collections::HashMap;
 #[cfg(all(target_os = "macos", feature = "metal"))]
@@ -20,6 +16,7 @@ mod opencl_weights;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AcquisitionKind {
     Ucb,
+    /// One sampled function with shared observation noise, as in ENN posterior draws.
     Thompson,
     /// Legacy scalar mean-plus-uncertainty heuristic for materialized weight selection.
     ///
@@ -150,6 +147,7 @@ pub struct WeightSelectConfig {
     pub y_scale: f32,
     pub beta: f32,
     pub acquisition: AcquisitionKind,
+    /// Sampled-function seed; observation row indices identify shared Thompson noise.
     pub seed: u64,
     pub device: ComputeDevice,
 }
@@ -164,6 +162,7 @@ pub struct WeightSelectResult {
 struct Prediction {
     mean: f32,
     se: f32,
+    draw: f32,
 }
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
@@ -355,9 +354,19 @@ fn select_auto(
     Ok(if use_gpu { gpu } else { cpu })
 }
 
+/// Noise for observation rows, independent of candidate ordering and batching.
 pub(crate) fn thompson_draws(count: usize, seed: u64) -> Vec<f32> {
-    let mut rng = StdRng::seed_from_u64(seed);
-    (0..count).map(|_| standard_normal(&mut rng)).collect()
+    (0..count)
+        .map(|row| crate::hash::normal_metric(seed, row as i64, 0) as f32)
+        .collect()
+}
+
+/// Resident histories can reorder rows; their storage slots identify observations.
+pub(crate) fn thompson_history_draws(history: &[(usize, f32)], seed: u64) -> Vec<f32> {
+    history
+        .iter()
+        .map(|&(slot, _)| crate::hash::normal_metric(seed, slot as i64, 0) as f32)
+        .collect()
 }
 
 #[cfg(any(
@@ -436,7 +445,11 @@ fn cpu_weight(
     row_bytes: usize,
     config: WeightSelectConfig,
 ) -> Result<WeightSelectResult, String> {
-    let mut rng = StdRng::seed_from_u64(config.seed);
+    let draws = if config.acquisition == AcquisitionKind::Thompson {
+        thompson_draws(observation_count, config.seed)
+    } else {
+        Vec::new()
+    };
     let mut best = WeightSelectResult {
         index: 0,
         score: f32::NEG_INFINITY,
@@ -450,8 +463,9 @@ fn cpu_weight(
             blocks,
             row_bytes,
             config,
+            &draws,
         );
-        let score = scalar_score(prediction, config.acquisition, config.beta, &mut rng);
+        let score = scalar_score(prediction, config.acquisition, config.beta);
         if score > best.score || (score == best.score && candidate_index < best.index) {
             best = WeightSelectResult {
                 index: candidate_index,
@@ -466,19 +480,11 @@ fn cpu_weight(
 ///
 /// `Pareto` is the legacy scalar mean-plus-uncertainty heuristic here. The
 /// multiobjective Pareto-front selector lives in `crate::acquisition`.
-fn scalar_score(
-    prediction: Prediction,
-    acquisition: AcquisitionKind,
-    beta: f32,
-    rng: &mut StdRng,
-) -> f32 {
+fn scalar_score(prediction: Prediction, acquisition: AcquisitionKind, beta: f32) -> f32 {
     match acquisition {
         AcquisitionKind::Ucb => prediction.mean + beta * prediction.se,
         AcquisitionKind::Pareto => prediction.mean + prediction.se,
-        AcquisitionKind::Thompson => {
-            let z = standard_normal(rng);
-            prediction.mean + prediction.se * z
-        }
+        AcquisitionKind::Thompson => prediction.mean + prediction.se * prediction.draw,
     }
 }
 
@@ -490,6 +496,7 @@ fn cpu_candidate(
     blocks: &[WeightBlock],
     row_bytes: usize,
     config: WeightSelectConfig,
+    draws: &[f32],
 ) -> Prediction {
     let mut nearest = vec![(f32::INFINITY, 0usize); config.neighbors];
     for observation_index in 0..observation_count {
@@ -498,25 +505,46 @@ fn cpu_candidate(
         let distance = weight_distance(candidate, observation, blocks);
         insert_neighbor(&mut nearest, distance, observation_index);
     }
-    weighted_prediction(&nearest, outcomes, config)
+    weighted_prediction(&nearest, outcomes, config, draws)
 }
 
 fn weighted_prediction(
     nearest: &[(f32, usize)],
     outcomes: &[f32],
     config: WeightSelectConfig,
+    draws: &[f32],
 ) -> Prediction {
     let mut weight_sum = 0.0f32;
     let mut weighted_outcome = 0.0f32;
+    let mut weighted_noise = 0.0f32;
+    let mut weight_squared_sum = 0.0f32;
+    let reference_weight = if config.acquisition == AcquisitionKind::Thompson {
+        let variance = 1.0e-9 + config.epistemic_scale * nearest[0].0 + config.aleatoric_scale;
+        (1.0 / variance.max(1.0e-12)).max(f32::MIN_POSITIVE)
+    } else {
+        1.0
+    };
     for &(distance, index) in nearest {
         let variance = 1.0e-9f32 + config.epistemic_scale * distance + config.aleatoric_scale;
         let weight = 1.0 / variance.max(1.0e-12);
         weight_sum += weight;
         weighted_outcome += weight * outcomes[index];
+        if config.acquisition == AcquisitionKind::Thompson {
+            // Rescale before squaring so small weights do not underflow.
+            let draw_weight = weight / reference_weight;
+            weighted_noise += draw_weight * draws[index];
+            weight_squared_sum += draw_weight * draw_weight;
+        }
     }
     let mean = weighted_outcome / weight_sum.max(1.0e-12);
     let se = (1.0 / weight_sum.max(1.0e-12)).sqrt() * config.y_scale;
-    Prediction { mean, se }
+    // Equivalent to posterior_draw's normalized weights divided by their L2 norm.
+    let draw = if config.acquisition == AcquisitionKind::Thompson {
+        weighted_noise / weight_squared_sum.sqrt().max(1.0e-12)
+    } else {
+        0.0
+    };
+    Prediction { mean, se, draw }
 }
 
 pub fn weight_distance(left: &[u8], right: &[u8], blocks: &[WeightBlock]) -> f32 {
@@ -554,10 +582,6 @@ pub fn weight_distance(left: &[u8], right: &[u8], blocks: &[WeightBlock]) -> f32
         byte_base += block.row_bytes();
     }
     distance
-}
-
-fn standard_normal(rng: &mut StdRng) -> f32 {
-    StandardNormal.sample(rng)
 }
 
 mod sparse;

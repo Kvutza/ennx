@@ -5,12 +5,13 @@ use opencl3::command_queue::CommandQueue;
 use opencl3::context::Context;
 use opencl3::device::{get_all_devices, Device, CL_DEVICE_TYPE_CPU, CL_DEVICE_TYPE_GPU};
 use opencl3::kernel::{ExecuteKernel, Kernel};
-use opencl3::memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_WRITE_ONLY};
+use opencl3::memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, CL_MEM_WRITE_ONLY};
 use opencl3::program::Program;
 use opencl3::types::{cl_mem_flags, CL_BLOCKING, CL_NON_BLOCKING};
 
 use super::{
-    acquisition_code, thompson_draws, WeightBlock, WeightSelectConfig, WeightSelectResult,
+    acquisition_code, thompson_draws, AcquisitionKind, WeightBlock, WeightSelectConfig,
+    WeightSelectResult,
 };
 
 const THREADS: usize = 256;
@@ -144,9 +145,13 @@ impl OpenClCtx {
         let mut outcome_buffer = self.buffer::<f32>(outcomes.len(), CL_MEM_READ_ONLY)?;
         let mut candidate_buffer = self.buffer::<u8>(candidates.len(), CL_MEM_READ_ONLY)?;
         let mut block_buffer = self.buffer::<ClBlock>(blocks.len(), CL_MEM_READ_ONLY)?;
-        let score_buffer = self.buffer::<f32>(candidate_count, CL_MEM_WRITE_ONLY)?;
+        let score_buffer = self.buffer::<f32>(candidate_count, CL_MEM_READ_WRITE)?;
         let best_buffer = self.buffer::<ClBest>(1, CL_MEM_WRITE_ONLY)?;
-        let draws = thompson_draws(candidate_count, config.seed);
+        let draws = if config.acquisition == AcquisitionKind::Thompson {
+            thompson_draws(observation_count, config.seed)
+        } else {
+            vec![0.0]
+        };
         let mut draw_buffer = self.buffer::<f32>(draws.len(), CL_MEM_READ_ONLY)?;
 
         unsafe {

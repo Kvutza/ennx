@@ -5,7 +5,8 @@ use std::sync::Arc;
 use metal::{ComputePipelineState, MTLSize};
 
 use super::{
-    acquisition_code, thompson_draws, WeightBlock, WeightSelectConfig, WeightSelectResult,
+    acquisition_code, thompson_draws, AcquisitionKind, WeightBlock, WeightSelectConfig,
+    WeightSelectResult,
 };
 use crate::apple_gpu::Runtime;
 
@@ -120,7 +121,11 @@ impl MetalCtx {
         let outcome_buffer = self.buffer_slice(outcomes);
         let candidate_buffer = self.buffer_slice(candidates);
         let block_buffer = self.buffer_slice(blocks);
-        let draws = thompson_draws(candidate_count, config.seed);
+        let draws = if config.acquisition == AcquisitionKind::Thompson {
+            thompson_draws(observation_count, config.seed)
+        } else {
+            vec![0.0]
+        };
         let draw_buffer = self.buffer_slice(&draws);
         let score_buffer = self.runtime.buffer::<f32>(candidate_count);
         let best_buffer = self.runtime.buffer::<MetalBest>(1);

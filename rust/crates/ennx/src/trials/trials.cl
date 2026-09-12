@@ -529,7 +529,8 @@ __kernel void score_trials(
     __global const float* outcomes,
     __global const float* draws,
     __global float* scores,
-    __global const Params *input
+    __global const Params *input,
+    __global const uint* history_slots
 ) {
     Params params = *input;
     if (params.candidates == 0) return;
@@ -592,6 +593,15 @@ __kernel void score_trials(
     if (thread_index == 0u) {
         float weight_sum = 0.0f;
         float weighted_value = 0.0f;
+        float weighted_noise = 0.0f;
+        float weight_squared_sum = 0.0f;
+        float reference_weight = 1.0f;
+        if (params.acquisition == 1u) {
+            float variance = 1.0e-9f
+                + params.epistemic_scale * nearest_distances[0]
+                + params.aleatoric_scale;
+            reference_weight = fmax(1.0f / fmax(variance, 1.0e-12f), 1.17549435e-38f);
+        }
         for (uint k = 0u; k < params.neighbors; ++k) {
             float variance =
                 1.0e-9f
@@ -600,11 +610,16 @@ __kernel void score_trials(
             float weight = 1.0f / fmax(variance, 1.0e-12f);
             weight_sum += weight;
             weighted_value += weight * outcomes[nearest_indices[k]];
+            if (params.acquisition == 1u) {
+                float draw_weight = weight / reference_weight;
+                weighted_noise += draw_weight * draws[history_slots[nearest_indices[k]]];
+                weight_squared_sum += draw_weight * draw_weight;
+            }
         }
         float mean = weighted_value / fmax(weight_sum, 1.0e-12f);
         float se = sqrt(1.0f / fmax(weight_sum, 1.0e-12f)) * params.y_scale;
         if (params.acquisition == 1u) {
-            scores[candidate_index] = mean + se * draws[candidate_index];
+            scores[candidate_index] = mean + se * (weighted_noise / fmax(sqrt(weight_squared_sum), 1.0e-12f));
         } else if (params.acquisition == 2u) {
             scores[candidate_index] = mean + se;
         } else {
@@ -694,6 +709,15 @@ __kernel void score_sparse(
         }
         float weight_sum = 0.0f;
         float weighted_value = 0.0f;
+        float weighted_noise = 0.0f;
+        float weight_squared_sum = 0.0f;
+        float reference_weight = 1.0f;
+        if (params.acquisition == 1u) {
+            float variance = 1.0e-9f
+                + params.epistemic_scale * nearest_distances[0]
+                + params.aleatoric_scale;
+            reference_weight = fmax(1.0f / fmax(variance, 1.0e-12f), 1.17549435e-38f);
+        }
         for (uint k = 0u; k < params.neighbors; ++k) {
             float variance =
                 1.0e-9f
@@ -702,11 +726,16 @@ __kernel void score_sparse(
             float weight = 1.0f / fmax(variance, 1.0e-12f);
             weight_sum += weight;
             weighted_value += weight * outcomes[nearest_indices[k]];
+            if (params.acquisition == 1u) {
+                float draw_weight = weight / reference_weight;
+                weighted_noise += draw_weight * draws[history_slots[nearest_indices[k]]];
+                weight_squared_sum += draw_weight * draw_weight;
+            }
         }
         float mean = weighted_value / fmax(weight_sum, 1.0e-12f);
         float se = sqrt(1.0f / fmax(weight_sum, 1.0e-12f)) * params.y_scale;
         if (params.acquisition == 1u) {
-            scores[candidate_index] = mean + se * draws[candidate_index];
+            scores[candidate_index] = mean + se * (weighted_noise / fmax(sqrt(weight_squared_sum), 1.0e-12f));
         } else if (params.acquisition == 2u) {
             scores[candidate_index] = mean + se;
         } else {

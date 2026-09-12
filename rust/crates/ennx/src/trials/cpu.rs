@@ -31,7 +31,11 @@ impl Cpu {
     ) -> Result<(usize, f32), String> {
         let steps = make_steps(leaves, config.length);
         let base = self.read(base_slot).to_vec();
-        let draws = crate::weights::thompson_draws(seeds.len(), config.seed);
+        let draws = if config.acquisition == AcquisitionKind::Thompson {
+            crate::weights::thompson_history_draws(history, config.seed)
+        } else {
+            Vec::new()
+        };
         let mut best_index = 0;
         let mut best_score = f32::NEG_INFINITY;
         let mut nearest = vec![(f32::INFINITY, 0usize); config.neighbors];
@@ -41,7 +45,7 @@ impl Cpu {
                 let distance = trial_distance(&base, self.read(slot), leaves, &steps, seed);
                 insert_neighbor(&mut nearest, distance, observation_index);
             }
-            let score = score(&nearest, history, draws[index], config);
+            let score = score(&nearest, history, &draws, config);
             if score > best_score || (score == best_score && index < best_index) {
                 best_index = index;
                 best_score = score;
@@ -310,22 +314,37 @@ pub(super) fn trial_distance(
 pub(super) fn score(
     nearest: &[(f32, usize)],
     history: &[(usize, f32)],
-    draw: f32,
+    draws: &[f32],
     config: Ask,
 ) -> f32 {
     let mut weight_sum = 0.0;
     let mut weighted_value = 0.0;
+    let mut weighted_noise = 0.0;
+    let mut weight_squared_sum = 0.0;
+    let reference_weight = if config.acquisition == AcquisitionKind::Thompson {
+        let variance = 1.0e-9 + config.epistemic_scale * nearest[0].0 + config.aleatoric_scale;
+        (1.0 / variance.max(1.0e-12)).max(f32::MIN_POSITIVE)
+    } else {
+        1.0
+    };
     for &(distance, index) in nearest {
         let variance = 1.0e-9 + config.epistemic_scale * distance + config.aleatoric_scale;
         let weight = 1.0 / variance.max(1.0e-12);
         weight_sum += weight;
         weighted_value += weight * history[index].1;
+        if config.acquisition == AcquisitionKind::Thompson {
+            let draw_weight = weight / reference_weight;
+            weighted_noise += draw_weight * draws[index];
+            weight_squared_sum += draw_weight * draw_weight;
+        }
     }
     let mean = weighted_value / weight_sum.max(1.0e-12);
     let se = (1.0 / weight_sum.max(1.0e-12)).sqrt() * config.y_scale;
     match config.acquisition {
         AcquisitionKind::Ucb => mean + config.beta * se,
-        AcquisitionKind::Thompson => mean + se * draw,
+        AcquisitionKind::Thompson => {
+            mean + se * (weighted_noise / weight_squared_sum.sqrt().max(1.0e-12))
+        }
         // Legacy scalar heuristic for the resident search path.
         // The multiobjective Pareto-front selector lives in `crate::acquisition`.
         AcquisitionKind::Pareto => mean + se,

@@ -225,7 +225,6 @@ pub(super) fn acquisition_score(
     outcomes: &[f32],
     variances: &[f32],
     draws: &[f32],
-    candidate: u32,
     params: Bf16Score,
 ) -> f32 {
     let mut nearest = 0u32;
@@ -251,6 +250,7 @@ pub(super) fn acquisition_score(
 
     let mut weight_sum = 0.0f32;
     let mut weighted_value = 0.0f32;
+    let mut reference_weight = f32::MIN_POSITIVE;
     nearest = 0;
     while nearest < params.neighbors {
         let distance = unsafe { nearest_distances.add(nearest as usize).read() };
@@ -260,12 +260,31 @@ pub(super) fn acquisition_score(
         let weight = 1.0 / variance.max(1.0e-12);
         weight_sum += weight;
         weighted_value += weight * outcomes[index];
+        reference_weight = reference_weight.max(weight);
         nearest += 1;
     }
     let mean = weighted_value / weight_sum.max(1.0e-12);
     let se = (1.0 / weight_sum.max(1.0e-12)).sqrt() * params.y_scale;
     match params.acquisition {
-        1 => mean + se * draws[candidate as usize],
+        1 => {
+            // Observation variances can change weight order; use the largest weight.
+            let mut weighted_noise = 0.0f32;
+            let mut squared_weight_sum = 0.0f32;
+            nearest = 0;
+            while nearest < params.neighbors {
+                let distance = unsafe { nearest_distances.add(nearest as usize).read() };
+                let index = unsafe { nearest_indices.add(nearest as usize).read() } as usize;
+                let variance = 1.0e-9
+                    + params.epistemic_scale * distance
+                    + params.aleatoric_scale
+                    + variances[index];
+                let draw_weight = (1.0 / variance.max(1.0e-12)) / reference_weight;
+                weighted_noise += draw_weight * draws[index];
+                squared_weight_sum += draw_weight * draw_weight;
+                nearest += 1;
+            }
+            mean + se * (weighted_noise / squared_weight_sum.sqrt().max(1.0e-12))
+        }
         2 => mean + se,
         _ => mean + params.beta * se,
     }
