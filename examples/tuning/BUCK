@@ -3,6 +3,8 @@ filegroup(
     srcs = [
         "code-pretrain.toml",
         "code-pretrain-family-learned.toml",
+        "code-pretrain-perturbation-gaussian.toml",
+        "code-pretrain-perturbation-rademacher.toml",
         "code-pretrain-ablation-global-reliability.toml",
         "code-pretrain-ablation-global-turbo.toml",
         "code-pretrain-ablation-local-reliability.toml",

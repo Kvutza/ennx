@@ -85,6 +85,18 @@ Record complete wall time, scorer GPU time, ask time, tell time, changed-weight
 fraction, realized/requested RMS ratio, acceptance, and trust radius. Treat
 distribution-dependent rewards as research outcomes, not timing parity.
 
+The checked-in matched comparison is:
+
+```sh
+./ennx tune examples/tuning/code-pretrain-perturbation-gaussian.toml
+./ennx tune examples/tuning/code-pretrain-perturbation-rademacher.toml
+```
+
+Each arm runs two independently derived repetitions of 32 rounds. With ten
+neighbors, every repetition contains ten initialization rounds followed by 22
+ENN-guided selections. The two TOMLs differ only in perturbation distribution,
+and the seed derivation deliberately excludes that treatment field.
+
 ## Workspace protocol
 
 Keep the runnable experiment platform at a named JJ revision. Create clean

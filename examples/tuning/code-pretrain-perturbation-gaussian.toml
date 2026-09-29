@@ -1,0 +1,35 @@
+version = 1
+
+[pretrain]
+model = "fbt_pisa1_moe_v1"
+corpus = "stack_v3_python_pilot_v1"
+
+[rounds]
+# Ten rounds initialize the ENN; the remaining 22 exercise Bayesian selection.
+count = 32
+reps = 2
+target_ms = 1000
+
+[perturbation]
+distribution = "gaussian"
+
+[acquisition]
+method = "ucb"
+beta = 0.75
+
+[surrogate]
+method = "enn"
+neighbors = 10
+fit_neighbors = true
+epistemic_scale = 0.05
+aleatoric_scale = 0.05
+y_scale = 1.0
+fit_candidates = 30
+fit_samples = 10
+
+[trust-region]
+method = "turbo"
+shape = "tensor_family_learned"
+length_init = 0.01
+length_min = 0.0001
+length_max = 0.1
