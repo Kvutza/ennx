@@ -6,6 +6,8 @@ use cuda_core::{CudaStream, DeviceBuffer, LaunchConfig1D};
 use super::*;
 
 const BF16_PENDING: usize = 32;
+const BF16_SMALL_TILE_ELEMENTS: usize = 4_096;
+const BF16_TILE_ELEMENTS: usize = 16_384;
 
 /// Selected seed, acquisition score, nominal radius, and per-leaf (changed, squared L2).
 pub type ProposalDescription = (u64, f32, f32, Vec<(u64, f64)>);
@@ -175,6 +177,7 @@ pub struct Bf16SearchEngine {
     tell_values: DeviceBuffer<f32>,
     tell_variances: DeviceBuffer<f32>,
     profiling: bool,
+    fused_pairs: bool,
     last_profile: Option<AskProfile>,
 }
 
@@ -290,12 +293,17 @@ impl Bf16SearchEngine {
             tell_values,
             tell_variances,
             profiling: false,
+            fused_pairs: true,
             last_profile: None,
         })
     }
 
     pub fn set_profiling(&mut self, enabled: bool) {
         set_profile(enabled, &mut self.profiling, &mut self.last_profile);
+    }
+
+    pub fn set_fused_pairs(&mut self, enabled: bool) {
+        self.fused_pairs = enabled;
     }
 
     pub fn enable_correlated(&mut self, reference_seed: u64) -> CudaResult<()> {
@@ -406,7 +414,7 @@ impl Bf16SearchEngine {
         let launch = self
             .runtime
             .module
-            .prepare_reference_rms_bf16(LaunchConfig1D::new(
+            .prepare_reference_rmsbf16(LaunchConfig1D::new(
                 to_u32(self.leaf_count, "BF16 reference tensors")?,
                 THREADS,
                 0,
@@ -851,7 +859,7 @@ impl Bf16SearchEngine {
         let launch = self
             .runtime
             .module
-            .prepare_copy_tell_bf16(LaunchConfig1D::new(
+            .prepare_copy_tellbf16(LaunchConfig1D::new(
                 to_u32(blocks, "BF16 copy blocks")?,
                 THREADS,
                 0,
@@ -1118,15 +1126,6 @@ impl Bf16SearchEngine {
     ) -> CudaResult<Option<AskEvents>> {
         let candidates = to_u32(shape.candidates, "BF16 candidate count")?;
         let regions = to_u32(shape.regions, "BF16 region count")?;
-        let distance_launch = self
-            .runtime
-            .module
-            .prepare_distance_bf16(LaunchConfig1D::new(
-                to_u32(shape.blocks, "BF16 distance blocks")?,
-                THREADS,
-                0,
-            ))
-            .map_err(cuda_error)?;
         let score_launch = self
             .runtime
             .module
@@ -1175,24 +1174,68 @@ impl Bf16SearchEngine {
             resident: u32::from(input.seed_root.is_some()),
             correlated: self.sampler,
         };
-        self.runtime
-            .module
-            .distance_bf16(
-                &self.runtime.stream,
-                &distance_launch,
-                &self.rows,
-                &self.scratch.history_slots,
-                &self.reference,
-                &self.reference_scales,
-                &self.state,
-                &self.scratch.seeds,
-                &self.leaves,
-                &self.tiles,
-                &mut self.scratch.partials,
-                &mut self.scratch.tile_status,
-                params,
-            )
-            .map_err(cuda_error)?;
+        if self.fused_pairs && shape.candidates == 4 {
+            let pair_blocks = shape
+                .candidates
+                .div_ceil(2)
+                .checked_mul(self.tile_count)
+                .ok_or("CUDA BF16 fused distance block count overflow")?;
+            let launch = self
+                .runtime
+                .module
+                .prepare_distance2_bf16(LaunchConfig1D::new(
+                    to_u32(pair_blocks, "BF16 fused distance blocks")?,
+                    THREADS,
+                    0,
+                ))
+                .map_err(cuda_error)?;
+            self.runtime
+                .module
+                .distance2_bf16(
+                    &self.runtime.stream,
+                    &launch,
+                    &self.rows,
+                    &self.scratch.history_slots,
+                    &self.reference,
+                    &self.reference_scales,
+                    &self.state,
+                    &self.scratch.seeds,
+                    &self.leaves,
+                    &self.tiles,
+                    &mut self.scratch.partials,
+                    &mut self.scratch.tile_status,
+                    params,
+                )
+                .map_err(cuda_error)?;
+        } else {
+            let launch = self
+                .runtime
+                .module
+                .prepare_distance_bf16(LaunchConfig1D::new(
+                    to_u32(shape.blocks, "BF16 distance blocks")?,
+                    THREADS,
+                    0,
+                ))
+                .map_err(cuda_error)?;
+            self.runtime
+                .module
+                .distance_bf16(
+                    &self.runtime.stream,
+                    &launch,
+                    &self.rows,
+                    &self.scratch.history_slots,
+                    &self.reference,
+                    &self.reference_scales,
+                    &self.state,
+                    &self.scratch.seeds,
+                    &self.leaves,
+                    &self.tiles,
+                    &mut self.scratch.partials,
+                    &mut self.scratch.tile_status,
+                    params,
+                )
+                .map_err(cuda_error)?;
+        }
         self.runtime
             .module
             .draw_bf16(
@@ -1754,6 +1797,18 @@ fn validate_bf16(len: usize, leaves: &[Bf16Leaf]) -> CudaResult<()> {
 }
 
 fn bf16_tiles(leaves: &[Bf16Leaf]) -> CudaResult<Vec<DenseTile>> {
+    let total = leaves.iter().try_fold(0usize, |total, leaf| {
+        let length = usize::try_from(leaf.length)
+            .map_err(|_| "CUDA BF16 leaf length exceeds usize".to_string())?;
+        total
+            .checked_add(length)
+            .ok_or("CUDA BF16 tile length overflow".to_string())
+    })?;
+    let tile_elements = if total <= DENSE_ELEMENTS {
+        BF16_SMALL_TILE_ELEMENTS
+    } else {
+        BF16_TILE_ELEMENTS
+    };
     let mut tiles = Vec::new();
     for (leaf_index, leaf) in leaves.iter().enumerate() {
         let leaf_index = to_u32(leaf_index, "BF16 leaf count")?;
@@ -1761,7 +1816,7 @@ fn bf16_tiles(leaves: &[Bf16Leaf]) -> CudaResult<Vec<DenseTile>> {
             .map_err(|_| "CUDA BF16 leaf length exceeds usize".to_string())?;
         let mut start = 0usize;
         while start < length {
-            let tile_length = (length - start).min(DENSE_ELEMENTS);
+            let tile_length = (length - start).min(tile_elements);
             tiles.push(DenseTile {
                 leaf: leaf_index,
                 start: to_u32(start, "BF16 leaf offset")?,

@@ -5,6 +5,7 @@ import json
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pytest
@@ -231,11 +232,19 @@ def test_004():
     )
 
 
+class SelfSearchTiming(NamedTuple):
+    posterior_seconds: float
+    index_seconds: float
+    faiss_seconds: float
+    index_vs_faiss: float
+    posterior_vs_index: float
+
+
 def _selfratios(
     scenario: dict,
     *,
     tie_neighbors: bool,
-) -> tuple[float, float, float, float, float]:
+) -> SelfSearchTiming:
     """Return (t_post, t_index, t_faiss, index/faiss, posterior/index) medians."""
     rng = np.random.default_rng(int(scenario["seed"]))
     n, d, m, k = scenario["n"], scenario["d"], scenario["m"], scenario["k"]
@@ -267,16 +276,13 @@ def _selfratios(
         index_neighbors()
         faiss_neighbors()
 
-    t_post = _medianseconds(posterior, reps=reps)
-    t_index = _medianseconds(index_neighbors, reps=reps)
-    t_faiss = _medianseconds(faiss_neighbors, reps=reps)
-    index_vs_faiss = _medianratio(
-        index_neighbors, faiss_neighbors, warmup=warmup, reps=reps
+    return SelfSearchTiming(
+        _medianseconds(posterior, reps=reps),
+        _medianseconds(index_neighbors, reps=reps),
+        _medianseconds(faiss_neighbors, reps=reps),
+        _medianratio(index_neighbors, faiss_neighbors, warmup=warmup, reps=reps),
+        _medianratio(posterior, index_neighbors, warmup=warmup, reps=reps),
     )
-    posterior_vs_index = _medianratio(
-        posterior, index_neighbors, warmup=warmup, reps=reps
-    )
-    return t_post, t_index, t_faiss, index_vs_faiss, posterior_vs_index
 
 
 @pytest.mark.parametrize("tie_neighbors", [False, True])

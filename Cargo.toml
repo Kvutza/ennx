@@ -8,6 +8,8 @@ members = [
     "rust/crates/ennx",
     "rust/crates/ennx-py",
     "rust/crates/modal-runner",
+    "rust/crates/ptx-synth",
+    "rust/crates/wire",
 ]
 resolver = "2"
 
@@ -30,13 +32,14 @@ numpy = "0.29"
 pyo3 = { version = "0.29", features = ["extension-module"] }
 rand = "0.8"
 rand_distr = "0.4"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+sha2 = "0.10"
+deser = { version = "=0.9.1", features = ["derive"] }
+ennx-wire = { path = "rust/crates/wire", version = "=0.2.0" }
 thiserror = "1.0"
-toml = "0.8"
 cuda-core = "0.3.1"
 cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "6abfaa091e29a6275c1943895bfbc97efa306e98" }
 cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "6abfaa091e29a6275c1943895bfbc97efa306e98" }
+ptx-synth = { path = "rust/crates/ptx-synth", version = "=0.2.0" }
 
 [profile.dev]
 opt-level = 1

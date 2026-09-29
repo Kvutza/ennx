@@ -269,6 +269,73 @@ fn full_tiledtiming() {
     projection_timing(true);
 }
 
+fn check_projection(tiled: bool, baseline: &mut Option<Vec<Vec<f32>>>, actual: Vec<Vec<f32>>) {
+    if let Some(expected) = baseline.as_ref() {
+        if tiled {
+            for (a, b) in actual.iter().flatten().zip(expected.iter().flatten()) {
+                assert!(
+                    (a - b).abs() <= 2e-4 * (1.0 + b.abs()),
+                    "tiled parity: {a} vs {b}"
+                );
+            }
+        } else {
+            assert_eq!(&actual, expected);
+        }
+    } else {
+        *baseline = Some(actual);
+    }
+}
+
+fn projection_mode(
+    runtime: &Runtime,
+    linear: &[Linear],
+    weights: &[metal::Buffer],
+    result: &[metal::Buffer],
+    input: &metal::BufferRef,
+    chunk: u32,
+    mode: usize,
+    tiled: bool,
+    projections: &[(&Linear, &metal::BufferRef, &metal::BufferRef)],
+) -> metal::CommandBuffer {
+    let command = runtime.queue.new_command_buffer().to_owned();
+    if mode == 1 && tiled {
+        for i in 0..linear.len() {
+            linear[i]
+                .encode_tiled(&command, chunk, &weights[i], input, &result[i])
+                .unwrap();
+        }
+    } else if mode == 1 {
+        Linear::encode_grouped(&command, chunk, input, &projections).unwrap();
+    } else {
+        for i in 0..linear.len() {
+            linear[i]
+                .encode(&command, chunk, &weights[i], input, &result[i])
+                .unwrap();
+        }
+    }
+    command.commit();
+    command
+}
+
+fn projection_weights(runtime: &Runtime, width: u32, n: u32, p: usize) -> metal::Buffer {
+    runtime.buffer_with(
+        &(0..u64::from(width) * u64::from(n))
+            .map(|i| bf16(((i + p as u64) % 37) as f32 / 37.0 - 0.5))
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn projection_inputs(runtime: &Runtime, chunk: u32, width: u32, part: u32) -> metal::Buffer {
+    runtime.buffer_with(
+        &(0..chunk * width)
+            .map(|i| {
+                let index = u64::from(part * chunk) * u64::from(width) + u64::from(i);
+                ((index.wrapping_mul(2654435761) % 65521) as f32 / 65521.0) - 0.5
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
 fn projection_timing(tiled: bool) {
     use crate::fbt::ProjectionActivation::Identity;
     autoreleasepool(|| {
@@ -283,13 +350,7 @@ fn projection_timing(tiled: bool) {
             let weights: Vec<_> = outputs
                 .iter()
                 .enumerate()
-                .map(|(p, &n)| {
-                    runtime.buffer_with(
-                        &(0..u64::from(width) * u64::from(n))
-                            .map(|i| bf16(((i + p as u64) % 37) as f32 / 37.0 - 0.5))
-                            .collect::<Vec<_>>(),
-                    )
-                })
+                .map(|(p, &n)| projection_weights(&runtime, width, n, p))
                 .collect();
             let result: Vec<_> = outputs
                 .iter()
@@ -301,18 +362,7 @@ fn projection_timing(tiled: bool) {
             for context in [4096u32, 16384, 32768] {
                 // Each token has distinct input; all input preparation is outside timing.
                 let inputs: Vec<_> = (0..context / chunk)
-                    .map(|part| {
-                        runtime.buffer_with(
-                            &(0..chunk * width)
-                                .map(|i| {
-                                    let index =
-                                        u64::from(part * chunk) * u64::from(width) + u64::from(i);
-                                    ((index.wrapping_mul(2654435761) % 65521) as f32 / 65521.0)
-                                        - 0.5
-                                })
-                                .collect::<Vec<_>>(),
-                        )
-                    })
+                    .map(|part| projection_inputs(&runtime, chunk, width, part))
                     .collect();
                 let mut wall = [Vec::new(), Vec::new()];
                 let mut baseline: Option<Vec<Vec<f32>>> = None;
@@ -322,31 +372,17 @@ fn projection_timing(tiled: bool) {
                         let start = std::time::Instant::now();
                         let mut commands = Vec::with_capacity(inputs.len());
                         for input in &inputs {
-                            let command = runtime.queue.new_command_buffer().to_owned();
-                            if mode == 1 && tiled {
-                                for i in 0..outputs.len() {
-                                    linear[i]
-                                        .encode_tiled(
-                                            &command,
-                                            chunk,
-                                            &weights[i],
-                                            input,
-                                            &result[i],
-                                        )
-                                        .unwrap();
-                                }
-                            } else if mode == 1 {
-                                Linear::encode_grouped(&command, chunk, input, &projections)
-                                    .unwrap();
-                            } else {
-                                for i in 0..outputs.len() {
-                                    linear[i]
-                                        .encode(&command, chunk, &weights[i], input, &result[i])
-                                        .unwrap();
-                                }
-                            }
-                            command.commit();
-                            commands.push(command);
+                            commands.push(projection_mode(
+                                &runtime,
+                                &linear,
+                                &weights,
+                                &result,
+                                input,
+                                chunk,
+                                mode,
+                                tiled,
+                                &projections,
+                            ));
                         }
                         commands.last().unwrap().wait_until_completed();
                         let elapsed = start.elapsed().as_secs_f64();
@@ -364,21 +400,7 @@ fn projection_timing(tiled: bool) {
                             .map(|(b, &n)| read(b, (chunk * n) as usize))
                             .collect();
                         assert!(actual.iter().flatten().all(|x| x.is_finite()));
-                        if let Some(expected) = &baseline {
-                            if tiled {
-                                for (a, b) in actual.iter().flatten().zip(expected.iter().flatten())
-                                {
-                                    assert!(
-                                        (a - b).abs() <= 2e-4 * (1.0 + b.abs()),
-                                        "tiled parity: {a} vs {b}"
-                                    );
-                                }
-                            } else {
-                                assert_eq!(&actual, expected);
-                            }
-                        } else {
-                            baseline = Some(actual);
-                        }
+                        check_projection(tiled, &mut baseline, actual);
                     }
                 }
                 for values in &mut wall {

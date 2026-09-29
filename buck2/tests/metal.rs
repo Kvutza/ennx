@@ -1,13 +1,12 @@
+use ennx::experimental::{
+    AcquisitionKind, ComputeDevice, DenseLeaf, DenseTerm, ForwardProgram, KdaControlRequest,
+    KdaForwardRequest, KdaMoeLayerRequest, KdaMoeMetalArena, KdaMoeMetalExecutor,
+    KdaMoeMetalKdaVectors, KdaMoeMetalModel, KdaMoeMetalWeights, KdaPackedLinear, KdaTensorLayout,
+    ParamBuffer, ResidentBoState, SearchConfig,
+};
 use ennx::search::Parameter;
 use ennx::search::Search;
-use ennx::experimental::{
-    AcquisitionKind, ComputeDevice, DenseLeaf, DenseTerm, ForwardProgram, ParamBuffer,
-    KdaControlRequest, KdaForwardRequest, KdaMoeLayerRequest, KdaMoeMetalArena,
-    KdaMoeMetalExecutor, KdaMoeMetalKdaVectors, KdaMoeMetalModel, KdaMoeMetalWeights,
-    KdaPackedLinear, KdaTensorLayout, ResidentBoState, SearchConfig, };
-use ennx::{
-    compute_internals, ENNParams, ENN, IndexDriver, PosteriorFlags,
-};
+use ennx::{ENN, ENNParams, IndexDriver, PosteriorFlags, compute_internals};
 use ndarray::Array2;
 
 fn leaves() -> Vec<Parameter> {
@@ -82,25 +81,25 @@ fn knn() {
 
     for neighbors in [1, 3, 8, 10, 16, 17, 31, 64] {
         let params = ENNParams::new(neighbors, 0.7, 0.13).unwrap();
-        let expected =
-            compute_internals(&exact_model, &queries.view(), &params, &flags).unwrap();
+        let expected = compute_internals(&exact_model, &queries.view(), &params, &flags).unwrap();
         let driver = IndexDriver::Metal;
-        let model =
-            ENN::new(rows.clone(), values.clone(), None, false, driver)
-                .unwrap();
-        let actual =
-            compute_internals(&model, &queries.view(), &params, &flags).unwrap();
+        let model = ENN::new(rows.clone(), values.clone(), None, false, driver).unwrap();
+        let actual = compute_internals(&model, &queries.view(), &params, &flags).unwrap();
         assert_eq!(actual.idx, expected.idx, "{driver:?}, k={neighbors}");
-        assert!(actual
-            .mu
-            .iter()
-            .zip(expected.mu.iter())
-            .all(|(actual, expected)| (actual - expected).abs() <= 1.0e-5));
-        assert!(actual
-            .se
-            .iter()
-            .zip(expected.se.iter())
-            .all(|(actual, expected)| (actual - expected).abs() <= 1.0e-5));
+        assert!(
+            actual
+                .mu
+                .iter()
+                .zip(expected.mu.iter())
+                .all(|(actual, expected)| (actual - expected).abs() <= 1.0e-5)
+        );
+        assert!(
+            actual
+                .se
+                .iter()
+                .zip(expected.se.iter())
+                .all(|(actual, expected)| (actual - expected).abs() <= 1.0e-5)
+        );
     }
 }
 
@@ -133,12 +132,13 @@ fn bf16_directions() {
     let terms = [DenseTerm::new(17, 1.0e-6).unwrap()];
     let mut cpu = ParamBuffer::new(base.to_vec(), leaves.clone(), ComputeDevice::Cpu).unwrap();
     cpu.materialize(&terms).unwrap();
-    assert!(cpu
-        .candidate()
-        .unwrap()
-        .iter()
-        .zip(base)
-        .all(|(candidate, base)| *candidate != base));
+    assert!(
+        cpu.candidate()
+            .unwrap()
+            .iter()
+            .zip(base)
+            .all(|(candidate, base)| *candidate != base)
+    );
     let device = ComputeDevice::Metal;
     let mut tree = ParamBuffer::new(base.to_vec(), leaves.clone(), device).unwrap();
     tree.materialize(&terms).unwrap();
@@ -343,9 +343,7 @@ fn row_forward() {
         &time_bias,
         &output_norm,
     );
-    state
-        .bind_metal(&round, &mut materialized)
-        .unwrap();
+    state.bind_metal(&round, &mut materialized).unwrap();
     let materialized_hidden = run_kda(&mut materialized);
     assert_eq!(materialized_hidden, seeded_hidden);
 }
@@ -379,20 +377,14 @@ fn kda_state() {
         executor.recurrence_state(),
         [vec![1.0; 4], vec![0.0; 12]].concat()
     );
-    assert!(executor
-        .kda_output()
-        .iter()
-        .all(|&value| value == 0x3800)); // IEEE f16 0.5 after the 1/sqrt(key_width) query scale
+    assert!(executor.kda_output().iter().all(|&value| value == 0x3800)); // IEEE f16 0.5 after the 1/sqrt(key_width) query scale
 
     executor.kda_step().unwrap();
     assert_eq!(
         executor.recurrence_state(),
         [vec![1.5; 4], vec![0.0; 12]].concat()
     );
-    assert!(executor
-        .kda_output()
-        .iter()
-        .all(|&value| value == 0x3a00)); // IEEE f16 0.75 after the 1/sqrt(key_width) query scale
+    assert!(executor.kda_output().iter().all(|&value| value == 0x3a00)); // IEEE f16 0.75 after the 1/sqrt(key_width) query scale
 }
 
 #[test]
@@ -425,10 +417,12 @@ fn single_resident() {
         )
     };
     assert!(hidden.iter().all(|value| value & 0x7c00 != 0x7c00));
-    assert!(executor
-        .recurrence_state()
-        .iter()
-        .all(|value| value.is_finite()));
+    assert!(
+        executor
+            .recurrence_state()
+            .iter()
+            .all(|value| value.is_finite())
+    );
 
     let mut model = KdaMoeMetalModel::new(vec![executor]).unwrap();
     model
@@ -543,9 +537,7 @@ fn decode_layer() {
         &[1.0; 128],
     );
     let resident = executor.packed.to_owned();
-    executor
-        .bind_row(&resident, 0, packed.len())
-        .unwrap();
+    executor.bind_row(&resident, 0, packed.len()).unwrap();
     executor.upload_hidden(&[0x3c00; 1_024]).unwrap();
     executor
         .upload_norms(&[0x3c00; 1_024], &[0x3c00; 1_024])
@@ -565,9 +557,7 @@ fn decode_layer() {
         1_000.0 / (24.0 * layer_ms)
     );
 
-    executor
-        .moe_norm(&[0x3c00; 1_024], 1, 1, 1.0e-6)
-        .unwrap();
+    executor.moe_norm(&[0x3c00; 1_024], 1, 1, 1.0e-6).unwrap();
     let started = std::time::Instant::now();
     for _ in 0..iterations {
         executor.moe(0).unwrap();
@@ -623,9 +613,7 @@ fn decode_layer() {
     }
     let mut model = KdaMoeMetalModel::new(layers).unwrap();
     let resident = arena.packed_buffer();
-    model
-        .bind_row(&resident, 0, arena.packed_bytes())
-        .unwrap();
+    model.bind_row(&resident, 0, arena.packed_bytes()).unwrap();
     model.upload_hidden(&[0x3c00; 1_024]).unwrap();
     model.reset_state();
     model.prepare_candidate(0).unwrap();

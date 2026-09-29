@@ -334,3 +334,12 @@ mod tests {
         assert_eq!(parallel, serial);
     }
 }
+
+/// Stable leaf key for a named tensor shared with external model runtimes.
+pub fn tensor_key(name: &str) -> u64 {
+    name.as_bytes()
+        .iter()
+        .fold(1_469_598_103_934_665_603, |key, byte| {
+            (key ^ u64::from(*byte)).wrapping_mul(1_099_511_628_211)
+        })
+}

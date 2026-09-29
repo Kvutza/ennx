@@ -5,6 +5,9 @@ use ndarray::{Array3, ArrayView2};
 use crate::error::ENNError;
 use crate::params::{ENNNormal, ENNParams, PosteriorFlags};
 
+mod oracle;
+pub use oracle::Oracle;
+
 /// Posterior computation extension for ENN model.
 pub trait PosteriorComputation {
     /// Compute posterior predictive distribution.

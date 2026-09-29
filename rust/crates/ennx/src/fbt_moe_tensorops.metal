@@ -25,6 +25,29 @@ METAL_FUNC void grouped_matmul(
     op.run(tile_a, tile_b, tile_c);
 }
 
+template <uint M, uint N, uint K>
+METAL_FUNC void wide_matmul(
+    device half* input,
+    device half* weights,
+    device half* output,
+    uint3 tgid) {
+    constexpr auto descriptor = matmul2d_descriptor(128, 128, K);
+    matmul2d<descriptor, execution_simdgroups<8>> op;
+
+    auto tile_a = tensor(
+        input + ulong(tgid.y) * 128 * K,
+        extents<int32_t, K, 128>{});
+    auto tile_b = tensor(
+        weights + tgid.x * 128,
+        extents<int32_t, 128, K>{},
+        array<int32_t, 2>{1, N});
+    auto tile_c = tensor(
+        output + ulong(tgid.y) * 128 * N + tgid.x * 128,
+        extents<int32_t, 128, 128>{},
+        array<int32_t, 2>{1, N});
+    op.run(tile_a, tile_b, tile_c);
+}
+
 template <uint N, uint K, uint KI, uint NI>
 METAL_FUNC void materialize_kronecker(
     device half* weights,
@@ -119,6 +142,22 @@ kernel void fbt_model_tensorops_output_projection(
     device half* output [[buffer(2)]],
     uint3 tgid [[threadgroup_position_in_grid]]) {
     grouped_matmul<8192, 512, 512>(input, weights, output, tgid);
+}
+
+kernel void fbt_model_tensorops_qkv_wide(
+    device half* input [[buffer(0)]],
+    device half* weights [[buffer(1)]],
+    device half* output [[buffer(2)]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+    wide_matmul<8192, 640, 512>(input, weights, output, tgid);
+}
+
+kernel void fbt_model_tensorops_output_projection_wide(
+    device half* input [[buffer(0)]],
+    device half* weights [[buffer(1)]],
+    device half* output [[buffer(2)]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+    wide_matmul<8192, 512, 512>(input, weights, output, tgid);
 }
 
 kernel void fbt_model_tensorops_readout(

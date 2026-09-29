@@ -55,6 +55,11 @@ pub struct IncrementalIndex {
 }
 
 impl IncrementalIndex {
+    pub(crate) fn rescale_pending(&mut self, factors: &[f64]) {
+        for (value, &factor) in self.pending_centroid_sum.iter_mut().zip(factors) {
+            *value *= factor;
+        }
+    }
     pub fn new(index_dir: PathBuf) -> Self {
         Self {
             indices: Vec::new(),
@@ -443,8 +448,8 @@ fn disk_rows(index_dir: &std::path::Path) -> Result<usize, BpannError> {
     }
     let text = fs::read_to_string(&header_path)
         .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
-    let header: IndexHeader =
-        serde_json::from_str(&text).map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+    let header: IndexHeader = ennx_wire::json::from_str(&text)
+        .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
     Ok(header.indexed_rows)
 }
 

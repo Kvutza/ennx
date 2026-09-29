@@ -1,11 +1,11 @@
-def cuda_oxide(name, package, workspace, bpann, ennx, python, modal, cuda, parity):
+def cuda_oxide(name, package, workspace, bpann, ennx, python, modal, ptx, cuda, parity):
     """Build a CUDA-Oxide CPython wheel and its GPU parity action."""
     wheel = name + "-wheel"
     filename = "ennx-{}+cuda75-cp312-cp312-manylinux_2_28_x86_64.whl".format(read_config("ennx", "release_version", "0.1.1"))
     native.genrule(
         name = wheel,
-        srcs = [package, workspace, bpann, ennx, python, modal, cuda],
-        outs = {"wheel": [filename], "cargo-target": ["target"]},
+        srcs = [package, workspace, bpann, ennx, python, modal, ptx, cuda],
+        outs = {"wheel": [filename], "cargo-target": ["target"], "spine": ["target/release/ennx-cuda"]},
         default_outs = [filename],
         # Cargo owns this incremental cache; Buck keeps it between local runs.
         no_outputs_cleanup = True,
@@ -25,10 +25,11 @@ def cuda_oxide(name, package, workspace, bpann, ennx, python, modal, cuda, parit
             "cp -R $(location {}) $ROOT/rust/crates/ennx;".format(ennx),
             "cp -R $(location {}) $ROOT/rust/crates/ennx-py;".format(python),
             "cp -R $(location {}) $ROOT/rust/crates/modal-runner;".format(modal),
+            "cp -R $(location {}) $ROOT/rust/crates/ptx-synth;".format(ptx),
             "cp -R $(location {})/. $ROOT/cuda/;".format(cuda),
             "cd $ROOT/cuda;",
             "cargo generate-lockfile --manifest-path $ROOT/Cargo.toml;",
-            "cargo oxide build --arch sm_75 --cargo-target-dir $OUT_DIR/target --device-codegen-crate ennx_cuda_kernels -- -p ennx-py --features cuda --release --locked --manifest-path $ROOT/Cargo.toml;",
+            "cargo oxide build --arch sm_75 --cargo-target-dir $OUT_DIR/target --device-codegen-crate ennx_cuda_kernels -- -p ennx-py -p ennx-cuda --features cuda --release --locked --manifest-path $ROOT/Cargo.toml;",
             "cd $ROOT;",
             "python3 ops/cuda_wheel.py",
             "$OUT_DIR/target/release/libennx_rust.so",

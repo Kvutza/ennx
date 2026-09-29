@@ -91,6 +91,13 @@ fn snapshot(p: &Prefill) -> Snapshot {
     }
 }
 
+fn softmax(z: &[f64]) -> Vec<f64> {
+    let max = z.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let exp: Vec<_> = z.iter().map(|v| (v - max).exp()).collect();
+    let sum: f64 = exp.iter().sum();
+    exp.iter().map(|v| v / sum).collect::<Vec<_>>()
+}
+
 fn attention_check(a: &Snapshot, b: &Snapshot, pass: usize, layer: usize) {
     let start = if (layer + 1) % 6 == 0 { 0 } else { 2048 };
     for head in 0..32 {
@@ -131,12 +138,6 @@ fn attention_check(a: &Snapshot, b: &Snapshot, pass: usize, layer: usize) {
             .zip(&zb)
             .map(|(a, b)| b - a)
             .fold(f64::NEG_INFINITY, f64::max);
-        let softmax = |z: &[f64]| {
-            let max = z.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-            let exp: Vec<_> = z.iter().map(|v| (v - max).exp()).collect();
-            let sum: f64 = exp.iter().sum();
-            exp.iter().map(|v| v / sum).collect::<Vec<_>>()
-        };
         let pa = softmax(&za);
         let pb = softmax(&zb);
         let tv = pa.iter().zip(&pb).map(|(a, b)| (a - b).abs()).sum::<f64>() * 0.5;
@@ -159,68 +160,87 @@ fn attention_check(a: &Snapshot, b: &Snapshot, pass: usize, layer: usize) {
             bound / actual.max(1e-30)
         );
 
-        // Exponential reweighting around the incumbent distribution. Retain
-        // signed vector sums; use norms only for the Taylor remainder.
-        let center: f64 = pa
-            .iter()
-            .zip(za.iter().zip(&zb))
-            .map(|(p, (a, b))| p * (b - a))
-            .sum();
-        for order in [1, 2] {
-            let mut numerator = vec![0.0; 96];
-            let mut denominator = 0.0;
-            let mut denominator_error = 0.0;
-            let mut terms = Vec::new();
-            let mut minimum = f64::INFINITY;
-            for (i, &probability) in pa.iter().enumerate() {
-                let t = zb[i] - za[i] - center;
-                minimum = minimum.min(t);
-                let polynomial = 1.0 + t + if order == 2 { t * t * 0.5 } else { 0.0 };
-                let remainder =
-                    t.max(0.0).exp() * t.abs().powi(order + 1) / if order == 1 { 2.0 } else { 6.0 };
-                denominator += probability * polynomial;
-                denominator_error += probability * remainder;
-                let offset = (kv * 4096 + start + i) * 96;
-                for d in 0..96 {
-                    numerator[d] += probability * polynomial * (half(b.v[offset + d]) - oa[d]);
-                }
-                terms.push(probability * remainder);
+        relational_check(
+            b, &pa, &za, &zb, &oa, &ob, kv, start, pass, layer, head, actual,
+        );
+    }
+}
+
+fn relational_check(
+    b: &Snapshot,
+    pa: &[f64],
+    za: &[f64],
+    zb: &[f64],
+    oa: &[f64],
+    ob: &[f64],
+    kv: usize,
+    start: usize,
+    pass: usize,
+    layer: usize,
+    head: usize,
+    actual: f64,
+) {
+    // Exponential reweighting around the incumbent distribution. Retain
+    // signed vector sums; use norms only for the Taylor remainder.
+    let center: f64 = pa
+        .iter()
+        .zip(za.iter().zip(zb))
+        .map(|(p, (a, b))| p * (b - a))
+        .sum();
+    for order in [1, 2] {
+        let mut numerator = vec![0.0; 96];
+        let mut denominator = 0.0;
+        let mut denominator_error = 0.0;
+        let mut terms = Vec::new();
+        let mut minimum = f64::INFINITY;
+        for (i, &probability) in pa.iter().enumerate() {
+            let t = zb[i] - za[i] - center;
+            minimum = minimum.min(t);
+            let polynomial = 1.0 + t + if order == 2 { t * t * 0.5 } else { 0.0 };
+            let remainder =
+                t.max(0.0).exp() * t.abs().powi(order + 1) / if order == 1 { 2.0 } else { 6.0 };
+            denominator += probability * polynomial;
+            denominator_error += probability * remainder;
+            let offset = (kv * 4096 + start + i) * 96;
+            for d in 0..96 {
+                numerator[d] += probability * polynomial * (half(b.v[offset + d]) - oa[d]);
             }
-            assert!(denominator > 0.0);
-            let estimate: Vec<_> = numerator.iter().map(|n| n / denominator).collect();
-            let lower = minimum.exp().max(denominator - denominator_error);
-            assert!(lower > 0.0);
-            let mut remainder_bound = 0.0;
-            for (i, &term) in terms.iter().enumerate() {
-                let offset = (kv * 4096 + start + i) * 96;
-                let residual_norm = (0..96)
-                    .map(|d| (half(b.v[offset + d]) - oa[d] - estimate[d]).powi(2))
-                    .sum::<f64>()
-                    .sqrt();
-                remainder_bound += term * residual_norm;
-            }
-            remainder_bound /= lower;
-            let delta: Vec<_> = ob.iter().zip(&oa).map(|(b, a)| b - a).collect();
-            let estimate_error = distance(&estimate, &delta);
-            assert!(estimate_error <= remainder_bound + 1e-10 * (1.0 + remainder_bound));
-            let total_bound = norm(&estimate) + remainder_bound;
-            assert!(actual <= total_bound + 1e-10 * (1.0 + total_bound));
-            eprintln!(
-                "BOUND_RELATIONAL pass={pass} layer={layer} head={head} order={order} actual={actual:.9} estimate_error={estimate_error:.9} remainder={remainder_bound:.9} remainder_relative={:.6} total_ratio={:.6}",
-                remainder_bound / actual.max(1e-30),
-                total_bound / actual.max(1e-30)
-            );
+            terms.push(probability * remainder);
         }
+        assert!(denominator > 0.0);
+        let estimate: Vec<_> = numerator.iter().map(|n| n / denominator).collect();
+        let lower = minimum.exp().max(denominator - denominator_error);
+        assert!(lower > 0.0);
+        let mut remainder_bound = 0.0;
+        for (i, &term) in terms.iter().enumerate() {
+            let offset = (kv * 4096 + start + i) * 96;
+            let residual_norm = (0..96)
+                .map(|d| (half(b.v[offset + d]) - oa[d] - estimate[d]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            remainder_bound += term * residual_norm;
+        }
+        remainder_bound /= lower;
+        let delta: Vec<_> = ob.iter().zip(oa).map(|(b, a)| b - a).collect();
+        let estimate_error = distance(&estimate, &delta);
+        assert!(estimate_error <= remainder_bound + 1e-10 * (1.0 + remainder_bound));
+        let total_bound = norm(&estimate) + remainder_bound;
+        assert!(actual <= total_bound + 1e-10 * (1.0 + total_bound));
+        eprintln!(
+            "BOUND_RELATIONAL pass={pass} layer={layer} head={head} order={order} actual={actual:.9} estimate_error={estimate_error:.9} remainder={remainder_bound:.9} remainder_relative={:.6} total_ratio={:.6}",
+            remainder_bound / actual.max(1e-30),
+            total_bound / actual.max(1e-30)
+        );
     }
 }
 
 #[test]
 #[ignore = "full 4K paired bound audit; post-hoc ideal arithmetic, not a certificate"]
-fn paired_bound_audit() {
+fn bound_audit() {
     metal::objc::rc::autoreleasepool(|| {
-        let mut model = Model::new(super::super::bo::full_model_config(), 42).unwrap();
+        let mut model = Model::new(super::super::bo::full_config(), 42).unwrap();
         model.set_optimized(true).unwrap();
-        let config = crate::config::parse_turbo_enn_config("version=1\nstudy='end_to_end'\nacquisition='thompson'\nlength_init=0.01\nlength_min=0.0001\nlength_max=0.1\noutput='unused'\nrounds=3\ntarget_round_ms=1000").unwrap();
+        let config = crate::config::parse_tune("version=2\nexperiment='end-to-end'\noutput='unused'\n[run]\nrounds=3\ntarget-ms=1000\n[acquisition]\nmethod='thompson'\n[trust-region]\nmethod='turbo'\ninitial=0.01\nmin=0.0001\nmax=0.1").unwrap();
         let mut search = super::super::bo::model_search(&model, &config);
         search.observe_initial(-1.0, 0.0).unwrap();
         let proposal = search.test_candidate(123, 0).unwrap();
@@ -241,9 +261,9 @@ fn paired_bound_audit() {
         let mut originals = None;
         for candidate in [false, true] {
             if candidate {
-                originals = Some(model.bind_parameter_row(&proposal).unwrap());
+                originals = Some(model.bind_row(&proposal).unwrap());
             }
-            model.ensure_transposed_weights().unwrap();
+            model.ensure_transposed().unwrap();
             for pass in 0..2 {
                 let command = model.runtime.queue.new_command_buffer();
                 p.start_pass(&model, command, pass).unwrap();

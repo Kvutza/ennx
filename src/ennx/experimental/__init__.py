@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import asdict, dataclass, replace
 
 from .._lazy import module_attr
 
@@ -50,20 +51,28 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
 experimental = sys.modules[__name__]
 
 
+@dataclass(frozen=True)
+class TurboEnnConfig:
+    """Reusable resident-search settings; CUDA validates their numeric domains."""
+
+    max_pending: int = 1
+    base_variance: float = 0.0
+    length_init: float = 0.8
+    length_min: float = 0.0078125
+    length_max: float = 1.6
+    failure_tolerance: int | None = None
+    sampler: str = "independent"
+    reference_seed: int = 0
+
+
 def turbo_enn(
     base: object,
     base_value: float,
     blocks: list[object],
     capacity: int,
     *,
-    max_pending: int = 1,
-    base_variance: float = 0.0,
-    length_init: float = 0.8,
-    length_min: float = 0.0078125,
-    length_max: float = 1.6,
-    failure_tolerance: int | None = None,
-    sampler: str = "independent",
-    reference_seed: int = 0,
+    config: TurboEnnConfig = TurboEnnConfig(),
+    **overrides: object,
 ) -> object:
     """Create resident CUDA BF16 search with independent sign proposals by default.
 
@@ -83,7 +92,11 @@ def turbo_enn(
     to a host NumPy uint16 array of raw BF16 bits for validation. This is a
     model-sized copy, requires a completed round and released DLPack views, and
     errors in other modes.
+
+    Pass a reusable ``config`` or the existing individual setting keywords.
+    Individual keywords override the corresponding fields in ``config``.
     """
+    settings = replace(config, **overrides) if overrides else config
     search_type = __getattr__("SearchState")
     if search_type is None:
         raise RuntimeError("turbo_enn requires the CUDA wheel")
@@ -92,14 +105,7 @@ def turbo_enn(
         base_value,
         blocks,
         capacity,
-        max_pending=max_pending,
-        base_variance=base_variance,
-        length_init=length_init,
-        length_min=length_min,
-        length_max=length_max,
-        failure_tolerance=failure_tolerance,
-        sampler=sampler,
-        reference_seed=reference_seed,
+        **asdict(settings),
     )
 
 
@@ -132,6 +138,7 @@ __all__: list[str] = [
     "SearchState",
     "SharingPolicy",
     "Telemetry",
+    "TurboEnnConfig",
     "allocate_batches",
     "create_lhd",
     "create_optimizer",

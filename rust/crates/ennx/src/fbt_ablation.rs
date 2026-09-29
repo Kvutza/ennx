@@ -3,16 +3,16 @@
 //! the same fitted ENN acceptance policy, isolating acquisition selection.
 
 use super::*;
+use ennx_wire::json::json;
 use metal::objc::rc::autoreleasepool;
 use rand::{Rng, SeedableRng, rngs::StdRng};
-use serde_json::json;
 use std::io::Write;
 
 fn load_config(path: &str) -> Result<crate::config::ConfigOverrides, String> {
-    let (run, _) = crate::config::load_turbo_enn_config(std::path::Path::new(path))?;
-    run.validate_round_study()?;
+    let (run, _) = crate::config::load_tune(std::path::Path::new(path))?;
+    run.validate_experiment()?;
     let enn = run.resident_enn(run.acquisition_seed())?;
-    if run.study != Some(crate::config::TurboEnnStudy::Pretrain)
+    if run.experiment != Some(crate::config::TurboEnnExperiment::Pretrain)
         || !matches!(enn.ask.acquisition, crate::weights::AcquisitionKind::Ucb)
         || enn.ask.neighbors != 10
     {
@@ -31,7 +31,7 @@ fn score(
     row: &Buffer,
 ) -> Result<(f32, f32, [f32; 2]), String> {
     let command = runtime.queue.new_command_buffer();
-    encode_candidate_objective_fused(
+    objective_fused(
         command,
         pipelines,
         tensorops,
@@ -44,7 +44,7 @@ fn score(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn initialized_scaling_search(
+fn scaling_search(
     runtime: &Runtime,
     pipelines: &Pipelines,
     tensorops: &TensorOpsPipelines,
@@ -65,8 +65,8 @@ fn initialized_scaling_search(
     let acquisition_seed = run.derived_seed(rep, "scaling-acquisition", 0);
     let mut enn = run.resident_enn(acquisition_seed)?;
     enn.distance_scaling = scaling;
-    search.configure_implicit_enn(enn)?;
-    load_pretraining_batch(buffers, train, 0)?;
+    search.configure_enn(enn)?;
+    pretrain_batch(buffers, train, 0)?;
     let (value, variance, _) = score(
         runtime,
         pipelines,
@@ -78,7 +78,7 @@ fn initialized_scaling_search(
     )?;
     search.observe_initial(value, variance)?;
     for step in 0..enn.ask.neighbors - 1 {
-        load_pretraining_batch(buffers, train, step as u32 % train.batches())?;
+        pretrain_batch(buffers, train, step as u32 % train.batches())?;
         let proposal_seed = run.derived_seed(rep, "scaling-proposal", step as u64);
         let row = search.begin_initial(proposal_seed, step % 4)?;
         let proposal = search.finish_ask()?;
@@ -98,7 +98,7 @@ fn selection_ablation() -> Result<(), String> {
     let run = load_config(&config)?;
     let train_path = run
         .dataset()
-        .ok_or("use a resolved pretraining study.toml")?;
+        .ok_or("use a resolved pretraining experiment.toml")?;
     let validation_path = train_path.with_file_name("validation.ennxptn");
     let train = crate::pretrain_data::PretrainDataset::load(train_path)?;
     let validation = crate::pretrain_data::PretrainDataset::load(&validation_path)?;
@@ -111,9 +111,12 @@ fn selection_ablation() -> Result<(), String> {
         .create_new(true)
         .open(&output)
         .map_err(|e| e.to_string())?;
-    let mut emit = |record: serde_json::Value| -> Result<(), String> {
-        eprintln!("ABLATION {record}");
-        writeln!(file, "{record}").map_err(|e| e.to_string())?;
+    let mut emit = |record: ennx_wire::json::Value| -> Result<(), String> {
+        eprintln!(
+            "ABLATION {}",
+            ennx_wire::json::to_string(&record).map_err(|e| e.to_string())?
+        );
+        ennx_wire::json::write_line(&mut file, &record).map_err(|e| e.to_string())?;
         file.flush().map_err(|e| e.to_string())
     };
     emit(json!({"kind": "protocol", "parameters": FULL_PARAMETERS,
@@ -149,11 +152,11 @@ fn selection_ablation() -> Result<(), String> {
                     )?;
                     let acquisition_seed = run.derived_seed(rep as u32, "selection-acquisition", 0);
                     let enn = run.resident_enn(acquisition_seed)?;
-                    search.configure_implicit_enn(enn)?;
+                    search.configure_enn(enn)?;
                     let choice_seed = run.derived_seed(rep as u32, "selection-policy", 0);
                     let mut rng = StdRng::seed_from_u64(choice_seed);
                     let choices: Vec<usize> = (0..rounds).map(|_| rng.gen_range(0..4)).collect();
-                    load_pretraining_batch(&buffers, &train, 0)?;
+                    pretrain_batch(&buffers, &train, 0)?;
                     let (value, variance, _) = score(
                         &runtime,
                         &pipelines,
@@ -167,7 +170,7 @@ fn selection_ablation() -> Result<(), String> {
                     let mut evaluate = |phase: &str, row: &Buffer| -> Result<(), String> {
                         let mut nlls = Vec::new();
                         for batch in 0..heldout_batches {
-                            load_pretraining_batch(&buffers, &validation, batch)?;
+                            pretrain_batch(&buffers, &validation, batch)?;
                             nlls.extend(
                                 score(
                                     &runtime, &pipelines, &tensorops, &pisa1, &buffers, &weights,
@@ -184,8 +187,8 @@ fn selection_ablation() -> Result<(), String> {
                     // End the closure's mutable borrow of the artifact writer.
                     drop(evaluate);
                     for step in 0..rounds {
-                        load_pretraining_batch(&buffers, &train, step % train.batches())?;
-                        search.compact_implicit_history()?;
+                        pretrain_batch(&buffers, &train, step % train.batches())?;
+                        search.compact_history()?;
                         let history = search.history_len()?;
                         let initializing = history < enn.ask.neighbors;
                         let mut ask = enn.ask;
@@ -212,7 +215,7 @@ fn selection_ablation() -> Result<(), String> {
                         let decision = if initializing {
                             search.tell_initial(&proposal, value, variance)?
                         } else {
-                            search.tell_model_aware(&proposal, value, variance)?
+                            search.tell_modeled(&proposal, value, variance)?
                         };
                         if search.sync()? != vec![decision.accepted] {
                             return Err("ablation tell/sync mismatch".into());
@@ -228,7 +231,7 @@ fn selection_ablation() -> Result<(), String> {
                     }
                     let mut nlls = Vec::new();
                     for batch in 0..heldout_batches {
-                        load_pretraining_batch(&buffers, &validation, batch)?;
+                        pretrain_batch(&buffers, &validation, batch)?;
                         nlls.extend(
                             score(
                                 &runtime,
@@ -265,7 +268,7 @@ fn pool_ablation() -> Result<(), String> {
     let run = load_config(&config)?;
     let train_path = run
         .dataset()
-        .ok_or("use a resolved pretraining study.toml")?;
+        .ok_or("use a resolved pretraining experiment.toml")?;
     let validation_path = train_path.with_file_name("validation.ennxptn");
     let train = crate::pretrain_data::PretrainDataset::load(train_path)?;
     let validation = crate::pretrain_data::PretrainDataset::load(&validation_path)?;
@@ -291,8 +294,8 @@ fn pool_ablation() -> Result<(), String> {
                         .unwrap_or(crate::config::TrustRegionShape::TensorFamilyStatic),
                 )?;
                 let enn = run.resident_enn(run.derived_seed(rep, "pool-acquisition", 0))?;
-                search.configure_implicit_enn(enn)?;
-                load_pretraining_batch(&buffers, &train, 0)?;
+                search.configure_enn(enn)?;
+                pretrain_batch(&buffers, &train, 0)?;
                 let (value, variance, _) = score(
                     &runtime,
                     &pipelines,
@@ -304,7 +307,7 @@ fn pool_ablation() -> Result<(), String> {
                 )?;
                 search.observe_initial(value, variance)?;
                 for step in 0..enn.ask.neighbors - 1 {
-                    load_pretraining_batch(&buffers, &train, step as u32 % train.batches())?;
+                    pretrain_batch(&buffers, &train, step as u32 % train.batches())?;
                     let proposal_seed = run.derived_seed(rep, "pool-proposal", step as u64);
                     let row = search.begin_initial(proposal_seed, step % 4)?;
                     let proposal = search.finish_ask()?;
@@ -319,7 +322,7 @@ fn pool_ablation() -> Result<(), String> {
                 ask.seed = run.derived_seed(rep, "pool-acquisition", 1);
                 let mut incumbent_nlls = Vec::new();
                 for batch in 0..8.min(validation.batches()) {
-                    load_pretraining_batch(&buffers, &validation, batch)?;
+                    pretrain_batch(&buffers, &validation, batch)?;
                     incumbent_nlls.extend(
                         score(
                             &runtime,
@@ -340,7 +343,7 @@ fn pool_ablation() -> Result<(), String> {
                     let row = search.diagnostic_row(&proposal, root, ask, candidate)?;
                     let mut nlls = Vec::new();
                     for batch in 0..8.min(validation.batches()) {
-                        load_pretraining_batch(&buffers, &validation, batch)?;
+                        pretrain_batch(&buffers, &validation, batch)?;
                         nlls.extend(
                             score(
                                 &runtime, &pipelines, &tensorops, &pisa1, &buffers, &weights, &row,
@@ -371,9 +374,12 @@ fn pool_ablation() -> Result<(), String> {
                     "enn_minus_same_radius_expected_nll": means[proposal.index] - same_radius_mean,
                     "scope": "first_guided_pool; fixed_validation; no_validation_feedback",
                     "config": config, "train": train_path, "validation": validation_path});
-                writeln!(file, "{record}").map_err(|e| e.to_string())?;
+                ennx_wire::json::write_line(&mut file, &record).map_err(|e| e.to_string())?;
                 file.flush().map_err(|e| e.to_string())?;
-                eprintln!("SAME_POOL {record}");
+                eprintln!(
+                    "SAME_POOL {}",
+                    ennx_wire::json::to_string(&record).map_err(|e| e.to_string())?
+                );
                 Ok(())
             })?;
         }
@@ -386,13 +392,13 @@ fn pool_ablation() -> Result<(), String> {
 /// either search state.
 #[test]
 #[ignore = "billion-weight same-pool distance-scaling eval; requires fixed corpus"]
-fn distance_scaling_ablation() -> Result<(), String> {
+fn scaling_ablation() -> Result<(), String> {
     let config = std::env::var("ENNX_ABLATION_CONFIG").map_err(|e| e.to_string())?;
     let output = std::env::var("ENNX_SCALING_OUTPUT").map_err(|e| e.to_string())?;
     let run = load_config(&config)?;
     let train_path = run
         .dataset()
-        .ok_or("use a resolved pretraining study.toml")?;
+        .ok_or("use a resolved pretraining experiment.toml")?;
     let validation_path = train_path.with_file_name("validation.ennxptn");
     let train = crate::pretrain_data::PretrainDataset::load(train_path)?;
     let validation = crate::pretrain_data::PretrainDataset::load(&validation_path)?;
@@ -412,7 +418,7 @@ fn distance_scaling_ablation() -> Result<(), String> {
         for rep in 0..3u32 {
             autoreleasepool(|| -> Result<(), String> {
                 let seed = run.derived_seed(rep, "distance-scaling-run", 0);
-                let (mut global, global_enn) = initialized_scaling_search(
+                let (mut global, global_enn) = scaling_search(
                     &runtime,
                     &pipelines,
                     &tensorops,
@@ -424,7 +430,7 @@ fn distance_scaling_ablation() -> Result<(), String> {
                     rep,
                     crate::config::DistanceScaling::Global,
                 )?;
-                let (mut local, local_enn) = initialized_scaling_search(
+                let (mut local, local_enn) = scaling_search(
                     &runtime,
                     &pipelines,
                     &tensorops,
@@ -458,7 +464,7 @@ fn distance_scaling_ablation() -> Result<(), String> {
                     let row = global.diagnostic_row(&global_pool, root, global_ask, candidate)?;
                     let mut nlls = Vec::new();
                     for batch in 0..heldout_batches {
-                        load_pretraining_batch(&buffers, &validation, batch)?;
+                        pretrain_batch(&buffers, &validation, batch)?;
                         nlls.extend(
                             score(
                                 &runtime, &pipelines, &tensorops, &pisa1, &buffers, &weights, &row,
@@ -494,9 +500,12 @@ fn distance_scaling_ablation() -> Result<(), String> {
                     "train": train_path,
                     "validation": validation_path,
                 });
-                writeln!(file, "{record}").map_err(|e| e.to_string())?;
+                ennx_wire::json::write_line(&mut file, &record).map_err(|e| e.to_string())?;
                 file.flush().map_err(|e| e.to_string())?;
-                eprintln!("DISTANCE_SCALING {record}");
+                eprintln!(
+                    "DISTANCE_SCALING {}",
+                    ennx_wire::json::to_string(&record).map_err(|e| e.to_string())?
+                );
                 Ok(())
             })?;
         }

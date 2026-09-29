@@ -3,14 +3,15 @@
 pub mod disk_observation;
 mod flush_controller;
 mod in_memory;
+mod inspection;
 pub(crate) mod row_storage;
 
 pub use crate::disk_bpann::DiskBpannEnnBackend;
 pub(crate) use flush_controller::DiskBackendHandle;
 pub use in_memory::InMemoryEnnBackend;
 
+use deser::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayView2};
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -21,7 +22,7 @@ use crate::index::{ENNIndex, IndexDriver};
 pub(crate) type TrainRows = (Array2<f64>, Array2<f64>, Option<Array2<f64>>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
 pub enum EnnStorage {
     InMemory,
     Disk,
@@ -151,40 +152,6 @@ impl EnnBackend {
         }
     }
 
-    pub fn len(&self) -> usize {
-        match self {
-            Self::InMemory(b) => b.len(),
-            Self::Disk(h) => disk_read(h.data()).map(|g| g.len()).unwrap_or(0),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn num_dim(&self) -> usize {
-        match self {
-            Self::InMemory(b) => b.num_dim(),
-            Self::Disk(h) => disk_read(h.data()).map(|g| g.num_dim()).unwrap_or(0),
-        }
-    }
-
-    pub fn num_metrics(&self) -> usize {
-        match self {
-            Self::InMemory(b) => b.num_metrics(),
-            Self::Disk(h) => disk_read(h.data()).map(|g| g.num_metrics()).unwrap_or(0),
-        }
-    }
-
-    pub fn driver(&self) -> IndexDriver {
-        match self {
-            Self::InMemory(b) => b.driver(),
-            Self::Disk(h) => disk_read(h.data())
-                .map(|g| g.driver())
-                .unwrap_or(IndexDriver::BpAnnDisk),
-        }
-    }
-
     pub fn mark_stale(&self) {
         match self {
             Self::InMemory(b) => b.mark_stale(),
@@ -231,6 +198,16 @@ impl EnnBackend {
         match self {
             Self::InMemory(b) => b.ensure_sync(scale_x, x_scale),
             Self::Disk(h) => disk_write(h.data())?.ensure_sync(scale_x, x_scale),
+        }
+    }
+
+    pub(crate) fn set_metric(&self, scale: &Array1<f64>, rebuild: bool) -> Result<(), ENNError> {
+        self.wait_flush()?;
+        match self {
+            Self::Disk(h) => disk_write(h.data())?.set_metric(scale, rebuild),
+            Self::InMemory(_) => Err(ENNError::InvalidParameter(
+                "AUTO metric requires disk BPANN".into(),
+            )),
         }
     }
 

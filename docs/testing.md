@@ -13,6 +13,12 @@ integrations.
 `./ennx test` runs Rust unit tests, integration tests, CLI tests, and kernel
 tests. GPU checks require the corresponding hardware and driver.
 
+`./ennx fmt` is the formatting and source-policy gate. In addition to Rust and
+Python formatting, it runs KISS for the repository and for every Rust crate. It
+also rejects sentence-like code names: local Python/Rust definitions and source
+file stems may contain at most two snake-case words (one underscore) and 24
+characters. Put the explanation in a comment or docstring, not in the name.
+
 For `--python`, replace `ennx-...whl` with the wheel filename. Python 3.13 is the
 default; set `ENNX_PYTHON_VERSION=3.12` or `3.14` to test another wheel.
 

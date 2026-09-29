@@ -1,0 +1,34 @@
+# Matched ranking ablation, NOT a standalone random-search or ES optimizer.
+# Preserves ENN fitting/acceptance and chooses a precommitted random pool index.
+version = 2
+
+experiment = "pretrain"
+model = "fbt-pisa1-legacy-v1"
+corpus = "fineweb-10bt-pilot-v1"
+
+[run]
+rounds = 12
+target-ms = 200
+selection = "random"
+validation-interval = 4
+
+[proposal]
+distribution = "rademacher"
+
+[enn]
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+
+[acquisition]
+method = "ucb"
+beta = 0.75
+
+[trust-region]
+method = "turbo"
+shape = "tensor-family-static"
+initial = 0.01
+min = 0.0001
+max = 0.1

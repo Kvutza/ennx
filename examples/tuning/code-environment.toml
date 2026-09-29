@@ -1,0 +1,59 @@
+# From-scratch, full-coordinate BO. No pretrained weights or teacher forcing.
+# Megatron initialization: NVIDIA/Megatron-LM transformer_config.py.
+# Execution checks: MBPP training task 602 plus ENNX boundary cases.
+version = 2
+experiment = "generation"
+model = "fbt-pisa1-legacy-v1"
+
+[run]
+rounds = 10000
+target-ms = 200
+
+[proposal]
+method = "polynomial-threshold"
+distribution = "rademacher"
+
+[enn]
+geometry = "latent"
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+
+[acquisition]
+method = "augmented-chebyshev"
+scales = [1.0, 1.0, 1.0]
+preferences = [1.0, 1.0, 1.0]
+alpha = 0.0
+seed-domain = "code-execution-objectives"
+
+[trust-region]
+method = "morbo"
+regions = 4
+rescalarize = "on-restart"
+clip = true
+shape = "tensor-family-learned"
+initial = 0.001
+min = 0.0005
+max = 0.1
+
+[generation]
+purpose = "pretrain"
+initialization = "megatron"
+max-tokens = 4096
+temperature = 1.0
+save-final-checkpoint = false
+
+[generation.verify]
+mode = "accepted-prefix"
+window = 128
+max-window = 1024
+passes = 2
+unroll = 2
+
+[generation.reward]
+kind = "code-execution"
+environment = "../evals/mbpp-602.toml"
+interpreter = "../../.venv/bin/python"
+timeout-ms = 1000

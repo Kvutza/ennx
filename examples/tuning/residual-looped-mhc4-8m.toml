@@ -1,0 +1,64 @@
+version = 2
+
+experiment = "pretrain"
+model = "fbt-pisa1-looped-mhc4-v1"
+corpus = "stack-v3-python-800k-v1"
+
+[run]
+rounds = 1000
+reps = 1
+target-ms = 200
+validation-interval = 25
+
+[proposal]
+distribution = "rademacher"
+
+[enn]
+geometry = "latent"
+scaling = "self-tuning"
+local-neighbors = 8
+neighbors = 32
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+candidates = 64
+samples = 64
+
+[acquisition]
+method = "ucb"
+beta = 0.5
+
+[trust-region]
+method = "turbo"
+shape = "tensor-family-learned"
+initial = 0.001
+min = 0.0001
+max = 0.1
+
+[seeds]
+model = 240105308887621659
+reference = 150813718214252701
+proposal = 91614869253048103
+acquisition = 314159265358979323
+
+[generation]
+purpose = "pretrain"
+initialization = "megatron"
+max-tokens = 4096
+temperature = 0.8
+corpus-prompt-tokens = 128
+save-final-checkpoint = true
+record-tensor-updates = true
+
+[generation.verify]
+mode = "accepted-prefix"
+window = 128
+max-window = 1024
+passes = 2
+unroll = 2
+
+[generation.reward]
+kind = "code-objectives"
+critical-window = 128

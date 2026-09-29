@@ -286,7 +286,7 @@ impl ENNFitter {
     /// Fit variance scales and then select `k` by the same leave-one-out
     /// predictive likelihood. The configured value is an upper bound; every
     /// feasible integer count participates rather than a hand-written grid.
-    pub fn ask_distances_adaptive_k<R: Rng>(
+    pub fn ask_adaptive<R: Rng>(
         &mut self,
         distances: &ArrayView2<f64>,
         y: &ArrayView2<f64>,
@@ -493,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_distance_fit_selects_a_bounded_neighbor_count() {
+    fn adaptive_fit() {
         let x = [0.0f64, 0.2, 0.6, 1.0];
         let distances = Array2::from_shape_fn((x.len(), x.len()), |(i, j)| (x[i] - x[j]).powi(2));
         let y = Array2::from_shape_fn((x.len(), 1), |(i, _)| x[i]);
@@ -501,7 +501,7 @@ mod tests {
         let mut fitter = ENNFitter::new(3, true);
         let mut rng = StdRng::seed_from_u64(29);
         let fitted = fitter
-            .ask_distances_adaptive_k(
+            .ask_adaptive(
                 &distances.view(),
                 &y.view(),
                 Some(&variance.view()),

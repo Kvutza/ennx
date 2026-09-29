@@ -149,18 +149,18 @@ buildscript_run(
     version = "0.8.12",
 )
 
+alias(
+    name = "anstream",
+    actual = ":anstream-1",
+    visibility = ["PUBLIC"],
+)
+
 http_archive(
     name = "anstream-1.0.0.crate",
     sha256 = "824a212faf96e9acacdbd09febd34438f8f711fb84e09a8916013cd7815ca28d",
     strip_prefix = "anstream-1.0.0",
     urls = ["https://static.crates.io/crates/anstream/1.0.0/download"],
     visibility = [],
-)
-
-alias(
-    name = "anstream",
-    actual = ":anstream-1",
-    visibility = ["PUBLIC"],
 )
 
 reindeer_rust_library(
@@ -210,18 +210,18 @@ reindeer_rust_library(
     ],
 )
 
+alias(
+    name = "anstyle",
+    actual = ":anstyle-1",
+    visibility = ["PUBLIC"],
+)
+
 http_archive(
     name = "anstyle-1.0.14.crate",
     sha256 = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000",
     strip_prefix = "anstyle-1.0.14",
     urls = ["https://static.crates.io/crates/anstyle/1.0.14/download"],
     visibility = [],
-)
-
-alias(
-    name = "anstyle",
-    actual = ":anstyle-1",
-    visibility = ["PUBLIC"],
 )
 
 reindeer_rust_library(
@@ -1094,6 +1094,46 @@ reindeer_rust_library(
 )
 
 http_archive(
+    name = "base64-0.23.1.crate",
+    sha256 = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5",
+    strip_prefix = "base64-0.23.1",
+    urls = ["https://static.crates.io/crates/base64/0.23.1/download"],
+    visibility = [],
+)
+
+reindeer_rust_library(
+    name = "base64-0.23",
+    srcs = [":base64-0.23.1.crate"],
+    crate = "base64",
+    crate_root = "base64-0.23.1.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_BIN_NAME": "base64",
+        "CARGO_CRATE_NAME": "base64",
+        "CARGO_MANIFEST_DIR": "base64-0.23.1.crate",
+        "CARGO_PKG_AUTHORS": "Marshall Pierce <marshall@mpierce.org>",
+        "CARGO_PKG_DESCRIPTION": "encodes and decodes base64 as bytes or utf8",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "base64",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/marshallpierce/rust-base64",
+        "CARGO_PKG_RUST_VERSION": "1.71.0",
+        "CARGO_PKG_VERSION": "0.23.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "23",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "alloc",
+        "default",
+        "simd-unsafe",
+        "std",
+    ],
+    visibility = [],
+)
+
+http_archive(
     name = "bitflags-1.3.2.crate",
     sha256 = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a",
     strip_prefix = "bitflags-1.3.2",
@@ -1309,23 +1349,23 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "cc-1.4.7.crate",
-    sha256 = "54413ede23c2daf518f35156dfde027feb2374004d63bd497f983c8db9c0e313",
-    strip_prefix = "cc-1.4.7",
-    urls = ["https://static.crates.io/crates/cc/1.4.7/download"],
+    name = "cc-1.5.1.crate",
+    sha256 = "f360145194ee8e21db5ee7f3fcd4fe52210864c75c985dae33218202c8bbe040",
+    strip_prefix = "cc-1.5.1",
+    urls = ["https://static.crates.io/crates/cc/1.5.1/download"],
     visibility = [],
 )
 
 reindeer_rust_library(
     name = "cc-1",
-    srcs = [":cc-1.4.7.crate"],
+    srcs = [":cc-1.5.1.crate"],
     crate = "cc",
-    crate_root = "cc-1.4.7.crate/src/lib.rs",
+    crate_root = "cc-1.5.1.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "cc",
         "CARGO_CRATE_NAME": "cc",
-        "CARGO_MANIFEST_DIR": "cc-1.4.7.crate",
+        "CARGO_MANIFEST_DIR": "cc-1.5.1.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A build-time dependency for Cargo build scripts to assist in invoking the native\nC compiler to compile native C code into a static archive to be linked into Rust\ncode.\n",
         "CARGO_PKG_HOMEPAGE": "https://github.com/rust-lang/cc-rs",
@@ -1333,10 +1373,10 @@ reindeer_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/rust-lang/cc-rs",
         "CARGO_PKG_RUST_VERSION": "1.65.0",
-        "CARGO_PKG_VERSION": "1.4.7",
+        "CARGO_PKG_VERSION": "1.5.1",
         "CARGO_PKG_VERSION_MAJOR": "1",
-        "CARGO_PKG_VERSION_MINOR": "4",
-        "CARGO_PKG_VERSION_PATCH": "7",
+        "CARGO_PKG_VERSION_MINOR": "5",
+        "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
@@ -2566,6 +2606,280 @@ reindeer_rust_library(
     visibility = [],
 )
 
+alias(
+    name = "deser",
+    actual = ":deser-0.9",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "deser-0.9.1.crate",
+    sha256 = "73f38758df3495e682a29dd0c1a6326fed4ad46a274b85ea36799884127202bf",
+    strip_prefix = "deser-0.9.1",
+    urls = ["https://static.crates.io/crates/deser/0.9.1/download"],
+    visibility = [],
+)
+
+reindeer_rust_library(
+    name = "deser-0.9",
+    srcs = [":deser-0.9.1.crate"],
+    crate = "deser",
+    crate_root = "deser-0.9.1.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "deser",
+        "CARGO_CRATE_NAME": "deser",
+        "CARGO_MANIFEST_DIR": "deser-0.9.1.crate",
+        "CARGO_PKG_AUTHORS": "Armin Ronacher <armin.ronacher@active-4.com>",
+        "CARGO_PKG_DESCRIPTION": "An experimental serialization and deserialization library for Rust",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "deser",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/mitsuhiko/deser",
+        "CARGO_PKG_RUST_VERSION": "1.88",
+        "CARGO_PKG_VERSION": "0.9.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "derive",
+        "io",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":deser-core-0.9",
+        ":deser-derive-0.9",
+    ],
+)
+
+http_archive(
+    name = "deser-core-0.9.1.crate",
+    sha256 = "12bd36a68e8d14a98ad4107016d65f3af3e851185f3176f05d873aaec9328472",
+    strip_prefix = "deser-core-0.9.1",
+    urls = ["https://static.crates.io/crates/deser-core/0.9.1/download"],
+    visibility = [],
+)
+
+reindeer_rust_library(
+    name = "deser-core-0.9",
+    srcs = [":deser-core-0.9.1.crate"],
+    crate = "deser_core",
+    crate_root = "deser-core-0.9.1.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "deser_core",
+        "CARGO_CRATE_NAME": "deser_core",
+        "CARGO_MANIFEST_DIR": "deser-core-0.9.1.crate",
+        "CARGO_PKG_AUTHORS": "Armin Ronacher <armin.ronacher@active-4.com>",
+        "CARGO_PKG_DESCRIPTION": "Core traits and types of deser, use the deser crate instead",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "deser-core",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/mitsuhiko/deser",
+        "CARGO_PKG_RUST_VERSION": "1.88",
+        "CARGO_PKG_VERSION": "0.9.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "derive",
+        "io",
+        "std",
+    ],
+    visibility = [],
+)
+
+http_archive(
+    name = "deser-derive-0.9.1.crate",
+    sha256 = "eca8164527abd9115827cc18284c01ebf597b2f5cf4b2e87f0e56b7654fb1c01",
+    strip_prefix = "deser-derive-0.9.1",
+    urls = ["https://static.crates.io/crates/deser-derive/0.9.1/download"],
+    visibility = [],
+)
+
+reindeer_rust_library(
+    name = "deser-derive-0.9",
+    srcs = [":deser-derive-0.9.1.crate"],
+    crate = "deser_derive",
+    crate_root = "deser-derive-0.9.1.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "deser_derive",
+        "CARGO_CRATE_NAME": "deser_derive",
+        "CARGO_MANIFEST_DIR": "deser-derive-0.9.1.crate",
+        "CARGO_PKG_AUTHORS": "Armin Ronacher <armin.ronacher@active-4.com>",
+        "CARGO_PKG_DESCRIPTION": "Derive macros for the Serialize and Deserialize traits of deser",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "deser-derive",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/mitsuhiko/deser",
+        "CARGO_PKG_RUST_VERSION": "1.88",
+        "CARGO_PKG_VERSION": "0.9.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    proc_macro = True,
+    visibility = [],
+    deps = [
+        ":proc-macro2-1",
+        ":quote-1",
+        ":syn-3",
+    ],
+)
+
+alias(
+    name = "deser-json",
+    actual = ":deser-json-0.9",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "deser-json-0.9.1.crate",
+    sha256 = "9f11fb5ad1e6dd92b89f2083154047651a2cb950f35019e8385a8681352ca6f2",
+    strip_prefix = "deser-json-0.9.1",
+    urls = ["https://static.crates.io/crates/deser-json/0.9.1/download"],
+    visibility = [],
+)
+
+reindeer_rust_library(
+    name = "deser-json-0.9",
+    srcs = [":deser-json-0.9.1.crate"],
+    crate = "deser_json",
+    crate_root = "deser-json-0.9.1.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "deser_json",
+        "CARGO_CRATE_NAME": "deser_json",
+        "CARGO_MANIFEST_DIR": "deser-json-0.9.1.crate",
+        "CARGO_PKG_AUTHORS": "Armin Ronacher <armin.ronacher@active-4.com>",
+        "CARGO_PKG_DESCRIPTION": "JSON support for deser",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "deser-json",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/mitsuhiko/deser",
+        "CARGO_PKG_RUST_VERSION": "1.88",
+        "CARGO_PKG_VERSION": "0.9.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "io",
+        "speedups",
+        "std",
+        "zmij",
+    ],
+    visibility = [],
+    deps = [
+        ":deser-core-0.9",
+        ":simdutf8-0.1",
+        ":zmij-1",
+    ],
+)
+
+alias(
+    name = "deser-toml",
+    actual = ":deser-toml-0.9",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "deser-toml-0.9.1.crate",
+    sha256 = "488893b7b66e0125e9fea921b44399e275909e67ed42187ecaf0d1157739420b",
+    strip_prefix = "deser-toml-0.9.1",
+    urls = ["https://static.crates.io/crates/deser-toml/0.9.1/download"],
+    visibility = [],
+)
+
+reindeer_rust_library(
+    name = "deser-toml-0.9",
+    srcs = [":deser-toml-0.9.1.crate"],
+    crate = "deser_toml",
+    crate_root = "deser-toml-0.9.1.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "deser_toml",
+        "CARGO_CRATE_NAME": "deser_toml",
+        "CARGO_MANIFEST_DIR": "deser-toml-0.9.1.crate",
+        "CARGO_PKG_AUTHORS": "Armin Ronacher <armin.ronacher@active-4.com>",
+        "CARGO_PKG_DESCRIPTION": "TOML support for deser",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "deser-toml",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/mitsuhiko/deser",
+        "CARGO_PKG_RUST_VERSION": "1.88",
+        "CARGO_PKG_VERSION": "0.9.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "io",
+        "zmij",
+    ],
+    visibility = [],
+    deps = [
+        ":deser-core-0.9",
+        ":zmij-1",
+    ],
+)
+
+alias(
+    name = "deser-value",
+    actual = ":deser-value-0.9",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "deser-value-0.9.1.crate",
+    sha256 = "2d92341b8f09ca41e6a5e9f5eed1f7f2c8025cd11922ce9b1cdb2bbe90e5faf7",
+    strip_prefix = "deser-value-0.9.1",
+    urls = ["https://static.crates.io/crates/deser-value/0.9.1/download"],
+    visibility = [],
+)
+
+reindeer_rust_library(
+    name = "deser-value-0.9",
+    srcs = [":deser-value-0.9.1.crate"],
+    crate = "deser_value",
+    crate_root = "deser-value-0.9.1.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "deser_value",
+        "CARGO_CRATE_NAME": "deser_value",
+        "CARGO_MANIFEST_DIR": "deser-value-0.9.1.crate",
+        "CARGO_PKG_AUTHORS": "Armin Ronacher <armin.ronacher@active-4.com>",
+        "CARGO_PKG_DESCRIPTION": "A dynamic value type for deser",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "deser-value",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/mitsuhiko/deser",
+        "CARGO_PKG_RUST_VERSION": "1.88",
+        "CARGO_PKG_VERSION": "0.9.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":deser-core-0.9",
+        ":indexmap-2",
+    ],
+)
+
 http_archive(
     name = "digest-0.10.7.crate",
     sha256 = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292",
@@ -2879,10 +3193,10 @@ reindeer_rust_library(
             deps = [":libc-0.2"],
         ),
         "windows-gnu": dict(
-            deps = [":windows-sys-0.59"],
+            deps = [":windows-sys-0.61"],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.59"],
+            deps = [":windows-sys-0.61"],
         ),
     },
     visibility = [],
@@ -2928,23 +3242,23 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "find-msvc-tools-0.1.13.crate",
-    sha256 = "ef25905e51abafe4dcea6c15fec58c57b601cdbd0ee53d22ea1d3016c587d39b",
-    strip_prefix = "find-msvc-tools-0.1.13",
-    urls = ["https://static.crates.io/crates/find-msvc-tools/0.1.13/download"],
+    name = "find-msvc-tools-0.1.14.crate",
+    sha256 = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484",
+    strip_prefix = "find-msvc-tools-0.1.14",
+    urls = ["https://static.crates.io/crates/find-msvc-tools/0.1.14/download"],
     visibility = [],
 )
 
 reindeer_rust_library(
     name = "find-msvc-tools-0.1",
-    srcs = [":find-msvc-tools-0.1.13.crate"],
+    srcs = [":find-msvc-tools-0.1.14.crate"],
     crate = "find_msvc_tools",
-    crate_root = "find-msvc-tools-0.1.13.crate/src/lib.rs",
+    crate_root = "find-msvc-tools-0.1.14.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "find_msvc_tools",
         "CARGO_CRATE_NAME": "find_msvc_tools",
-        "CARGO_MANIFEST_DIR": "find-msvc-tools-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "find-msvc-tools-0.1.14.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Find windows-specific tools, read MSVC versions from the registry and from COM interfaces",
         "CARGO_PKG_HOMEPAGE": "",
@@ -2952,10 +3266,10 @@ reindeer_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/rust-lang/cc-rs",
         "CARGO_PKG_RUST_VERSION": "1.65.0",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
@@ -3821,6 +4135,7 @@ reindeer_rust_library(
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :getrandom-0.3-build-script-run[out_dir])",
     },
+    features = ["std"],
     platform = {
         "linux-arm64": dict(
             deps = [":libc-0.2"],
@@ -3863,6 +4178,7 @@ reindeer_rust_binary(
         "CARGO_PKG_VERSION_PATCH": "4",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = ["std"],
     visibility = [],
 )
 
@@ -3882,6 +4198,7 @@ buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "4",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = ["std"],
     version = "0.3.4",
 )
 
@@ -4613,34 +4930,34 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "hyper-util-0.1.20.crate",
-    sha256 = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0",
-    strip_prefix = "hyper-util-0.1.20",
-    urls = ["https://static.crates.io/crates/hyper-util/0.1.20/download"],
+    name = "hyper-util-0.1.21.crate",
+    sha256 = "ddc03d96684f9226b8a787cdb71488417b53ab5ea8fdb1dac946cb9431cc8bff",
+    strip_prefix = "hyper-util-0.1.21",
+    urls = ["https://static.crates.io/crates/hyper-util/0.1.21/download"],
     visibility = [],
 )
 
 reindeer_rust_library(
     name = "hyper-util-0.1",
-    srcs = [":hyper-util-0.1.20.crate"],
+    srcs = [":hyper-util-0.1.21.crate"],
     crate = "hyper_util",
-    crate_root = "hyper-util-0.1.20.crate/src/lib.rs",
-    edition = "2021",
+    crate_root = "hyper-util-0.1.21.crate/src/lib.rs",
+    edition = "2024",
     env = {
         "CARGO_BIN_NAME": "hyper_util",
         "CARGO_CRATE_NAME": "hyper_util",
-        "CARGO_MANIFEST_DIR": "hyper-util-0.1.20.crate",
+        "CARGO_MANIFEST_DIR": "hyper-util-0.1.21.crate",
         "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "hyper utilities",
         "CARGO_PKG_HOMEPAGE": "https://hyper.rs",
         "CARGO_PKG_NAME": "hyper-util",
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/hyperium/hyper-util",
-        "CARGO_PKG_RUST_VERSION": "1.64",
-        "CARGO_PKG_VERSION": "0.1.20",
+        "CARGO_PKG_RUST_VERSION": "1.85",
+        "CARGO_PKG_VERSION": "0.1.21",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "20",
+        "CARGO_PKG_VERSION_PATCH": "21",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -4657,12 +4974,13 @@ reindeer_rust_library(
     ],
     visibility = [],
     deps = [
-        ":base64-0.22",
+        ":base64-0.23",
         ":bytes-1",
         ":futures-channel-0.3",
         ":futures-util-0.3",
         ":http-1",
         ":http-body-1",
+        ":httparse-1",
         ":hyper-1",
         ":ipnet-2",
         ":libc-0.2",
@@ -6149,6 +6467,10 @@ reindeer_rust_library(
         "CARGO_PKG_VERSION_PATCH": "34",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = [
+        "alloc",
+        "std",
+    ],
     visibility = [],
 )
 
@@ -9111,23 +9433,23 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "pulldown-cmark-to-cmark-22.0.1.crate",
-    sha256 = "ab1ad36992cead65f02aa399a373a42730922f1525d988172634fdefdecb8a60",
-    strip_prefix = "pulldown-cmark-to-cmark-22.0.1",
-    urls = ["https://static.crates.io/crates/pulldown-cmark-to-cmark/22.0.1/download"],
+    name = "pulldown-cmark-to-cmark-22.0.3.crate",
+    sha256 = "84bbb29c624230c4bd1047bbdb2aa47e41c860e9665ce62ba9504eebe91bf867",
+    strip_prefix = "pulldown-cmark-to-cmark-22.0.3",
+    urls = ["https://static.crates.io/crates/pulldown-cmark-to-cmark/22.0.3/download"],
     visibility = [],
 )
 
 reindeer_rust_library(
     name = "pulldown-cmark-to-cmark-22",
-    srcs = [":pulldown-cmark-to-cmark-22.0.1.crate"],
+    srcs = [":pulldown-cmark-to-cmark-22.0.3.crate"],
     crate = "pulldown_cmark_to_cmark",
-    crate_root = "pulldown-cmark-to-cmark-22.0.1.crate/src/lib.rs",
+    crate_root = "pulldown-cmark-to-cmark-22.0.3.crate/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_BIN_NAME": "pulldown_cmark_to_cmark",
         "CARGO_CRATE_NAME": "pulldown_cmark_to_cmark",
-        "CARGO_MANIFEST_DIR": "pulldown-cmark-to-cmark-22.0.1.crate",
+        "CARGO_MANIFEST_DIR": "pulldown-cmark-to-cmark-22.0.3.crate",
         "CARGO_PKG_AUTHORS": "Sebastian Thiel <byronimo@gmail.com>:Dylan Owen <dyltotheo@gmail.com>:Alessandro Ogier <alessandro.ogier@gmail.com>:Zixian Cai <2891235+caizixian@users.noreply.github.com>:Andrew Lyjak <andrew.lyjak@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Convert pulldown-cmark Events back to the string they were parsed from",
         "CARGO_PKG_HOMEPAGE": "https://github.com/Byron/pulldown-cmark-to-cmark",
@@ -9135,10 +9457,10 @@ reindeer_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/Byron/pulldown-cmark-to-cmark",
         "CARGO_PKG_RUST_VERSION": "1.71.1",
-        "CARGO_PKG_VERSION": "22.0.1",
+        "CARGO_PKG_VERSION": "22.0.3",
         "CARGO_PKG_VERSION_MAJOR": "22",
         "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
@@ -10987,12 +11309,6 @@ reindeer_rust_library(
     visibility = [],
 )
 
-alias(
-    name = "serde",
-    actual = ":serde-1",
-    visibility = ["PUBLIC"],
-)
-
 http_archive(
     name = "serde-1.0.229.crate",
     sha256 = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba",
@@ -11319,12 +11635,6 @@ reindeer_rust_library(
     ],
 )
 
-alias(
-    name = "serde_json",
-    actual = ":serde_json-1",
-    visibility = ["PUBLIC"],
-)
-
 http_archive(
     name = "serde_json-1.0.151.crate",
     sha256 = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14",
@@ -11422,42 +11732,6 @@ buildscript_run(
         "std",
     ],
     version = "1.0.151",
-)
-
-http_archive(
-    name = "serde_spanned-0.6.9.crate",
-    sha256 = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3",
-    strip_prefix = "serde_spanned-0.6.9",
-    urls = ["https://static.crates.io/crates/serde_spanned/0.6.9/download"],
-    visibility = [],
-)
-
-reindeer_rust_library(
-    name = "serde_spanned-0.6",
-    srcs = [":serde_spanned-0.6.9.crate"],
-    crate = "serde_spanned",
-    crate_root = "serde_spanned-0.6.9.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "serde_spanned",
-        "CARGO_CRATE_NAME": "serde_spanned",
-        "CARGO_MANIFEST_DIR": "serde_spanned-0.6.9.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "Serde-compatible spanned Value",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "serde_spanned",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_RUST_VERSION": "1.66",
-        "CARGO_PKG_VERSION": "0.6.9",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "6",
-        "CARGO_PKG_VERSION_PATCH": "9",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = ["serde"],
-    visibility = [],
-    deps = [":serde-1"],
 )
 
 http_archive(
@@ -11666,6 +11940,41 @@ reindeer_rust_library(
 )
 
 http_archive(
+    name = "simdutf8-0.1.5.crate",
+    sha256 = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e",
+    strip_prefix = "simdutf8-0.1.5",
+    urls = ["https://static.crates.io/crates/simdutf8/0.1.5/download"],
+    visibility = [],
+)
+
+reindeer_rust_library(
+    name = "simdutf8-0.1",
+    srcs = [":simdutf8-0.1.5.crate"],
+    crate = "simdutf8",
+    crate_root = "simdutf8-0.1.5.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_BIN_NAME": "simdutf8",
+        "CARGO_CRATE_NAME": "simdutf8",
+        "CARGO_MANIFEST_DIR": "simdutf8-0.1.5.crate",
+        "CARGO_PKG_AUTHORS": "Hans Kratz <hans@appfour.com>",
+        "CARGO_PKG_DESCRIPTION": "SIMD-accelerated UTF-8 validation.",
+        "CARGO_PKG_HOMEPAGE": "https://github.com/rusticstuff/simdutf8",
+        "CARGO_PKG_NAME": "simdutf8",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rusticstuff/simdutf8",
+        "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "0.1.5",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "5",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["std"],
+    visibility = [],
+)
+
+http_archive(
     name = "slab-0.4.12.crate",
     sha256 = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5",
     strip_prefix = "slab-0.4.12",
@@ -11704,23 +12013,23 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "smallvec-1.16.1.crate",
-    sha256 = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891",
-    strip_prefix = "smallvec-1.16.1",
-    urls = ["https://static.crates.io/crates/smallvec/1.16.1/download"],
+    name = "smallvec-1.16.2.crate",
+    sha256 = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e",
+    strip_prefix = "smallvec-1.16.2",
+    urls = ["https://static.crates.io/crates/smallvec/1.16.2/download"],
     visibility = [],
 )
 
 reindeer_rust_library(
     name = "smallvec-1",
-    srcs = [":smallvec-1.16.1.crate"],
+    srcs = [":smallvec-1.16.2.crate"],
     crate = "smallvec",
-    crate_root = "smallvec-1.16.1.crate/src/lib.rs",
+    crate_root = "smallvec-1.16.2.crate/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_BIN_NAME": "smallvec",
         "CARGO_CRATE_NAME": "smallvec",
-        "CARGO_MANIFEST_DIR": "smallvec-1.16.1.crate",
+        "CARGO_MANIFEST_DIR": "smallvec-1.16.2.crate",
         "CARGO_PKG_AUTHORS": "The Servo Project Developers",
         "CARGO_PKG_DESCRIPTION": "'Small vector' optimization: store up to a small number of items on the stack",
         "CARGO_PKG_HOMEPAGE": "",
@@ -11728,10 +12037,10 @@ reindeer_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/servo/rust-smallvec",
         "CARGO_PKG_RUST_VERSION": "",
-        "CARGO_PKG_VERSION": "1.16.1",
+        "CARGO_PKG_VERSION": "1.16.2",
         "CARGO_PKG_VERSION_MAJOR": "1",
         "CARGO_PKG_VERSION_MINOR": "16",
-        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -12382,10 +12691,10 @@ reindeer_rust_library(
             deps = [":rustix-1"],
         ),
         "windows-gnu": dict(
-            deps = [":windows-sys-0.59"],
+            deps = [":windows-sys-0.61"],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.59"],
+            deps = [":windows-sys-0.61"],
         ),
     },
     visibility = [],
@@ -12485,34 +12794,34 @@ buildscript_run(
 )
 
 http_archive(
-    name = "thiserror-2.0.20.crate",
-    sha256 = "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f",
-    strip_prefix = "thiserror-2.0.20",
-    urls = ["https://static.crates.io/crates/thiserror/2.0.20/download"],
+    name = "thiserror-2.0.21.crate",
+    sha256 = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e",
+    strip_prefix = "thiserror-2.0.21",
+    urls = ["https://static.crates.io/crates/thiserror/2.0.21/download"],
     visibility = [],
 )
 
 reindeer_rust_library(
     name = "thiserror-2",
-    srcs = [":thiserror-2.0.20.crate"],
+    srcs = [":thiserror-2.0.21.crate"],
     crate = "thiserror",
-    crate_root = "thiserror-2.0.20.crate/src/lib.rs",
+    crate_root = "thiserror-2.0.21.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "thiserror",
         "CARGO_CRATE_NAME": "thiserror",
-        "CARGO_MANIFEST_DIR": "thiserror-2.0.20.crate",
+        "CARGO_MANIFEST_DIR": "thiserror-2.0.21.crate",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "derive(Error)",
         "CARGO_PKG_HOMEPAGE": "",
         "CARGO_PKG_NAME": "thiserror",
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/dtolnay/thiserror",
-        "CARGO_PKG_RUST_VERSION": "1.71",
-        "CARGO_PKG_VERSION": "2.0.20",
+        "CARGO_PKG_RUST_VERSION": "1.77",
+        "CARGO_PKG_VERSION": "2.0.21",
         "CARGO_PKG_VERSION_MAJOR": "2",
         "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "20",
+        "CARGO_PKG_VERSION_PATCH": "21",
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :thiserror-2-build-script-run[out_dir])",
     },
@@ -12527,25 +12836,25 @@ reindeer_rust_library(
 
 reindeer_rust_binary(
     name = "thiserror-2-build-script-build",
-    srcs = [":thiserror-2.0.20.crate"],
+    srcs = [":thiserror-2.0.21.crate"],
     crate = "build_script_build",
-    crate_root = "thiserror-2.0.20.crate/build.rs",
+    crate_root = "thiserror-2.0.21.crate/build.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "build-script-build",
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "thiserror-2.0.20.crate",
+        "CARGO_MANIFEST_DIR": "thiserror-2.0.21.crate",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "derive(Error)",
         "CARGO_PKG_HOMEPAGE": "",
         "CARGO_PKG_NAME": "thiserror",
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/dtolnay/thiserror",
-        "CARGO_PKG_RUST_VERSION": "1.71",
-        "CARGO_PKG_VERSION": "2.0.20",
+        "CARGO_PKG_RUST_VERSION": "1.77",
+        "CARGO_PKG_VERSION": "2.0.21",
         "CARGO_PKG_VERSION_MAJOR": "2",
         "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "20",
+        "CARGO_PKG_VERSION_PATCH": "21",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -12565,17 +12874,17 @@ buildscript_run(
         "CARGO_PKG_HOMEPAGE": "",
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/dtolnay/thiserror",
-        "CARGO_PKG_RUST_VERSION": "1.71",
+        "CARGO_PKG_RUST_VERSION": "1.77",
         "CARGO_PKG_VERSION_MAJOR": "2",
         "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "20",
+        "CARGO_PKG_VERSION_PATCH": "21",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
         "default",
         "std",
     ],
-    version = "2.0.20",
+    version = "2.0.21",
 )
 
 http_archive(
@@ -12619,34 +12928,34 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "thiserror-impl-2.0.20.crate",
-    sha256 = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af",
-    strip_prefix = "thiserror-impl-2.0.20",
-    urls = ["https://static.crates.io/crates/thiserror-impl/2.0.20/download"],
+    name = "thiserror-impl-2.0.21.crate",
+    sha256 = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524",
+    strip_prefix = "thiserror-impl-2.0.21",
+    urls = ["https://static.crates.io/crates/thiserror-impl/2.0.21/download"],
     visibility = [],
 )
 
 reindeer_rust_library(
     name = "thiserror-impl-2",
-    srcs = [":thiserror-impl-2.0.20.crate"],
+    srcs = [":thiserror-impl-2.0.21.crate"],
     crate = "thiserror_impl",
-    crate_root = "thiserror-impl-2.0.20.crate/src/lib.rs",
+    crate_root = "thiserror-impl-2.0.21.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "thiserror_impl",
         "CARGO_CRATE_NAME": "thiserror_impl",
-        "CARGO_MANIFEST_DIR": "thiserror-impl-2.0.20.crate",
+        "CARGO_MANIFEST_DIR": "thiserror-impl-2.0.21.crate",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Implementation detail of the `thiserror` crate",
         "CARGO_PKG_HOMEPAGE": "",
         "CARGO_PKG_NAME": "thiserror-impl",
         "CARGO_PKG_README": "",
         "CARGO_PKG_REPOSITORY": "https://github.com/dtolnay/thiserror",
-        "CARGO_PKG_RUST_VERSION": "1.71",
-        "CARGO_PKG_VERSION": "2.0.20",
+        "CARGO_PKG_RUST_VERSION": "1.77",
+        "CARGO_PKG_VERSION": "2.0.21",
         "CARGO_PKG_VERSION_MAJOR": "2",
         "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "20",
+        "CARGO_PKG_VERSION_PATCH": "21",
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
@@ -12881,23 +13190,23 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "tokio-rustls-0.26.5.crate",
-    sha256 = "b0c85f2c3ef0b1cd58b36682f4b17aaa995f0e5db534d85692b4903abce21f67",
-    strip_prefix = "tokio-rustls-0.26.5",
-    urls = ["https://static.crates.io/crates/tokio-rustls/0.26.5/download"],
+    name = "tokio-rustls-0.26.6.crate",
+    sha256 = "c9cc2678c2cdd569ef8215e2afd7954ada2ae20b4fdd2c5fe6139a3b02d105db",
+    strip_prefix = "tokio-rustls-0.26.6",
+    urls = ["https://static.crates.io/crates/tokio-rustls/0.26.6/download"],
     visibility = [],
 )
 
 reindeer_rust_library(
     name = "tokio-rustls-0.26",
-    srcs = [":tokio-rustls-0.26.5.crate"],
+    srcs = [":tokio-rustls-0.26.6.crate"],
     crate = "tokio_rustls",
-    crate_root = "tokio-rustls-0.26.5.crate/src/lib.rs",
+    crate_root = "tokio-rustls-0.26.6.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "tokio_rustls",
         "CARGO_CRATE_NAME": "tokio_rustls",
-        "CARGO_MANIFEST_DIR": "tokio-rustls-0.26.5.crate",
+        "CARGO_MANIFEST_DIR": "tokio-rustls-0.26.6.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Asynchronous TLS/SSL streams for Tokio using Rustls.",
         "CARGO_PKG_HOMEPAGE": "https://github.com/rustls/tokio-rustls",
@@ -12905,10 +13214,10 @@ reindeer_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/rustls/tokio-rustls",
         "CARGO_PKG_RUST_VERSION": "1.71",
-        "CARGO_PKG_VERSION": "0.26.5",
+        "CARGO_PKG_VERSION": "0.26.6",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "26",
-        "CARGO_PKG_VERSION_PATCH": "5",
+        "CARGO_PKG_VERSION_PATCH": "6",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -13028,57 +13337,6 @@ reindeer_rust_library(
     ],
 )
 
-alias(
-    name = "toml",
-    actual = ":toml-0.8",
-    visibility = ["PUBLIC"],
-)
-
-http_archive(
-    name = "toml-0.8.23.crate",
-    sha256 = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362",
-    strip_prefix = "toml-0.8.23",
-    urls = ["https://static.crates.io/crates/toml/0.8.23/download"],
-    visibility = [],
-)
-
-reindeer_rust_library(
-    name = "toml-0.8",
-    srcs = [":toml-0.8.23.crate"],
-    crate = "toml",
-    crate_root = "toml-0.8.23.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "toml",
-        "CARGO_CRATE_NAME": "toml",
-        "CARGO_MANIFEST_DIR": "toml-0.8.23.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "A native Rust encoder and decoder of TOML-formatted files and streams. Provides\nimplementations of the standard Serialize/Deserialize traits for TOML data to\nfacilitate deserializing and serializing Rust structures.\n",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "toml",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_RUST_VERSION": "1.66",
-        "CARGO_PKG_VERSION": "0.8.23",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "8",
-        "CARGO_PKG_VERSION_PATCH": "23",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "display",
-        "parse",
-    ],
-    visibility = [],
-    deps = [
-        ":serde-1",
-        ":serde_spanned-0.6",
-        ":toml_datetime-0.6",
-        ":toml_edit-0.22",
-    ],
-)
-
 http_archive(
     name = "toml-0.9.12+spec-1.1.0.crate",
     sha256 = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863",
@@ -13129,42 +13387,6 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "toml_datetime-0.6.11.crate",
-    sha256 = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c",
-    strip_prefix = "toml_datetime-0.6.11",
-    urls = ["https://static.crates.io/crates/toml_datetime/0.6.11/download"],
-    visibility = [],
-)
-
-reindeer_rust_library(
-    name = "toml_datetime-0.6",
-    srcs = [":toml_datetime-0.6.11.crate"],
-    crate = "toml_datetime",
-    crate_root = "toml_datetime-0.6.11.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "toml_datetime",
-        "CARGO_CRATE_NAME": "toml_datetime",
-        "CARGO_MANIFEST_DIR": "toml_datetime-0.6.11.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "A TOML-compatible datetime type",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "toml_datetime",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_RUST_VERSION": "1.66",
-        "CARGO_PKG_VERSION": "0.6.11",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "6",
-        "CARGO_PKG_VERSION_PATCH": "11",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = ["serde"],
-    visibility = [],
-    deps = [":serde-1"],
-)
-
-http_archive(
     name = "toml_datetime-0.7.5+spec-1.1.0.crate",
     sha256 = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347",
     strip_prefix = "toml_datetime-0.7.5+spec-1.1.0",
@@ -13205,53 +13427,6 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "toml_edit-0.22.27.crate",
-    sha256 = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a",
-    strip_prefix = "toml_edit-0.22.27",
-    urls = ["https://static.crates.io/crates/toml_edit/0.22.27/download"],
-    visibility = [],
-)
-
-reindeer_rust_library(
-    name = "toml_edit-0.22",
-    srcs = [":toml_edit-0.22.27.crate"],
-    crate = "toml_edit",
-    crate_root = "toml_edit-0.22.27.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "toml_edit",
-        "CARGO_CRATE_NAME": "toml_edit",
-        "CARGO_MANIFEST_DIR": "toml_edit-0.22.27.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "Yet another format-preserving TOML parser.",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "toml_edit",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_RUST_VERSION": "1.66",
-        "CARGO_PKG_VERSION": "0.22.27",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "22",
-        "CARGO_PKG_VERSION_PATCH": "27",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "display",
-        "parse",
-        "serde",
-    ],
-    visibility = [],
-    deps = [
-        ":indexmap-2",
-        ":serde-1",
-        ":serde_spanned-0.6",
-        ":toml_datetime-0.6",
-        ":toml_write-0.1",
-        ":winnow-0.7",
-    ],
-)
-
-http_archive(
     name = "toml_parser-1.1.3+spec-1.1.0.crate",
     sha256 = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56",
     strip_prefix = "toml_parser-1.1.3+spec-1.1.0",
@@ -13288,45 +13463,6 @@ reindeer_rust_library(
     ],
     visibility = [],
     deps = [":winnow-1"],
-)
-
-http_archive(
-    name = "toml_write-0.1.2.crate",
-    sha256 = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801",
-    strip_prefix = "toml_write-0.1.2",
-    urls = ["https://static.crates.io/crates/toml_write/0.1.2/download"],
-    visibility = [],
-)
-
-reindeer_rust_library(
-    name = "toml_write-0.1",
-    srcs = [":toml_write-0.1.2.crate"],
-    crate = "toml_write",
-    crate_root = "toml_write-0.1.2.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "toml_write",
-        "CARGO_CRATE_NAME": "toml_write",
-        "CARGO_MANIFEST_DIR": "toml_write-0.1.2.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "A low-level interface for writing out TOML\n",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "toml_write",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_RUST_VERSION": "1.66",
-        "CARGO_PKG_VERSION": "0.1.2",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "2",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "alloc",
-        "default",
-        "std",
-    ],
-    visibility = [],
 )
 
 http_archive(
@@ -14582,56 +14718,6 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "windows-sys-0.59.0.crate",
-    sha256 = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b",
-    strip_prefix = "windows-sys-0.59.0",
-    urls = ["https://static.crates.io/crates/windows-sys/0.59.0/download"],
-    visibility = [],
-)
-
-reindeer_rust_library(
-    name = "windows-sys-0.59",
-    srcs = [":windows-sys-0.59.0.crate"],
-    crate = "windows_sys",
-    crate_root = "windows-sys-0.59.0.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "windows_sys",
-        "CARGO_CRATE_NAME": "windows_sys",
-        "CARGO_MANIFEST_DIR": "windows-sys-0.59.0.crate",
-        "CARGO_PKG_AUTHORS": "Microsoft",
-        "CARGO_PKG_DESCRIPTION": "Rust for Windows",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "windows-sys",
-        "CARGO_PKG_README": "readme.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
-        "CARGO_PKG_RUST_VERSION": "1.60",
-        "CARGO_PKG_VERSION": "0.59.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "59",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "Win32",
-        "Win32_Foundation",
-        "Win32_NetworkManagement",
-        "Win32_NetworkManagement_IpHelper",
-        "Win32_Networking",
-        "Win32_Networking_WinSock",
-        "Win32_Storage",
-        "Win32_Storage_FileSystem",
-        "Win32_System",
-        "Win32_System_Diagnostics",
-        "Win32_System_Diagnostics_Debug",
-        "Win32_System_Threading",
-        "default",
-    ],
-    visibility = [],
-    deps = [":windows-targets-0.52"],
-)
-
-http_archive(
     name = "windows-sys-0.61.2.crate",
     sha256 = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
     strip_prefix = "windows-sys-0.61.2",
@@ -14683,6 +14769,8 @@ reindeer_rust_library(
         "Win32_System",
         "Win32_System_Com",
         "Win32_System_Console",
+        "Win32_System_Diagnostics",
+        "Win32_System_Diagnostics_Debug",
         "Win32_System_IO",
         "Win32_System_LibraryLoader",
         "Win32_System_Memory",
@@ -14697,210 +14785,6 @@ reindeer_rust_library(
     ],
     visibility = [],
     deps = [":windows-link-0.2"],
-)
-
-http_archive(
-    name = "windows-targets-0.52.6.crate",
-    sha256 = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973",
-    strip_prefix = "windows-targets-0.52.6",
-    urls = ["https://static.crates.io/crates/windows-targets/0.52.6/download"],
-    visibility = [],
-)
-
-reindeer_rust_library(
-    name = "windows-targets-0.52",
-    srcs = [":windows-targets-0.52.6.crate"],
-    crate = "windows_targets",
-    crate_root = "windows-targets-0.52.6.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "windows_targets",
-        "CARGO_CRATE_NAME": "windows_targets",
-        "CARGO_MANIFEST_DIR": "windows-targets-0.52.6.crate",
-        "CARGO_PKG_AUTHORS": "Microsoft",
-        "CARGO_PKG_DESCRIPTION": "Import libs for Windows",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "windows-targets",
-        "CARGO_PKG_README": "readme.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
-        "CARGO_PKG_RUST_VERSION": "1.56",
-        "CARGO_PKG_VERSION": "0.52.6",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "52",
-        "CARGO_PKG_VERSION_PATCH": "6",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    platform = {
-        "windows-gnu": dict(
-            deps = [":windows_x86_64_gnu-0.52"],
-        ),
-        "windows-msvc": dict(
-            deps = [":windows_x86_64_msvc-0.52"],
-        ),
-    },
-    visibility = [],
-)
-
-http_archive(
-    name = "windows_x86_64_gnu-0.52.6.crate",
-    sha256 = "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78",
-    strip_prefix = "windows_x86_64_gnu-0.52.6",
-    urls = ["https://static.crates.io/crates/windows_x86_64_gnu/0.52.6/download"],
-    visibility = [],
-)
-
-reindeer_rust_library(
-    name = "windows_x86_64_gnu-0.52",
-    srcs = [":windows_x86_64_gnu-0.52.6.crate"],
-    crate = "windows_x86_64_gnu",
-    crate_root = "windows_x86_64_gnu-0.52.6.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "windows_x86_64_gnu",
-        "CARGO_CRATE_NAME": "windows_x86_64_gnu",
-        "CARGO_MANIFEST_DIR": "windows_x86_64_gnu-0.52.6.crate",
-        "CARGO_PKG_AUTHORS": "Microsoft",
-        "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "windows_x86_64_gnu",
-        "CARGO_PKG_README": "",
-        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
-        "CARGO_PKG_RUST_VERSION": "1.56",
-        "CARGO_PKG_VERSION": "0.52.6",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "52",
-        "CARGO_PKG_VERSION_PATCH": "6",
-        "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :windows_x86_64_gnu-0.52-build-script-run[out_dir])",
-    },
-    rustc_flags = ["@$(location :windows_x86_64_gnu-0.52-build-script-run[rustc_flags])"],
-    visibility = [],
-)
-
-reindeer_rust_binary(
-    name = "windows_x86_64_gnu-0.52-build-script-build",
-    srcs = [":windows_x86_64_gnu-0.52.6.crate"],
-    crate = "build_script_build",
-    crate_root = "windows_x86_64_gnu-0.52.6.crate/build.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "build-script-build",
-        "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "windows_x86_64_gnu-0.52.6.crate",
-        "CARGO_PKG_AUTHORS": "Microsoft",
-        "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "windows_x86_64_gnu",
-        "CARGO_PKG_README": "",
-        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
-        "CARGO_PKG_RUST_VERSION": "1.56",
-        "CARGO_PKG_VERSION": "0.52.6",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "52",
-        "CARGO_PKG_VERSION_PATCH": "6",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-)
-
-buildscript_run(
-    name = "windows_x86_64_gnu-0.52-build-script-run",
-    package_name = "windows_x86_64_gnu",
-    buildscript_rule = ":windows_x86_64_gnu-0.52-build-script-build",
-    env = {
-        "CARGO_PKG_AUTHORS": "Microsoft",
-        "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_README": "",
-        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
-        "CARGO_PKG_RUST_VERSION": "1.56",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "52",
-        "CARGO_PKG_VERSION_PATCH": "6",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    version = "0.52.6",
-)
-
-http_archive(
-    name = "windows_x86_64_msvc-0.52.6.crate",
-    sha256 = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec",
-    strip_prefix = "windows_x86_64_msvc-0.52.6",
-    urls = ["https://static.crates.io/crates/windows_x86_64_msvc/0.52.6/download"],
-    visibility = [],
-)
-
-reindeer_rust_library(
-    name = "windows_x86_64_msvc-0.52",
-    srcs = [":windows_x86_64_msvc-0.52.6.crate"],
-    crate = "windows_x86_64_msvc",
-    crate_root = "windows_x86_64_msvc-0.52.6.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "windows_x86_64_msvc",
-        "CARGO_CRATE_NAME": "windows_x86_64_msvc",
-        "CARGO_MANIFEST_DIR": "windows_x86_64_msvc-0.52.6.crate",
-        "CARGO_PKG_AUTHORS": "Microsoft",
-        "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "windows_x86_64_msvc",
-        "CARGO_PKG_README": "",
-        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
-        "CARGO_PKG_RUST_VERSION": "1.56",
-        "CARGO_PKG_VERSION": "0.52.6",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "52",
-        "CARGO_PKG_VERSION_PATCH": "6",
-        "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :windows_x86_64_msvc-0.52-build-script-run[out_dir])",
-    },
-    rustc_flags = ["@$(location :windows_x86_64_msvc-0.52-build-script-run[rustc_flags])"],
-    visibility = [],
-)
-
-reindeer_rust_binary(
-    name = "windows_x86_64_msvc-0.52-build-script-build",
-    srcs = [":windows_x86_64_msvc-0.52.6.crate"],
-    crate = "build_script_build",
-    crate_root = "windows_x86_64_msvc-0.52.6.crate/build.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "build-script-build",
-        "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "windows_x86_64_msvc-0.52.6.crate",
-        "CARGO_PKG_AUTHORS": "Microsoft",
-        "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "windows_x86_64_msvc",
-        "CARGO_PKG_README": "",
-        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
-        "CARGO_PKG_RUST_VERSION": "1.56",
-        "CARGO_PKG_VERSION": "0.52.6",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "52",
-        "CARGO_PKG_VERSION_PATCH": "6",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-)
-
-buildscript_run(
-    name = "windows_x86_64_msvc-0.52-build-script-run",
-    package_name = "windows_x86_64_msvc",
-    buildscript_rule = ":windows_x86_64_msvc-0.52-build-script-build",
-    env = {
-        "CARGO_PKG_AUTHORS": "Microsoft",
-        "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_README": "",
-        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
-        "CARGO_PKG_RUST_VERSION": "1.56",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "52",
-        "CARGO_PKG_VERSION_PATCH": "6",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    version = "0.52.6",
 )
 
 http_archive(
@@ -14934,11 +14818,6 @@ reindeer_rust_library(
         "CARGO_PKG_VERSION_PATCH": "15",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "alloc",
-        "default",
-        "std",
-    ],
     visibility = [],
 )
 
@@ -15095,23 +14974,23 @@ reindeer_rust_library(
 )
 
 http_archive(
-    name = "zerocopy-0.8.57.crate",
-    sha256 = "d35102a9f36d089ccae9e4c6802bc118be4487b80aaffc0ab4e0cf5ce92d2873",
-    strip_prefix = "zerocopy-0.8.57",
-    urls = ["https://static.crates.io/crates/zerocopy/0.8.57/download"],
+    name = "zerocopy-0.8.59.crate",
+    sha256 = "6df92bf3d9227be3d53173901ddbffac2babc27ae50f397776ffd6dc33f800cb",
+    strip_prefix = "zerocopy-0.8.59",
+    urls = ["https://static.crates.io/crates/zerocopy/0.8.59/download"],
     visibility = [],
 )
 
 reindeer_rust_library(
     name = "zerocopy-0.8",
-    srcs = [":zerocopy-0.8.57.crate"],
+    srcs = [":zerocopy-0.8.59.crate"],
     crate = "zerocopy",
-    crate_root = "zerocopy-0.8.57.crate/src/lib.rs",
+    crate_root = "zerocopy-0.8.59.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "zerocopy",
         "CARGO_CRATE_NAME": "zerocopy",
-        "CARGO_MANIFEST_DIR": "zerocopy-0.8.57.crate",
+        "CARGO_MANIFEST_DIR": "zerocopy-0.8.59.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Zerocopy makes zero-cost memory manipulation effortless. We write \"unsafe\" so you don't have to.",
         "CARGO_PKG_HOMEPAGE": "",
@@ -15119,10 +14998,10 @@ reindeer_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/google/zerocopy",
         "CARGO_PKG_RUST_VERSION": "1.56.0",
-        "CARGO_PKG_VERSION": "0.8.57",
+        "CARGO_PKG_VERSION": "0.8.59",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "8",
-        "CARGO_PKG_VERSION_PATCH": "57",
+        "CARGO_PKG_VERSION_PATCH": "59",
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :zerocopy-0.8-build-script-run[out_dir])",
     },
@@ -15138,14 +15017,14 @@ reindeer_rust_library(
 
 reindeer_rust_binary(
     name = "zerocopy-0.8-build-script-build",
-    srcs = [":zerocopy-0.8.57.crate"],
+    srcs = [":zerocopy-0.8.59.crate"],
     crate = "build_script_build",
-    crate_root = "zerocopy-0.8.57.crate/build.rs",
+    crate_root = "zerocopy-0.8.59.crate/build.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "build-script-build",
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "zerocopy-0.8.57.crate",
+        "CARGO_MANIFEST_DIR": "zerocopy-0.8.59.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Zerocopy makes zero-cost memory manipulation effortless. We write \"unsafe\" so you don't have to.",
         "CARGO_PKG_HOMEPAGE": "",
@@ -15153,10 +15032,10 @@ reindeer_rust_binary(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/google/zerocopy",
         "CARGO_PKG_RUST_VERSION": "1.56.0",
-        "CARGO_PKG_VERSION": "0.8.57",
+        "CARGO_PKG_VERSION": "0.8.59",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "8",
-        "CARGO_PKG_VERSION_PATCH": "57",
+        "CARGO_PKG_VERSION_PATCH": "59",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -15180,7 +15059,7 @@ buildscript_run(
         "CARGO_PKG_RUST_VERSION": "1.56.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "8",
-        "CARGO_PKG_VERSION_PATCH": "57",
+        "CARGO_PKG_VERSION_PATCH": "59",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -15188,27 +15067,27 @@ buildscript_run(
         "simd",
         "zerocopy-derive",
     ],
-    version = "0.8.57",
+    version = "0.8.59",
 )
 
 http_archive(
-    name = "zerocopy-derive-0.8.57.crate",
-    sha256 = "146c01f5ab44258da43cf276c74a2763db2ff3969c9c652c3f2de07041d0b2bc",
-    strip_prefix = "zerocopy-derive-0.8.57",
-    urls = ["https://static.crates.io/crates/zerocopy-derive/0.8.57/download"],
+    name = "zerocopy-derive-0.8.59.crate",
+    sha256 = "ac4f328cf2f05d084e496c3e9c3f33ed0a183656a16e1fcec4d464d8373aec82",
+    strip_prefix = "zerocopy-derive-0.8.59",
+    urls = ["https://static.crates.io/crates/zerocopy-derive/0.8.59/download"],
     visibility = [],
 )
 
 reindeer_rust_library(
     name = "zerocopy-derive-0.8",
-    srcs = [":zerocopy-derive-0.8.57.crate"],
+    srcs = [":zerocopy-derive-0.8.59.crate"],
     crate = "zerocopy_derive",
-    crate_root = "zerocopy-derive-0.8.57.crate/src/lib.rs",
+    crate_root = "zerocopy-derive-0.8.59.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "zerocopy_derive",
         "CARGO_CRATE_NAME": "zerocopy_derive",
-        "CARGO_MANIFEST_DIR": "zerocopy-derive-0.8.57.crate",
+        "CARGO_MANIFEST_DIR": "zerocopy-derive-0.8.59.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Custom derive for traits from the zerocopy crate",
         "CARGO_PKG_HOMEPAGE": "",
@@ -15216,10 +15095,10 @@ reindeer_rust_library(
         "CARGO_PKG_README": "",
         "CARGO_PKG_REPOSITORY": "https://github.com/google/zerocopy",
         "CARGO_PKG_RUST_VERSION": "",
-        "CARGO_PKG_VERSION": "0.8.57",
+        "CARGO_PKG_VERSION": "0.8.59",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "8",
-        "CARGO_PKG_VERSION_PATCH": "57",
+        "CARGO_PKG_VERSION_PATCH": "59",
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,

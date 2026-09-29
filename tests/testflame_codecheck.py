@@ -67,7 +67,7 @@ def test_setup(sandbox):
         ),
     ],
 )
-def test_failures(sandbox, code, setup, tests, failure, phase, index, count):
+def test_failures(sandbox, code, *, setup, tests, failure, phase, index, count):
     result = codecheck.check_solution(code, setup, tests)
     assert result["status"] == "failed", result
     assert result["failure"] == failure

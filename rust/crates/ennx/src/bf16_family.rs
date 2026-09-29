@@ -1,5 +1,8 @@
 //! Four-group metric fitting; canonical components never change units after a fit.
 use super::*;
+use crate::params::ENNParams;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 pub(super) const FAMILIES: usize = 4;
 
@@ -46,15 +49,7 @@ impl FamilyHistory {
         })
     }
 
-    pub fn fit(
-        &mut self,
-        y: &ndarray::ArrayView2<f64>,
-        variance: &ndarray::ArrayView2<f64>,
-        params: ENNParams,
-        samples: usize,
-        seed: u64,
-        local_scale_neighbors: Option<usize>,
-    ) -> Result<(), String> {
+    pub fn candidates(&self) -> Vec<[f32; FAMILIES]> {
         // Conditional coordinate search. All shapes see the same held-out row
         // IDs. The current shape wins weak evidence; accepted moves are damped.
         let mut candidates = vec![self.weights];
@@ -69,31 +64,27 @@ impl FamilyHistory {
                 }
             }
         }
+        candidates
+    }
+
+    pub fn select(
+        &mut self,
+        candidates: &[[f32; FAMILIES]],
+        scores: &[f64],
+        samples: usize,
+    ) -> Result<(), String> {
+        if samples == 0 || candidates.len() != scores.len() || candidates.is_empty() {
+            return Err("Invalid family score batch".into());
+        }
         let mut best = f64::NEG_INFINITY;
         let mut selected = self.weights;
-        for weights in candidates {
-            let raw_distances = self.aggregate(weights, y.nrows());
-            let distances = match local_scale_neighbors {
-                Some(k) => crate::fit::self_tuned_distances(&raw_distances.view(), k)
-                    .map_err(|error| error.to_string())?,
-                None => raw_distances,
-            };
-            let ll = crate::fit::distance_loglik(
-                &distances.view(),
-                y,
-                Some(variance),
-                &[params],
-                samples,
-                &mut StdRng::seed_from_u64(seed),
-                None,
-            )
-            .map_err(|e| e.to_string())?[0];
+        for (&weights, &ll) in candidates.iter().zip(scores) {
             let penalty = weights
                 .iter()
                 .map(|w| f64::from(*w).ln().powi(2))
                 .sum::<f64>()
                 / FAMILIES as f64;
-            let score = ll / samples.min(y.nrows()) as f64 - 0.1 * penalty;
+            let score = ll / samples as f64 - 0.1 * penalty;
             if score.is_finite() && score > best + 0.005 {
                 best = score;
                 selected = weights;
@@ -110,6 +101,56 @@ impl FamilyHistory {
         self.weights = blended.map(f32::exp);
         Ok(())
     }
+
+    #[cfg(test)]
+    pub fn fit(
+        &mut self,
+        y: &ndarray::ArrayView2<f64>,
+        variance: &ndarray::ArrayView2<f64>,
+        params: ENNParams,
+        samples: usize,
+        seed: u64,
+        local: Option<usize>,
+    ) -> Result<(), String> {
+        let candidates = self.candidates();
+        let scores = self.reference(&candidates, y, variance, params, samples, seed, local)?;
+        self.select(&candidates, &scores, samples.min(y.nrows()))
+    }
+
+    pub fn reference(
+        &self,
+        candidates: &[[f32; FAMILIES]],
+        y: &ndarray::ArrayView2<f64>,
+        variance: &ndarray::ArrayView2<f64>,
+        params: ENNParams,
+        samples: usize,
+        seed: u64,
+        local: Option<usize>,
+    ) -> Result<Vec<f64>, String> {
+        candidates
+            .iter()
+            .map(|&weights| {
+                let raw = self.aggregate(weights, y.nrows());
+                let distances = match local {
+                    Some(k) => {
+                        crate::fit::tuned_distances(&raw.view(), k).map_err(|e| e.to_string())?
+                    }
+                    None => raw,
+                };
+                crate::fit::distance_loglik(
+                    &distances.view(),
+                    y,
+                    Some(variance),
+                    &[params],
+                    samples,
+                    &mut StdRng::seed_from_u64(seed),
+                    None,
+                )
+                .map(|v| v[0])
+                .map_err(|e| e.to_string())
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -124,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn family_energy_and_sensitivity() {
+    fn family_energy() {
         let mut h = fixture();
         h.weights = [4.0, 1.0, 1.0, 0.25];
         let scales = h.scales();
@@ -134,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn family_components_keep_units() {
+    fn family_units() {
         let mut h = fixture();
         h.components[1] = [1.0, 2.0, 3.0, 4.0];
         h.components[MAX_HISTORY] = h.components[1];
@@ -145,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn family_fit_learns_informative_axis() {
+    fn family_learning() {
         use rand::Rng;
         let mut h = fixture();
         let n = 64;
@@ -176,21 +217,21 @@ mod tests {
     }
 
     #[test]
-    fn family_gpu_history_replay_and_reset() -> Result<(), String> {
+    fn family_replay() -> Result<(), String> {
         autoreleasepool(|| {
             let len = 65_537;
             let base = vec![0x3400u16; 4 * len];
             let blocks = (0..4)
                 .map(|g| ParamBlock::new(g as u64, g * len, len, 0.25, 16.0 / len as f32))
                 .collect::<Result<Vec<_>, _>>()?;
-            let mut s = SearchState::new_fp16_implicit(
+            let mut s = SearchState::new_implicit(
                 &base,
                 blocks,
                 2,
                 TRLengthConfig::new(0.01, 0.0001, 0.1),
                 Perturbation::Rademacher,
             )?;
-            s.enable_family_shape(vec![0, 1, 2, 3])?;
+            s.enable_family(vec![0, 1, 2, 3])?;
             let config = crate::config::ConfigOverrides {
                 k_neighbors: Some(4),
                 num_candidates: Some(2),
@@ -200,12 +241,12 @@ mod tests {
                 ..Default::default()
             }
             .resident_enn(42)?;
-            s.configure_implicit_enn(config)?;
+            s.configure_enn(config)?;
             s.observe_initial(0.0, 0.001)?;
             for step in 0..10 {
                 if step == 5 {
                     s.family.as_mut().unwrap().weights = [4.0, 1.0, 1.0, 0.25];
-                    s.apply_family_shape()?;
+                    s.apply_family()?;
                 }
                 let initializing = s.history < 4;
                 let root = 123 + step;
@@ -219,7 +260,7 @@ mod tests {
                 s.diagnostic_row(&proposal, root, config.ask, proposal.index)?;
                 assert_eq!(original, read::<u16>(&s.proposal, base.len()));
                 let f = s.family.as_ref().unwrap();
-                for slot in 0..s.resident_history {
+                for slot in 0..s.resident_history * usize::from(!s.exact_history) {
                     let history = read::<u16>(&s.history_rows[slot], base.len());
                     let row = s.identities[..s.history]
                         .iter()
@@ -250,7 +291,7 @@ mod tests {
                 if initializing {
                     s.tell_initial(&proposal, reward, 0.001)?;
                 } else {
-                    s.tell_model_aware(&proposal, reward, 0.001)?;
+                    s.tell_modeled(&proposal, reward, 0.001)?;
                 }
                 s.sync()?;
                 let f = s.family.as_ref().unwrap();
@@ -265,7 +306,7 @@ mod tests {
                 }
             }
             s.history = MAX_HISTORY;
-            s.compact_implicit_history()?;
+            s.compact_history()?;
             assert_eq!(s.history, 1);
             assert_eq!(s.family.as_ref().unwrap().weights, [1.0; 4]);
             assert!(

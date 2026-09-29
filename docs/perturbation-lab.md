@@ -1,6 +1,6 @@
 # Full-Weight Perturbation Lab
 
-Updated: 2026-09-29.
+Updated: 2026-09-30.
 
 ## Scope
 
@@ -15,7 +15,7 @@ The active laws are:
 
 | TOML value | Coordinate law | Mean | Variance | Metal generation |
 | --- | --- | ---: | ---: | --- |
-| `gaussian` | Standard normal | 0 | 1 | SplitMix64 and Box--Muller |
+| `gaussian` | Standard normal | 0 | 1 | SplitMix64 and a 256-strip Ziggurat |
 | `rademacher` | Uniform over {-1, +1} | 0 | 1 | SplitMix64 and two bit tests per coordinate pair |
 
 For tensor block `j`, coordinate `i`, current tensor scale `s_j`, and candidate
@@ -58,20 +58,26 @@ distribution = "rademacher"
 The legacy flat `perturbation = "rademacher"` form remains supported.
 Omitting the selector selects `gaussian`, preserving prior runs. The field is
 rejected for workloads that have not wired the same contract. Run artifacts
-record the selected law in `study.toml`, `run.log`, and `result.toml`.
+record the selected law in `experiment.toml`, `run.log`, and `result.toml`.
 
 Perturbation law and acquisition are independent controls. The selected
 full-weight proposal pool is scored through the shared TuRBO-ENN `Ask` contract,
 whose neighbor count, Thompson/UCB choice, variance scales, output scale and
-seed are resolved from the same study TOML.
+seed are resolved from the same experiment TOML.
 
 ## Performance hypothesis
 
-Gaussian generation performs a logarithm, square root, and `sincos` for each
-coordinate pair in each of two independent streams. Rademacher generation uses
-one mixed 64-bit word per stream and extracts two signs. It removes those
-transcendentals from both the four-candidate pool traversal and selected-row
-materialization.
+Gaussian generation uses a 256-strip Ziggurat with tables embedded in Metal
+constant memory. The common path is bounded integer hashing, a table lookup,
+one multiply, and one comparison. Rejection and tail paths retain `exp` or
+`log`, but derive every retry from `(seed, tensor key, coordinate, attempt)` so
+pool scoring and selected-row materialization replay exactly. Rademacher still
+uses fewer instructions: one mixed word supplies two signs.
+
+The first-round FP16 kernel consumes coordinate pairs directly. The preceding
+scalar loop recomputed the same Box--Muller pair for adjacent coordinates and
+discarded half of each result. Pool and materialization paths were already
+pair-oriented.
 
 This does not predict an end-to-end factor. The controller still reads the
 incumbent and history, rounds four candidates to FP16, computes full realized
@@ -79,6 +85,24 @@ resident distances and pool geometry, reduces tile statistics, and writes the
 selected 2.077 GB row. The scorer is unchanged. Only complete 4K-context BO
 rounds can establish whether this changes end-to-end latency. Historical
 component medians are not current budgets; see [dated evidence](handoff.md).
+
+Early 4,096-token runs with independently randomized initialization took
+734.862 ms for Rademacher and 526.627 ms for Ziggurat Gaussian. They are useful
+favorable-point measurements, not an A/B comparison. Generation now derives
+model, proposal, acquisition, and sampling seeds from the experiment configuration;
+the derivation deliberately excludes perturbation law. This avoids checked-in
+seed literals and gives treatment arms identical streams automatically.
+
+The first controlled one-round comparison took 5,967.550 ms for Rademacher and
+7,100.504 ms for Ziggurat Gaussian. Proposal times were 83.758 and 151.000 ms;
+exact rollout times were 5,849.261 and 6,914.140 ms. Rademacher evaluated
+99,200 positions and Gaussian 117,120. Both sampled all 1,047,732,224
+coordinates; FP16 rounding changed every Rademacher coordinate and 547,552,769
+Gaussian coordinates. These untrained, zero-reward runs demonstrate strong
+seed-dependent fixed-point behavior, not search quality or a stable timing
+distribution. Artifacts:
+`.cache/ennx/runs/generation-4096/run-1790815988746-59739-0` and
+`.cache/ennx/runs/generation-4096-gaussian/run-1790816007822-60088-0`.
 
 Compare the laws with identical model, corpus, rounds, power state, and seeds.
 Record complete wall time, scorer GPU time, ask time, tell time, changed-weight
@@ -110,7 +134,7 @@ For an A/B comparison, interleave whole control and treatment CLI runs on one
 machine. Within one CLI run, repetitions execute sequentially. The repetition
 scheduler derives matched proposal and acquisition streams without checked-in
 seed literals and writes a separate artifact directory for every repetition.
-Record the source revision and resolved study with the results. A historical
+Record the source revision and resolved experiment with the results. A historical
 timing remains historical evidence unless it is rerun through the same harness,
 objective, model, and system state as the current arm.
 

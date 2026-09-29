@@ -112,16 +112,7 @@ def test_acquisitions(model):
         ),
     ]
     for acquisition in acquisitions:
-        actual = acquisition(x)
-        assert actual.shape == (3,)
-        assert torch.isfinite(actual).all()
-        assert torch.equal(actual, acquisition(x))
-        # Native samples are bitwise identical above. PyTorch reductions can
-        # change their summation order with tensor shape; do not claim otherwise.
-        separate = torch.cat([acquisition(batch[None]) for batch in x])
-        torch.testing.assert_close(
-            actual, separate, rtol=0, atol=32 * torch.finfo(actual.dtype).eps
-        )
+        assert_batch(acquisition, x)
     draws = sampler(scalar.posterior(x)).squeeze(-1)
     expected = draws.clamp_min(0).amax(-1).mean(0)
     assert torch.equal(acquisitions[0](x), expected)
@@ -150,12 +141,7 @@ def test_rejections(model):
         model.posterior(x, observation_noise=torch.ones(2, 2))
     with pytest.raises(NotImplementedError, match="transform"):
         model.posterior(x, posterior_transform=object())
-    for bad in [torch.zeros(2), torch.zeros(2, 3), x.long(), x + float("nan")]:
-        with pytest.raises(ValueError):
-            model.posterior(bad)
-    for indices in [[], [0, 0], [-1], [2]]:
-        with pytest.raises(ValueError, match="indices"):
-            model.posterior(x, output_indices=indices)
+    assert_invalid(model, x)
     posterior = model.posterior(x)
     with pytest.raises(ValueError, match="int64"):
         posterior.rsample_from_base_samples(torch.Size([2]), torch.zeros(2))
@@ -172,3 +158,25 @@ def test_rng(model):
     assert torch.equal(before, torch.random.get_rng_state())
     assert values.dtype == torch.float32
     assert torch.equal(values, Sampler(torch.Size([4]), seed=17)(model.posterior(x)))
+
+
+def assert_batch(acquisition, x):
+    actual = acquisition(x)
+    assert actual.shape == (3,)
+    assert torch.isfinite(actual).all()
+    assert torch.equal(actual, acquisition(x))
+    # Native samples are bitwise identical above. PyTorch reductions can
+    # change their summation order with tensor shape; do not claim otherwise.
+    separate = torch.cat([acquisition(batch[None]) for batch in x])
+    torch.testing.assert_close(
+        actual, separate, rtol=0, atol=32 * torch.finfo(actual.dtype).eps
+    )
+
+
+def assert_invalid(model, x):
+    for bad in [torch.zeros(2), torch.zeros(2, 3), x.long(), x + float("nan")]:
+        with pytest.raises(ValueError):
+            model.posterior(bad)
+    for indices in [[], [0, 0], [-1], [2]]:
+        with pytest.raises(ValueError, match="indices"):
+            model.posterior(x, output_indices=indices)

@@ -10,14 +10,14 @@ pub use crate::backend::EnnStorage;
 pub use crate::candidates::{CandidateRV, from_unit, generate_candidates, generate_lhd, to_unit};
 pub use crate::config::{
     AcquisitionConfig, CandidateConfig, ConfigOverrides, DistanceScaling, InitStrategy,
-    OptimizerConfig, PretrainCorpus, PretrainModel, SurrogateConfig, TrustRegionKind,
-    TurboEnnStudy, lhd_only, turbo_enn, turbo_zero,
+    ObjectiveReference, OptimizerConfig, PretrainCorpus, PretrainModel, SurrogateConfig,
+    TrustRegionKind, TurboEnnExperiment, lhd_only, turbo_enn, turbo_zero,
 };
 pub use crate::draw::{Candidates, ConditionalDraw, DrawInternals, NeighborData};
 pub use crate::error::{ENNError, EPS_VAR};
 pub use crate::fit::{row_loglik, subsample_loglik, subsample_model};
 pub use crate::fitter::ENNFitter;
-pub use crate::hypervolume::hypervolume2d_max;
+pub use crate::hypervolume::{hypervolume_max, hypervolume2d_max};
 pub use crate::index::IndexDriver;
 pub use crate::model::{ENN, ModelOptions};
 pub use crate::optimizer::{Optimizer, Telemetry};

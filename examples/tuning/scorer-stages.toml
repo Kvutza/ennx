@@ -1,0 +1,36 @@
+version = 2
+
+experiment = "pretrain"
+model = "fbt-pisa1-legacy-v1"
+corpus = "stack-v3-python-pilot-v1"
+
+[run]
+rounds = 12
+target-ms = 200
+
+[proposal]
+distribution = "gaussian"
+
+[enn]
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+
+[acquisition]
+method = "ucb"
+beta = 0.75
+
+[trust-region]
+method = "turbo"
+shape = "tensor-family-learned"
+initial = 0.01
+min = 0.0001
+max = 0.1
+
+[objective]
+reference = "frozen-initial"
+
+[diagnostics]
+stage-samples = 3

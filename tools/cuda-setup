@@ -1,0 +1,62 @@
+#!/bin/sh
+set -eu
+
+revision=6abfaa091e29a6275c1943895bfbc97efa306e98
+rust_toolchain=nightly-2026-08-28
+llvm_major=21
+cuda_root=/usr/local/cuda-13.0
+workspace=${ENNX_CUDA_OXIDE_WORKSPACE:-/content/cuda-oxide}
+cargo_home=${CARGO_HOME:-"$HOME/.cargo"}
+
+fail() {
+    echo "ennx cuda setup: $*" >&2
+    exit 1
+}
+
+[ "$(uname -s)" = Linux ] || fail "requires Linux"
+[ "$(uname -m)" = x86_64 ] || fail "requires x86_64"
+command -v nvidia-smi >/dev/null 2>&1 || fail "requires an NVIDIA runtime"
+[ -x "$cuda_root/bin/nvcc" ] || fail "requires CUDA 13.0 at $cuda_root"
+[ "$(id -u)" -eq 0 ] || fail "fresh hosted setup requires root"
+
+if [ ! -x "/usr/bin/clang-$llvm_major" ] || [ ! -x "/usr/bin/llc-$llvm_major" ]; then
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates curl g++ gcc gnupg libc6-dev make pkg-config
+    codename=$(sed -n 's/^VERSION_CODENAME=//p' /etc/os-release)
+    [ -n "$codename" ] || fail "cannot determine the Ubuntu release"
+    curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /tmp/llvm-snapshot.gpg.key
+    gpg --dearmor --yes --output /usr/share/keyrings/apt.llvm.org.gpg /tmp/llvm-snapshot.gpg.key
+    echo "deb [signed-by=/usr/share/keyrings/apt.llvm.org.gpg] https://apt.llvm.org/$codename/ llvm-toolchain-$codename-$llvm_major main" > "/etc/apt/sources.list.d/llvm-toolchain-$llvm_major.list"
+    apt-get update
+    apt-get install -y --no-install-recommends "clang-$llvm_major" "libclang-common-$llvm_major-dev" "lld-$llvm_major" "llvm-$llvm_major" "llvm-$llvm_major-dev"
+fi
+
+if [ ! -x "$cargo_home/bin/rustup" ]; then
+    curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
+    sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain none
+fi
+
+"$cargo_home/bin/rustup" toolchain install "$rust_toolchain" --profile minimal \
+    --component rust-src --component rustc-dev --component llvm-tools
+
+if [ ! -f "$workspace/.ennx-revision" ] || [ "$(cat "$workspace/.ennx-revision" 2>/dev/null || true)" != "$revision" ]; then
+    [ ! -e "$workspace" ] || fail "$workspace exists without the requested ENNX revision marker"
+    mkdir -p "$workspace"
+    curl -fsSL "https://github.com/NVlabs/cuda-oxide/archive/$revision.tar.gz" -o /tmp/cuda-oxide.tar.gz
+    tar -xzf /tmp/cuda-oxide.tar.gz --strip-components=1 -C "$workspace"
+    echo "$revision" > "$workspace/.ennx-revision"
+fi
+
+export CUDA_HOME=$cuda_root
+export CUDA_PATH=$cuda_root
+export CUDA_TOOLKIT_PATH=$cuda_root
+export CUDA_OXIDE_LLC="/usr/bin/llc-$llvm_major"
+export LIBCLANG_PATH="/usr/lib/llvm-$llvm_major/lib"
+export LLVM_CONFIG_PATH="/usr/bin/llvm-config-$llvm_major"
+export PATH="$cargo_home/bin:/usr/lib/llvm-$llvm_major/bin:$cuda_root/bin:$PATH"
+
+if [ ! -x "$cargo_home/bin/cargo-oxide" ]; then
+    "$cargo_home/bin/cargo" "+$rust_toolchain" install \
+        --path "$workspace/crates/cargo-oxide" --locked --force
+fi
+echo "CUDA-Oxide $revision bootstrap is ready; run ./ennx cuda build"

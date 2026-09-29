@@ -1,0 +1,355 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<title>ENNX compute</title>
+<style>
+  :root { color-scheme: dark; font: 17px/1.45 ui-monospace, SFMono-Regular, monospace; }
+  body { margin: 0; min-height: 100svh; display: grid; place-items: center; background: #0a0a0a; color: #f4f4ef; }
+  main { width: min(36rem, calc(100% - 3rem)); }
+  h1 { font-size: 1rem; color: #8cff98; letter-spacing: .12em; text-transform: uppercase; }
+  output { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .dim { color: #8c8c84; }
+</style>
+<main>
+  <h1>ENNX / iPhone GPU</h1>
+  <output id="status">Connecting…</output>
+</main>
+<script type="module">
+const status = document.querySelector('#status');
+const show = (text, dim = '') => status.innerHTML = `${text}${dim ? `\n<span class="dim">${dim}</span>` : ''}`;
+
+async function run() {
+  if (!navigator.gpu) throw new Error('WebGPU is unavailable. This path requires Safari 26 or newer.');
+  const job = await fetch('/job', { cache: 'no-store' }).then(response => response.json());
+  show('Requesting GPU…', job.command);
+  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+  if (!adapter) throw new Error('Safari did not expose a GPU adapter.');
+  const requiredFeatures = ['timestamp-query', 'shader-f16'].filter(feature => adapter.features.has(feature));
+  const device = await adapter.requestDevice({ requiredFeatures });
+  const result = job.command === 'token-accuracy'
+    ? await tokenObjective(job, adapter, device)
+    : job.command === 'readout-probe'
+      ? await readoutProbe(job, adapter, device)
+      : await proposalProbe(job, adapter, device);
+  await fetch('/result', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) });
+  if (job.command === 'token-accuracy') {
+    show(`Candidate evaluated · ${(100 * result.objective).toFixed(6)}%`, `${result.matches.toLocaleString()} / ${result.denominator.toLocaleString()} tokens · ${result.device_ms.toFixed(3)} ms GPU\nRust parity passed. You can close this tab.`);
+  } else if (job.command === 'readout-probe') {
+    show(`Readout · ${result.median_gpu_ms.toFixed(3)} ms`, `${result.tflops.toFixed(3)} TFLOP/s · output ${result.sample}\nYou can close this tab.`);
+  } else {
+    show(`Complete · ${result.median_ms.toFixed(3)} ms`, `${result.effective_gb_s.toFixed(2)} effective GB/s\nYou can close this tab.`);
+  }
+}
+
+async function readoutProbe(job, adapter, device) {
+  if (!device.features.has('shader-f16')) throw new Error('Safari did not expose shader-f16.');
+  const rows = job.rows;
+  const inputWidth = job['input-width'];
+  const outputWidth = job['output-width'];
+  const input = new Uint16Array(rows * inputWidth).fill(0x3c00);
+  const weights = new Uint16Array(inputWidth * outputWidth).fill(0x3c00);
+  const inputBuffer = device.createBuffer({ size: input.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const weightBuffer = device.createBuffer({ size: weights.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const outputBuffer = device.createBuffer({ size: rows * outputWidth * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const params = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(inputBuffer, 0, input);
+  device.queue.writeBuffer(weightBuffer, 0, weights);
+  device.queue.writeBuffer(params, 0, new Uint32Array([rows, inputWidth, outputWidth, 0]));
+  const shader = device.createShaderModule({ code: `
+    enable f16;
+    struct Shape { rows: u32, input_width: u32, output_width: u32, pad: u32 }
+    @group(0) @binding(0) var<storage, read> input: array<f16>;
+    @group(0) @binding(1) var<storage, read> weights: array<f16>;
+    @group(0) @binding(2) var<storage, read_write> output: array<f32>;
+    @group(0) @binding(3) var<uniform> shape: Shape;
+    var<workgroup> tile_input: array<f16, 256>;
+    var<workgroup> tile_weight: array<f16, 256>;
+    @compute @workgroup_size(16, 16)
+    fn readout(
+      @builtin(local_invocation_id) local: vec3<u32>,
+      @builtin(workgroup_id) group: vec3<u32>
+    ) {
+      let row = group.y * 16u + local.y;
+      let column = group.x * 16u + local.x;
+      let slot = local.y * 16u + local.x;
+      var sum = 0.0;
+      var base = 0u;
+      loop {
+        if (base >= shape.input_width) { break; }
+        let input_column = base + local.x;
+        let weight_row = base + local.y;
+        tile_input[slot] = select(f16(0.0), input[row * shape.input_width + input_column], row < shape.rows && input_column < shape.input_width);
+        tile_weight[slot] = select(f16(0.0), weights[weight_row * shape.output_width + column], weight_row < shape.input_width && column < shape.output_width);
+        workgroupBarrier();
+        for (var index = 0u; index < 16u; index++) {
+          sum += f32(tile_input[local.y * 16u + index]) * f32(tile_weight[index * 16u + local.x]);
+        }
+        workgroupBarrier();
+        base += 16u;
+      }
+      if (row < shape.rows && column < shape.output_width) {
+        output[row * shape.output_width + column] = sum;
+      }
+    }
+  `});
+  const pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: shader, entryPoint: 'readout' } });
+  const bind = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: inputBuffer } },
+      { binding: 1, resource: { buffer: weightBuffer } },
+      { binding: 2, resource: { buffer: outputBuffer } },
+      { binding: 3, resource: { buffer: params } }
+    ]
+  });
+  const times = [];
+  const walls = [];
+  for (let repeat = 0; repeat < job.repeats; repeat++) {
+    show(`Readout ${repeat + 1}/${job.repeats}…`, `${rows} × ${inputWidth} × ${outputWidth}`);
+    const query = device.createQuerySet({ type: 'timestamp', count: 2 });
+    const timing = device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
+    const read = device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass({ timestampWrites: { querySet: query, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } });
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bind);
+    pass.dispatchWorkgroups(Math.ceil(outputWidth / 16), Math.ceil(rows / 16));
+    pass.end();
+    encoder.resolveQuerySet(query, 0, 2, timing, 0);
+    encoder.copyBufferToBuffer(timing, 0, read, 0, 16);
+    const start = performance.now();
+    device.queue.submit([encoder.finish()]);
+    await device.queue.onSubmittedWorkDone();
+    walls.push(performance.now() - start);
+    await read.mapAsync(GPUMapMode.READ);
+    const stamps = new BigUint64Array(read.getMappedRange());
+    times.push(Number(stamps[1] - stamps[0]) / 1e6);
+    read.unmap();
+    query.destroy();
+  }
+  const sampleBuffer = device.createBuffer({ size: 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(outputBuffer, 0, sampleBuffer, 0, 4);
+  device.queue.submit([encoder.finish()]);
+  await sampleBuffer.mapAsync(GPUMapMode.READ);
+  const sample = new Float32Array(sampleBuffer.getMappedRange())[0];
+  sampleBuffer.unmap();
+  if (sample !== inputWidth) throw new Error(`Readout validation failed: ${sample} != ${inputWidth}.`);
+  times.sort((a, b) => a - b);
+  walls.sort((a, b) => a - b);
+  const median = times[Math.floor(times.length / 2)];
+  return {
+    ok: true,
+    protocol: job.protocol,
+    command: job.command,
+    backend: 'webgpu',
+    rows,
+    input_width: inputWidth,
+    output_width: outputWidth,
+    repeats: job.repeats,
+    median_gpu_ms: median,
+    median_wall_ms: walls[Math.floor(walls.length / 2)],
+    tflops: 2 * rows * inputWidth * outputWidth / median / 1e9,
+    sample,
+    ...deviceInfo(adapter, device)
+  };
+}
+
+function grid(n, device) {
+  const groups = Math.ceil(n / 256);
+  const x = Math.min(groups, device.limits.maxComputeWorkgroupsPerDimension);
+  const y = Math.ceil(groups / x);
+  if (y > device.limits.maxComputeWorkgroupsPerDimension) throw new Error('Work exceeds Safari compute dispatch limits.');
+  return { x, y };
+}
+
+function deviceInfo(adapter, device) {
+  const info = adapter.info || {};
+  return {
+    adapter: { vendor: info.vendor || '', architecture: info.architecture || '', device: info.device || '', description: info.description || '' },
+    features: [...adapter.features].sort(),
+    limits: { max_buffer_size: device.limits.maxBufferSize, max_storage_binding_size: device.limits.maxStorageBufferBindingSize }
+  };
+}
+
+async function tokenObjective(job, adapter, device) {
+  const wallStart = performance.now();
+  const candidate = Uint32Array.from(job.candidate);
+  const reference = Uint32Array.from(job.reference);
+  const denominator = Math.max(candidate.length, reference.length);
+  show('Loading candidate…', `${candidate.length.toLocaleString()} generated · ${reference.length.toLocaleString()} reference tokens`);
+  for (const bytes of [candidate.byteLength, reference.byteLength]) {
+    if (bytes > device.limits.maxBufferSize || bytes > device.limits.maxStorageBufferBindingSize) {
+      throw new Error(`Token buffer needs ${bytes} bytes; Safari permits ${Math.min(device.limits.maxBufferSize, device.limits.maxStorageBufferBindingSize)}.`);
+    }
+  }
+  const candidateBuffer = device.createBuffer({ size: Math.max(4, candidate.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const referenceBuffer = device.createBuffer({ size: Math.max(4, reference.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const countBuffer = device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const params = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(candidateBuffer, 0, candidate);
+  device.queue.writeBuffer(referenceBuffer, 0, reference);
+  const dispatch = grid(denominator, device);
+  device.queue.writeBuffer(params, 0, new Uint32Array([candidate.length, reference.length, dispatch.x, 0]));
+  const shader = device.createShaderModule({ code: `
+    struct Params { candidate_n: u32, reference_n: u32, groups_x: u32, pad: u32 }
+    @group(0) @binding(0) var<storage, read> candidate: array<u32>;
+    @group(0) @binding(1) var<storage, read> reference: array<u32>;
+    @group(0) @binding(2) var<storage, read_write> matches: array<atomic<u32>>;
+    @group(0) @binding(3) var<uniform> params: Params;
+    @compute @workgroup_size(256)
+    fn score(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let i = gid.x + gid.y * params.groups_x * 256u;
+      if (i < params.candidate_n && i < params.reference_n && candidate[i] == reference[i]) {
+        atomicAdd(&matches[0], 1u);
+      }
+    }
+  `});
+  const pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: shader, entryPoint: 'score' } });
+  const bind = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: candidateBuffer } },
+      { binding: 1, resource: { buffer: referenceBuffer } },
+      { binding: 2, resource: { buffer: countBuffer } },
+      { binding: 3, resource: { buffer: params } }
+    ]
+  });
+  const readback = device.createBuffer({ size: 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const querySet = device.features.has('timestamp-query')
+    ? device.createQuerySet({ type: 'timestamp', count: 2 })
+    : null;
+  const timing = querySet
+    ? device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC })
+    : null;
+  const timingRead = querySet
+    ? device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+    : null;
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass(querySet ? {
+    timestampWrites: { querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 }
+  } : undefined);
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bind);
+  pass.dispatchWorkgroups(dispatch.x, dispatch.y);
+  pass.end();
+  if (querySet) {
+    encoder.resolveQuerySet(querySet, 0, 2, timing, 0);
+    encoder.copyBufferToBuffer(timing, 0, timingRead, 0, 16);
+  }
+  encoder.copyBufferToBuffer(countBuffer, 0, readback, 0, 4);
+  show('Evaluating candidate…', `${denominator.toLocaleString()} objective positions`);
+  const deviceStart = performance.now();
+  device.queue.submit([encoder.finish()]);
+  await device.queue.onSubmittedWorkDone();
+  const deviceMs = performance.now() - deviceStart;
+  let gpuMs = null;
+  if (timingRead) {
+    await timingRead.mapAsync(GPUMapMode.READ);
+    const stamps = new BigUint64Array(timingRead.getMappedRange());
+    gpuMs = Number(stamps[1] - stamps[0]) / 1e6;
+    timingRead.unmap();
+  }
+  await readback.mapAsync(GPUMapMode.READ);
+  const matches = new Uint32Array(readback.getMappedRange())[0];
+  readback.unmap();
+  return {
+    ok: true,
+    protocol: job.protocol,
+    command: job.command,
+    backend: 'webgpu',
+    objective: matches / denominator,
+    expected_objective: job['expected-objective'],
+    matches,
+    denominator,
+    candidate_tokens: candidate.length,
+    reference_tokens: reference.length,
+    device_ms: deviceMs,
+    gpu_ms: gpuMs,
+    evaluator_wall_ms: performance.now() - wallStart,
+    ...deviceInfo(adapter, device)
+  };
+}
+
+async function proposalProbe(job, adapter, device) {
+  const n = job.coordinates;
+  const bytes = n * 4;
+  if (bytes > device.limits.maxBufferSize || bytes > device.limits.maxStorageBufferBindingSize) {
+    throw new Error(`Probe needs ${bytes} bytes; Safari permits ${Math.min(device.limits.maxBufferSize, device.limits.maxStorageBufferBindingSize)}.`);
+  }
+  const shader = device.createShaderModule({ code: `
+    struct Params { n: u32, key: u32, groups_x: u32, pad: u32 }
+    @group(0) @binding(0) var<storage, read_write> weights: array<f32>;
+    @group(0) @binding(1) var<uniform> params: Params;
+    fn mix(input: u32) -> u32 {
+      var x = input;
+      x = (x ^ (x >> 16u)) * 0x7feb352du;
+      x = (x ^ (x >> 15u)) * 0x846ca68bu;
+      return x ^ (x >> 16u);
+    }
+    @compute @workgroup_size(256)
+    fn proposal(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let i = gid.x + gid.y * params.groups_x * 256u;
+      if (i < params.n) {
+        let sign = select(-0.001, 0.001, (mix(i ^ params.key) & 1u) != 0u);
+        weights[i] = weights[i] + sign;
+      }
+    }
+  `});
+  const pipeline = await device.createComputePipelineAsync({
+    layout: 'auto', compute: { module: shader, entryPoint: 'proposal' }
+  });
+  const weights = device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const params = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const dispatch = grid(n, device);
+  device.queue.writeBuffer(params, 0, new Uint32Array([n, 0x9e3779b9, dispatch.x, 0]));
+  const bind = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: { buffer: weights } }, { binding: 1, resource: { buffer: params } }]
+  });
+  const times = [];
+  for (let repeat = 0; repeat < job.repeats; repeat++) {
+    show(`Running ${repeat + 1}/${job.repeats}…`, `${n.toLocaleString()} coordinates`);
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bind);
+    pass.dispatchWorkgroups(dispatch.x, dispatch.y);
+    pass.end();
+    const start = performance.now();
+    device.queue.submit([encoder.finish()]);
+    await device.queue.onSubmittedWorkDone();
+    times.push(performance.now() - start);
+  }
+  const sampleBytes = Math.min(bytes, 1024);
+  const sample = device.createBuffer({ size: sampleBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(weights, 0, sample, 0, sampleBytes);
+  device.queue.submit([encoder.finish()]);
+  await sample.mapAsync(GPUMapMode.READ);
+  let hash = 2166136261;
+  for (const word of new Uint32Array(sample.getMappedRange())) hash = Math.imul(hash ^ word, 16777619) >>> 0;
+  sample.unmap();
+  times.sort((a, b) => a - b);
+  const median = times[Math.floor(times.length / 2)];
+  return {
+    ok: true,
+    protocol: job.protocol,
+    backend: 'webgpu',
+    coordinates: n,
+    repeats: job.repeats,
+    median_ms: median,
+    min_ms: times[0],
+    max_ms: times[times.length - 1],
+    effective_gb_s: 8 * n / median / 1e6,
+    sample_hash: hash.toString(16).padStart(8, '0'),
+    ...deviceInfo(adapter, device)
+  };
+}
+
+run().catch(async error => {
+  const result = { ok: false, protocol: 'ennx.iphone.web.v2', error: String(error?.message || error) };
+  try { await fetch('/result', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) }); } catch {}
+  show('Unable to run', result.error);
+});
+</script>

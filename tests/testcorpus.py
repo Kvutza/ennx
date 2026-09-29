@@ -1,5 +1,6 @@
 """Integration parity for the native corpus reader and the Python reference."""
 
+from itertools import product
 from dataclasses import asdict
 
 import pytest
@@ -75,15 +76,20 @@ def job(tmp_path, paths, targets):
     }
 
 
-@pytest.mark.parametrize("row_group", [1, 64])
-@pytest.mark.parametrize("repository_limit", [256, pretrain.MAX_REPOSITORY_CHARS])
+@pytest.mark.parametrize(
+    "repository_limit,row_group",
+    [
+        (case_0, case_1)
+        for case_0, case_1 in product([256, pretrain.MAX_REPOSITORY_CHARS], [1, 64])
+    ],
+)
 def test_native(tmp_path, monkeypatch, row_group, repository_limit):
     monkeypatch.setattr(pretrain, "MAX_REPOSITORY_CHARS", repository_limit)
     rows = records()
     rows += [
         {
             "repo_path": repository(split),
-            "commit_id": "commit",
+            "commit_id": "different-commit",
             "github_metadata": {"is_fork": False},
             "files": [file(split + "-extra", "config.toml", "TOML")],
         }

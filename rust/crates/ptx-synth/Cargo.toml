@@ -1,0 +1,10 @@
+[package]
+name = "ptx-synth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Type-driven symbolic PTX synthesizer for NVIDIA Turing (sm_75 / T4) and modern GPU architectures"
+license.workspace = true
+publish = false
+
+[dependencies]

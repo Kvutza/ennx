@@ -155,16 +155,7 @@ cp dotslash-stub .buck2-tools/bin/dotslash
         )
         self.assertLess(events.index(installs[-1]), events.index("build"))
         self.assertEqual(events.count("build"), 3)
-        invocations = self.buck_invocations()
-        self.assertEqual(len(invocations), 3)
-        self.assertTrue(all("//:wheel" in command for command in invocations))
-        self.assertEqual(
-            sum("//buck2/tests:all" in command for command in invocations), 1
-        )
-        self.assertEqual(
-            sum("//rust/crates/dev-cli:ennx" in command for command in invocations),
-            1,
-        )
+        assert_builds(self, self.buck_invocations())
         self.assertEqual(
             [line for line in events if line.startswith("verify:")],
             ["verify:3.12:smoke", "verify:3.14:smoke", "verify:3.13:smoke"],
@@ -337,7 +328,7 @@ esac
                 self.assertNotEqual(self.run_build(*args).returncode, 0)
                 self.assertEqual(self.events(), [])
 
-    def test_tune_help_lists_config_families(self):
+    def test_help(self):
         result = subprocess.run(
             [str(self.root / "ennx"), "tune", "--help"],
             cwd=self.root,
@@ -350,6 +341,16 @@ esac
         self.assertIn("flat TuRBO-ENN study fields", result.stdout)
         self.assertIn("[knn]", result.stdout)
         self.assertIn("[proposal]", result.stdout)
+
+
+def assert_builds(test, invocations):
+    test.assertEqual(len(invocations), 3)
+    test.assertTrue(all("//:wheel" in command for command in invocations))
+    test.assertEqual(sum("//buck2/tests:all" in command for command in invocations), 1)
+    test.assertEqual(
+        sum("//rust/crates/dev-cli:ennx" in command for command in invocations),
+        1,
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,50 @@
+# Full 4096-token, billion-parameter ENN Bayesian-optimization run.
+version = 2
+output = "../../.cache/ennx/runs/generation-4096"
+
+experiment = "generation"
+model = "fbt-pisa1-legacy-v1"
+
+[run]
+rounds = 1
+target-ms = 200
+
+[proposal]
+distribution = "rademacher"
+
+[enn]
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+
+[acquisition]
+method = "ucb"
+beta = 0.75
+
+[trust-region]
+method = "turbo"
+shape = "tensor-family-learned"
+initial = 0.001
+min = 0.0001
+max = 0.1
+
+[generation]
+purpose = "systems-probe"
+max-tokens = 4096
+temperature = 0.0
+
+[generation.verify]
+mode = "accepted-prefix"
+window = 128
+max-window = 1024
+passes = 2
+unroll = 2
+
+[generation.reward]
+kind = "token-accuracy"
+
+[[generation.tasks]]
+prompt = [1]
+expected = [2]

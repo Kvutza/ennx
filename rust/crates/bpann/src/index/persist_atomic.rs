@@ -60,16 +60,8 @@ pub(crate) fn persist_files(
     let pages_tmp = index_dir.join("pages.bin.tmp");
     let skip_path = index_dir.join("skip_edges.bin");
     let skip_tmp = index_dir.join("skip_edges.bin.tmp");
-    let pages_backup = pages_path
-        .exists()
-        .then(|| fs::read(&pages_path))
-        .transpose()
-        .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
-    let skip_backup = skip_path
-        .exists()
-        .then(|| fs::read(&skip_path))
-        .transpose()
-        .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+    let pages_backup = read_existing(&pages_path)?;
+    let skip_backup = read_existing(&skip_path)?;
     let persist_result = (|| {
         {
             let file = File::create(&pages_tmp)
@@ -92,7 +84,7 @@ pub(crate) fn persist_files(
                 "test-injected persist failure after pages rename".to_string(),
             ));
         }
-        let header_json = serde_json::to_string_pretty(header)
+        let header_json = ennx_wire::json::pretty_string(header)
             .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
         fs::write(index_dir.join("header.json"), header_json)
             .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
@@ -109,6 +101,13 @@ pub(crate) fn persist_files(
         let _ = fs::remove_file(&skip_tmp);
     }
     persist_result
+}
+
+fn read_existing(path: &Path) -> Result<Option<Vec<u8>>, BpannError> {
+    path.exists()
+        .then(|| fs::read(path))
+        .transpose()
+        .map_err(|error| BpannError::InvalidParameter(error.to_string()))
 }
 
 #[cfg(test)]

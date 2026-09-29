@@ -137,7 +137,7 @@ impl TurboTrustRegion {
     }
 
     /// Use an explicit failure budget, independent of dimension and batch size.
-    pub fn set_failure_tolerance(&mut self, failures: usize) -> Result<(), TrustRegionError> {
+    pub fn set_tolerance(&mut self, failures: usize) -> Result<(), TrustRegionError> {
         let failures = i32::try_from(failures)
             .ok()
             .filter(|&value| value > 0)
@@ -642,16 +642,16 @@ mod tests {
     }
 
     #[test]
-    fn explicit_tolerance_with_negative_rewards() {
+    fn negative_rewards() {
         let mut tr = TurboTrustRegion::new(1_065_494_016, TRLengthConfig::new(0.01, 0.0001, 0.1));
         tr.set_arms(1);
         assert_eq!(tr.failure_tolerance(), 1_065_494_016);
-        tr.set_failure_tolerance(4).unwrap();
+        tr.set_tolerance(4).unwrap();
         tr.set_dim(1_065_494_016.0);
         tr.set_arms(8);
         assert_eq!(tr.failure_tolerance(), 4);
-        assert!(tr.set_failure_tolerance(0).is_err());
-        assert!(tr.set_failure_tolerance(i32::MAX as usize + 1).is_err());
+        assert!(tr.set_tolerance(0).is_err());
+        assert!(tr.set_tolerance(i32::MAX as usize + 1).is_err());
         assert_eq!(tr.failure_tolerance(), 4);
 
         let mut values = vec![-12.0];
@@ -672,9 +672,9 @@ mod tests {
     }
 
     #[test]
-    fn explicit_outcomes_preserve_inconclusive_evidence() {
+    fn inconclusive_evidence() {
         let mut tr = TurboTrustRegion::new(1_065_494_016, TRLengthConfig::new(0.01, 0.0001, 0.1));
-        tr.set_failure_tolerance(4).unwrap();
+        tr.set_tolerance(4).unwrap();
 
         tr.update_outcome(
             &array![-12.0].view(),

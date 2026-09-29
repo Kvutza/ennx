@@ -1,14 +1,14 @@
 //! Morbo trust region: Chebyshev scalarization over an inner TuRBO trust region.
 
+use deser::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayView1, ArrayView2};
 use rand::Rng;
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
 
 use crate::trust_region::{TRLengthConfig, TrustRegionError, TurboTrustRegion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "kebab-case")]
 pub enum Rescalarize {
     OnRestart,
     OnPropose,
@@ -19,8 +19,8 @@ impl std::str::FromStr for Rescalarize {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "on_restart" => Ok(Self::OnRestart),
-            "on_propose" => Ok(Self::OnPropose),
+            "on-restart" => Ok(Self::OnRestart),
+            "on-propose" => Ok(Self::OnPropose),
             _ => Err(()),
         }
     }
@@ -92,6 +92,21 @@ impl MorboTrustRegion {
         &self.weights
     }
 
+    pub fn set_weights(&mut self, weights: &[f64]) -> Result<(), TrustRegionError> {
+        if weights.len() != self.num_metrics
+            || weights
+                .iter()
+                .any(|weight| !weight.is_finite() || *weight <= 0.0)
+        {
+            return Err(TrustRegionError::InvalidParameter(
+                "MORBO weights must contain one positive finite value per metric".into(),
+            ));
+        }
+        let sum = weights.iter().sum::<f64>();
+        self.weights = Array1::from_iter(weights.iter().map(|weight| weight / sum));
+        Ok(())
+    }
+
     pub fn y_min(&self) -> Option<&Array1<f64>> {
         self.y_min.as_ref()
     }
@@ -110,6 +125,26 @@ impl MorboTrustRegion {
 
     pub fn set_arms(&mut self, num_arms: usize) {
         self.inner.set_arms(num_arms);
+    }
+
+    pub fn set_tolerance(&mut self, failures: usize) -> Result<(), TrustRegionError> {
+        self.inner.set_tolerance(failures)
+    }
+
+    pub fn success_tolerance(&self) -> i32 {
+        self.inner.success_tolerance()
+    }
+
+    pub fn failure_tolerance(&self) -> i32 {
+        self.inner.failure_tolerance()
+    }
+
+    pub fn success_counter(&self) -> i32 {
+        self.inner.success_counter()
+    }
+
+    pub fn failure_counter(&self) -> i32 {
+        self.inner.failure_counter()
     }
 
     pub fn needs_restart(&self) -> bool {

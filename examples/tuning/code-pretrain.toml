@@ -1,47 +1,30 @@
-version = 1
+version = 2
 
-[pretrain]
-# FBT + PISA attention + MoE; Python code corpus. Presets fix model and data shapes.
-model = "fbt_pisa1_moe_v1"
-corpus = "stack_v3_python_pilot_v1"
+experiment = "pretrain"
+model = "fbt-pisa1-legacy-v1"
+corpus = "stack-v3-python-pilot-v1"
 
-[rounds]
-count = 1000
-# Increase for independently derived, matched proposal/acquisition streams.
-reps = 1
-# Wall-time target per complete BO round, in milliseconds.
-target_ms = 1000
+[run]
+rounds = 1000
+target-ms = 1000
 
-# Independent noise for every model weight, scaled by the trust region.
-[perturbation]
+[proposal]
 distribution = "gaussian"
 
-# Upper confidence bound selects from four weight proposals per BO round.
+[enn]
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+
 [acquisition]
 method = "ucb"
 beta = 0.75
 
-[surrogate]
-method = "enn"
-# Gather this many observations before ENN-guided selection.
-neighbors = 10
-fit_neighbors = true
-# Initial uncertainty and outcome scales; fitting updates them.
-epistemic_scale = 0.05
-aleatoric_scale = 0.05
-y_scale = 1.0
-# Random ENN hyperparameter candidates per fit.
-fit_candidates = 30
-# Observations sampled for leave-one-out likelihood per fit.
-fit_samples = 10
-
 [trust-region]
-# Trust-region controller.
 method = "turbo"
-# Learn four family sensitivities from ENN leave-one-out likelihood while
-# preserving the global trust-region energy.
-shape = "tensor_family_learned"
-# Dimensionless base length and its lower/upper bounds.
-length_init = 0.01
-length_min = 0.0001
-length_max = 0.1
+shape = "tensor-family-learned"
+initial = 0.01
+min = 0.0001
+max = 0.1

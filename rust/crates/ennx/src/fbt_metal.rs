@@ -113,10 +113,10 @@ impl Linear {
         output: &BufferRef,
         epilogue: GemmEpilogue<'_>,
     ) -> Result<(), String> {
-        self.encode_fused_offset(command, rows, weights, input, 0, output, epilogue)
+        self.fused_offset(command, rows, weights, input, 0, output, epilogue)
     }
 
-    pub(crate) fn encode_fused_offset(
+    pub(crate) fn fused_offset(
         &self,
         command: &CommandBufferRef,
         rows: u32,

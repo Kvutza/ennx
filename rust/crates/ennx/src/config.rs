@@ -7,12 +7,48 @@ use crate::mbtrregn::{MorboTRSettings, Rescalarize};
 use crate::surrogate::ENNSurrogateConfig;
 use crate::trregncfg::TrustRegionConfig;
 use crate::trust_region::TRLengthConfig;
-use serde::{Deserialize, Serialize};
+use deser::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-mod study;
-use study::lower_structured_tune;
-pub use study::{DistanceScaling, TrustRegionShape};
+mod diffusion;
+mod experiment;
+mod feedback;
+mod generation;
+pub use diffusion::{DiffusionConfig, IndexMode};
+mod initialization;
+mod kernel;
+mod objectives;
+mod resident;
+mod seeds;
+pub use resident::ResidentEnnConfig;
+mod procedural;
+mod spec;
+#[path = "config/spec/conversion.rs"]
+mod spec_conversion;
+#[path = "config/spec/execution.rs"]
+mod spec_execution;
+#[path = "config/spec/optimizer.rs"]
+mod spec_optimizer;
+mod validation;
+pub use feedback::FeedbackTransition;
+pub use generation::{
+    FrozenAttention, FrozenBackend, FrozenReadout, GenerationConfig, GenerationPurpose,
+    GenerationReward, GenerationTask, SignalGate, VerifyConfig, VerifyMode,
+};
+pub use initialization::ModelInitialization;
+pub use kernel::KernelTrial;
+pub use objectives::{ResidentObjectiveConfig, ResidentObjectiveMode};
+pub use spec::TuneSpec;
+pub use spec_execution::{DataSpec, DiagnosticSpec, ObjectiveSpec, RunSpec, SeedSpec};
+pub use spec_optimizer::{
+    AcquisitionSpec, EnnSpec, FitSpec, ProposalSpec, TrustRegionBounds, TrustRegionSpec,
+};
+#[cfg(test)]
+#[path = "config/spec/tests.rs"]
+mod spec_tests;
+pub use experiment::{
+    DistanceScaling, HistoryGeometry, ObjectiveReference, PretrainSelection, TrustRegionShape,
+};
 
 /// Optimizer configuration.
 #[derive(Debug, Clone)]
@@ -124,10 +160,18 @@ impl CandidateConfig {
 
 /// Shared TuRBO-ENN optimizer overrides.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[deser(default, deny_unknown_fields)]
 pub struct ConfigOverrides {
-    /// File-driven study to run. Programmatic optimizer overrides may omit it.
-    pub study: Option<TurboEnnStudy>,
+    /// Explicit independent objective acquisition; never inferred from scalar rewards.
+    pub objective_acquisition: Option<ResidentObjectiveConfig>,
+    pub generation: Option<GenerationConfig>,
+    /// Logical procedural proposal layout. Current resident kernels accept the
+    /// legacy one-arm/four-slot layout only; larger requests fail validation.
+    pub proposal_pool: Option<crate::procedural_pool::ProceduralPoolConfig>,
+    /// Program used to turn procedural random bits into a full-coordinate direction.
+    pub proposal_method: Option<crate::procedural_pool::ProposalMethod>,
+    /// File-driven experiment to run. Programmatic optimizer overrides may omit it.
+    pub experiment: Option<TurboEnnExperiment>,
     pub acquisition: Option<AcquisitionConfig>,
     /// Neighbors used by the resident accelerator ENN.
     pub k_neighbors: Option<i32>,
@@ -139,6 +183,8 @@ pub struct ConfigOverrides {
     pub y_scale: Option<f64>,
     /// Geometry normalization used before ENN neighbor weighting.
     pub distance_scaling: Option<DistanceScaling>,
+    /// Coordinate system used for resident ENN history distances.
+    pub history_geometry: Option<HistoryGeometry>,
     /// Neighbor rank defining each point's local radius under self-tuning scaling.
     pub local_scale_neighbors: Option<usize>,
     /// Select the resident ENN neighbor count by leave-one-out predictive likelihood.
@@ -169,12 +215,16 @@ pub struct ConfigOverrides {
     pub output: Option<PathBuf>,
     /// Number of complete optimization rounds to measure.
     pub rounds: Option<u32>,
-    /// Deterministic repetitions of the same study.
+    /// Deterministic repetitions of the same experiment.
     pub reps: Option<u32>,
     /// Required maximum latency for every measured round.
     pub target_round_ms: Option<u32>,
-    /// Emit perturbative per-operation timing records for the fixed round study.
+    /// Emit perturbative per-operation timing records for the fixed round experiment.
     pub trace: Option<bool>,
+    /// Opt-in shader replacement and full-loop numerical capture for kernel search.
+    pub kernel_trial: Option<KernelTrial>,
+    /// Timestamp complete scorer stages; also profiles the selected gate experiment.
+    pub scorer_stage_samples: Option<u32>,
     /// Seed for model initialization.
     pub model_seed: Option<u64>,
     /// Seed for the persistent proposal direction.
@@ -185,52 +235,84 @@ pub struct ConfigOverrides {
     pub acquisition_seed: Option<u64>,
     /// Fixed ENNXPTN1 token stream for causal pretraining.
     pub dataset: Option<PathBuf>,
-    /// Versioned model architecture preset for a pretraining study.
+    /// Immutable held-out stream, never supplied to optimizer acceptance.
+    pub validation_dataset: Option<PathBuf>,
+    pub validation_interval: Option<u32>,
+    /// Candidate-selection ablation; the remaining ENN policy stays unchanged.
+    pub selection: Option<PretrainSelection>,
+    /// Versioned model architecture preset for a pretraining experiment.
     pub model: Option<PretrainModel>,
-    /// Versioned immutable corpus recipe for a pretraining study.
+    /// Versioned immutable corpus recipe for a pretraining experiment.
     pub corpus: Option<PretrainCorpus>,
     /// Full-coordinate perturbation distribution generated by the accelerator.
     pub perturbation: Option<crate::Perturbation>,
-    /// Trust-region shape policy for the full-weight pretrain study.
+    /// Trust-region shape policy for the full-weight pretrain experiment.
     pub trust_region_shape: Option<TrustRegionShape>,
+    /// Per-minibatch control variate used by the pretraining objective.
+    pub objective_reference: Option<ObjectiveReference>,
     /// Reliability-aware controller parameters for full-weight pretraining.
-    pub reliability_controller: Option<crate::ReliabilityControllerConfig>,
-}
-
-/// Fully resolved ENN policy for accelerator-resident search.
-#[derive(Debug, Clone, Copy)]
-pub struct ResidentEnnConfig {
-    pub ask: crate::trials::Ask,
-    pub num_candidates: usize,
-    pub num_samples: usize,
-    pub fit_neighbors: bool,
-    pub distance_scaling: DistanceScaling,
-    pub local_scale_neighbors: usize,
+    pub reliability_controller: Option<crate::ReliabilityPolicy>,
 }
 
 /// Complete workload selected by a file-driven TuRBO-ENN configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TurboEnnStudy {
+#[deser(rename_all = "kebab-case")]
+pub enum TurboEnnExperiment {
     EndToEnd,
     MoeLayer,
     Pretrain,
+    Generation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "kebab-case")]
 pub enum PretrainModel {
+    #[deser(rename = "fbt-pisa1-legacy-v1")]
     FbtPisa1MoeV1,
+    FbtPisa1Residual1V1,
+    FbtPisa1ProjectedBoundaryV1,
+    FbtPisa1Hc4V1,
+    FbtPisa1Mhc4V1,
+    FbtPisa1LoopedMhc4V1,
+    FbtPisa1DiffusionMhc4V1,
+}
+
+impl PretrainModel {
+    pub const ALL: [Self; 7] = [
+        Self::FbtPisa1MoeV1,
+        Self::FbtPisa1Residual1V1,
+        Self::FbtPisa1ProjectedBoundaryV1,
+        Self::FbtPisa1Hc4V1,
+        Self::FbtPisa1Mhc4V1,
+        Self::FbtPisa1LoopedMhc4V1,
+        Self::FbtPisa1DiffusionMhc4V1,
+    ];
+
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::FbtPisa1MoeV1 => "fbt-pisa1-legacy-v1",
+            Self::FbtPisa1Residual1V1 => "fbt-pisa1-residual1-v1",
+            Self::FbtPisa1ProjectedBoundaryV1 => "fbt-pisa1-projected-boundary-v1",
+            Self::FbtPisa1Hc4V1 => "fbt-pisa1-hc4-v1",
+            Self::FbtPisa1Mhc4V1 => "fbt-pisa1-mhc4-v1",
+            Self::FbtPisa1LoopedMhc4V1 => "fbt-pisa1-looped-mhc4-v1",
+            Self::FbtPisa1DiffusionMhc4V1 => "fbt-pisa1-diffusion-mhc4-v1",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "kebab-case")]
 pub enum PretrainCorpus {
     StackV3PythonPilotV1,
+    #[deser(rename = "stack-v3-python-800k-v1")]
+    StackV3Python800kV1,
+    #[deser(rename = "fineweb-10bt-pilot-v1")]
+    Fineweb10btPilotV1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
 pub enum TrustRegionKind {
     Turbo,
     Morbo,
@@ -324,160 +406,6 @@ fn apply_region(overrides: &ConfigOverrides, config: &mut OptimizerConfig) {
 }
 
 impl ConfigOverrides {
-    fn validate_study_selection(&self) -> Result<bool, String> {
-        if !matches!(
-            self.study,
-            Some(TurboEnnStudy::EndToEnd | TurboEnnStudy::MoeLayer | TurboEnnStudy::Pretrain)
-        ) {
-            return Err("study must be 'end_to_end', 'moe_layer', or 'pretrain'".into());
-        }
-        if self.rounds() == 0 {
-            return Err("rounds must be positive".into());
-        }
-        if self.reps() == 0 {
-            return Err("reps must be positive".into());
-        }
-        if self.target_round_ms() == 0 {
-            return Err("target_round_ms must be positive".into());
-        }
-        if self.output().as_os_str().is_empty() {
-            return Err("output must be nonempty".into());
-        }
-        Ok(self.study == Some(TurboEnnStudy::Pretrain))
-    }
-
-    fn validate_study_fields(&self, pretrain: bool) -> Result<(), String> {
-        if pretrain && self.model != Some(PretrainModel::FbtPisa1MoeV1) {
-            return Err("pretrain model must be 'fbt_pisa1_moe_v1'".into());
-        }
-        if pretrain && self.corpus != Some(PretrainCorpus::StackV3PythonPilotV1) {
-            return Err("pretrain corpus must be 'stack_v3_python_pilot_v1'".into());
-        }
-        if !pretrain && self.perturbation.is_some() {
-            return Err("perturbation is supported only by pretrain studies".into());
-        }
-        if !pretrain && (self.distance_scaling.is_some() || self.local_scale_neighbors.is_some()) {
-            return Err("distance scaling is supported only by pretrain studies".into());
-        }
-        if !pretrain && self.reps() > 1 {
-            return Err("reps greater than one are supported only by pretrain".into());
-        }
-        if self.study == Some(TurboEnnStudy::MoeLayer) {
-            if self.model.is_some() || self.corpus.is_some() {
-                return Err("model and corpus presets are supported only by pretrain".into());
-            }
-            return Ok(());
-        }
-        if !pretrain && (self.dataset.is_some() || self.model.is_some() || self.corpus.is_some()) {
-            return Err("dataset, model, and corpus are supported only by pretrain studies".into());
-        }
-        Ok(())
-    }
-
-    fn validate_seeds(&self) -> Result<(), String> {
-        if self.reps() > 1
-            && [
-                self.model_seed,
-                self.reference_seed,
-                self.proposal_seed,
-                self.acquisition_seed,
-            ]
-            .iter()
-            .any(Option::is_some)
-        {
-            return Err("reps greater than one require internally derived seeds".into());
-        }
-        let fixed_seeds = [self.model_seed(), self.reference_seed()];
-        if fixed_seeds.iter().any(|&seed| seed > i64::MAX as u64) {
-            return Err("seeds must fit TOML signed 64-bit integers".into());
-        }
-        for rep in 0..self.reps() {
-            let seeds = [
-                self.proposal_seed_for_rep(rep),
-                self.acquisition_seed_for_rep(rep),
-            ];
-            if seeds.iter().any(|&seed| seed > i64::MAX as u64) {
-                return Err("seeds must fit TOML signed 64-bit integers".into());
-            }
-            for seed in [
-                self.proposal_seed_for_rep(rep),
-                self.acquisition_seed_for_rep(rep),
-            ] {
-                seed.checked_add(u64::from(self.rounds() - 1))
-                    .ok_or("round seed overflow")?;
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_resident_policy(&self, pretrain: bool) -> Result<(), String> {
-        if self.trust_region_kind == Some(TrustRegionKind::Morbo) {
-            return Err("the LocalV1 FBT latency run requires the TuRBO trust region".into());
-        }
-        if !pretrain && self.trust_region_shape.is_some() {
-            return Err("trust-region shape is supported only by pretrain studies".into());
-        }
-        match (self.trust_region_kind, self.reliability_controller) {
-            (Some(TrustRegionKind::Reliability), Some(config)) if pretrain => {
-                config.validate()?;
-            }
-            (Some(TrustRegionKind::Reliability), _) if !pretrain => {
-                return Err(
-                    "the reliability controller is supported only by pretrain studies".into(),
-                );
-            }
-            (Some(TrustRegionKind::Reliability), None) => {
-                return Err(
-                    "trust-region method 'reliability' requires [trust-region.reliability]".into(),
-                );
-            }
-            (_, Some(_)) => {
-                return Err("[trust-region.reliability] requires method = 'reliability'".into());
-            }
-            _ => {}
-        }
-        let effective = self.apply_to(turbo_enn());
-        match effective.acquisition {
-            AcquisitionConfig::Random | AcquisitionConfig::Pareto => {
-                return Err(
-                    "the TuRBO-ENN round study supports only UCB or Thompson acquisition".into(),
-                );
-            }
-            AcquisitionConfig::UCB { beta } if !beta.is_finite() || !(beta as f32).is_finite() => {
-                return Err("turbo_enn UCB beta must be finite FP32".into());
-            }
-            AcquisitionConfig::UCB { .. } | AcquisitionConfig::Thompson => {}
-        }
-        self.resident_enn(self.acquisition_seed())?;
-        let TrustRegionConfig::Turbo(length) = effective.trust_region else {
-            return Err("the LocalV1 FBT latency run requires the TuRBO trust region".into());
-        };
-        validate_lengths(length)
-    }
-
-    fn validate_fixed_controller_fields(&self) -> Result<(), String> {
-        let unsupported = self.candidate_rv.is_some()
-            || self.num_candidates_factor.is_some()
-            || self.min_candidates.is_some()
-            || self.max_candidates.is_some()
-            || self.num_candidates_per_arm.is_some()
-            || self.num_pert.is_some()
-            || self.index_driver.is_some()
-            || self.scale_x.is_some()
-            || self.noise_aware.is_some()
-            || self.failure_tolerance_dim.is_some()
-            || self.enn_storage.is_some()
-            || self.work_dir.is_some()
-            || self.y_bounds.is_some()
-            || self.num_metrics.is_some()
-            || self.alpha.is_some()
-            || self.rescalarize.is_some();
-        if unsupported {
-            return Err("the TuRBO-ENN round study received optimizer fields that its fixed resident controller does not implement".into());
-        }
-        Ok(())
-    }
-
     /// Apply overrides to an existing config.
     pub fn apply_to(&self, mut config: OptimizerConfig) -> OptimizerConfig {
         if let Some(acq) = self.acquisition {
@@ -525,10 +453,10 @@ impl ConfigOverrides {
 
 /// Acquisition function configuration.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
 pub enum AcquisitionConfig {
     /// Upper Confidence Bound.
-    #[serde(rename = "ucb")]
+    #[deser(rename = "ucb")]
     UCB { beta: f64 },
     /// Thompson sampling.
     Thompson,
@@ -539,22 +467,23 @@ pub enum AcquisitionConfig {
 }
 
 #[cfg(test)]
-mod serde_tests {
+mod serialization_tests {
+    use super::TuneSpec;
     use super::{
-        AcquisitionConfig, ConfigOverrides, DistanceScaling, TRLengthConfig, TrustRegionKind,
-        TrustRegionShape, TurboEnnStudy, parse_turbo_enn_config, turbo_enn,
+        AcquisitionConfig, ConfigOverrides, DistanceScaling, GenerationPurpose, TRLengthConfig,
+        TrustRegionKind, TrustRegionShape, TurboEnnExperiment, parse_tune, turbo_enn,
     };
     use crate::{CandidateRV, Rescalarize};
 
     #[test]
     fn config_names() {
-        let parsed: ConfigOverrides = toml::from_str(
+        let parsed: ConfigOverrides = ennx_wire::toml::from_str(
             r#"
             acquisition = { ucb = { beta = 3.5 } }
             candidate_rv = "sobol"
             num_samples = 14
             trust_region_kind = "morbo"
-            rescalarize = "on_propose"
+            rescalarize = "on-propose"
             "#,
         )
         .unwrap();
@@ -571,69 +500,65 @@ mod serde_tests {
 
     #[test]
     fn config_fields() {
-        let error = toml::from_str::<ConfigOverrides>("fit_samples = 10").unwrap_err();
+        let error = ennx_wire::toml::from_str::<ConfigOverrides>("fit_samples = 10").unwrap_err();
         assert!(error.to_string().contains("unknown field"));
-        let parsed = toml::from_str::<ConfigOverrides>("rounds = 3").unwrap();
+        let parsed = ennx_wire::toml::from_str::<ConfigOverrides>("rounds = 3").unwrap();
         assert_eq!(parsed.rounds(), 3);
-        assert_eq!(crate::TurboEnnStudy::EndToEnd, TurboEnnStudy::EndToEnd);
         assert_eq!(
-            crate::prelude::TurboEnnStudy::EndToEnd,
-            TurboEnnStudy::EndToEnd
+            crate::TurboEnnExperiment::EndToEnd,
+            TurboEnnExperiment::EndToEnd
+        );
+        assert_eq!(
+            crate::prelude::TurboEnnExperiment::EndToEnd,
+            TurboEnnExperiment::EndToEnd
         );
     }
 
     #[test]
-    fn tune_uses_flat_turbo_enn_config() {
-        let config = parse_turbo_enn_config(
-            r#"
-            version = 1
-            study = "end_to_end"
-            acquisition = "ucb"
-            beta = 1.0
-            trust_region_kind = "turbo"
-            length_init = 0.01
-            length_min = 0.0001
-            length_max = 0.1
-            output = "results/turbo-enn"
-            rounds = 3
-            target_round_ms = 1000
-            "#,
-        )
-        .unwrap();
-        assert_eq!(config.target_round_ms(), 1000);
-        assert_eq!(config.length().length_init, 0.01);
-        assert!(matches!(
-            config.acquisition,
-            Some(AcquisitionConfig::UCB { beta: 1.0 })
-        ));
-        assert!(!config.trace());
-
-        let defaults = parse_turbo_enn_config("version=1\nstudy='end_to_end'\ntrace=true").unwrap();
-        assert!(matches!(
-            defaults.apply_to(turbo_enn()).acquisition,
-            AcquisitionConfig::UCB { beta: 2.0 }
-        ));
-        assert_eq!(defaults.rounds(), 3);
-        assert!(defaults.trace());
-
-        let local = parse_turbo_enn_config(
-            r#"
-            version = 1
-            study = "pretrain"
-            model = "fbt_pisa1_moe_v1"
-            corpus = "stack_v3_python_pilot_v1"
-            distance_scaling = "self_tuning"
-            local_scale_neighbors = 7
-            "#,
-        )
-        .unwrap();
-        let resident = local.resident_enn(11).unwrap();
-        assert_eq!(resident.distance_scaling, DistanceScaling::SelfTuning);
-        assert_eq!(resident.local_scale_neighbors, 7);
+    fn fineweb_seeds() {
+        let input = "version=2\nexperiment='pretrain'\nmodel='fbt-pisa1-legacy-v1'\ncorpus='fineweb-10bt-pilot-v1'\n[run]\nselection='enn'\nvalidation-interval=4";
+        let enn = parse_tune(input).unwrap();
+        let random = parse_tune(&input.replace("selection='enn'", "selection='random'")).unwrap();
+        assert_eq!(enn.model_seed(), random.model_seed());
+        assert_eq!(enn.proposal_seed(), random.proposal_seed());
+        assert_eq!(enn.acquisition_seed(), random.acquisition_seed());
+        assert_ne!(enn.model_seeded(0), enn.model_seeded(1));
+        assert!(
+            parse_tune(&input.replace("validation-interval=4", "validation-interval=0")).is_err()
+        );
     }
 
     #[test]
-    fn checked_in_turbo_enn_study_uses_the_shared_schema() {
+    fn generated_seeds() {
+        #[cfg(feature = "buck2-test-data")]
+        let (enn_text, random_text) = (
+            include_str!("../turbo-enn.toml/code-generation-enn.toml"),
+            include_str!("../turbo-enn.toml/code-generation-random.toml"),
+        );
+        #[cfg(not(feature = "buck2-test-data"))]
+        let (enn_text, random_text) = (
+            include_str!("../../../../examples/tuning/code-generation-enn.toml"),
+            include_str!("../../../../examples/tuning/code-generation-random.toml"),
+        );
+        let enn = parse_tune(enn_text).unwrap();
+        let random = parse_tune(random_text).unwrap();
+        enn.validate_experiment().unwrap();
+        random.validate_experiment().unwrap();
+        assert_eq!(enn.reps(), 3);
+        assert_eq!(enn.rounds(), 512);
+        assert_eq!(enn.generation.as_ref().unwrap().max_tokens, 4096);
+        assert!(enn.generation.as_ref().unwrap().seed.is_none());
+        for rep in 0..enn.reps() {
+            assert_eq!(enn.model_seeded(rep), random.model_seeded(rep));
+            assert_eq!(enn.proposal_seeded(rep), random.proposal_seeded(rep));
+            assert_eq!(enn.acquisition_seeded(rep), random.acquisition_seeded(rep));
+            assert_eq!(enn.sample_seeded(rep), random.sample_seeded(rep));
+        }
+        assert_ne!(enn.selection, random.selection);
+    }
+
+    #[test]
+    fn shared_schema() {
         macro_rules! tuning_example {
             ($buck:literal, $cargo:literal) => {{
                 #[cfg(feature = "buck2-test-data")]
@@ -647,20 +572,20 @@ mod serde_tests {
             }};
         }
 
-        let config = parse_turbo_enn_config(tuning_example!(
+        let config = parse_tune(tuning_example!(
             "../turbo-enn.toml/turbo-enn.toml",
             "../../../../examples/tuning/turbo-enn.toml"
         ))
         .unwrap();
         assert_eq!(config.rounds(), 3);
-        assert_eq!(config.target_round_ms(), 1000);
+        assert_eq!(config.target_ms(), 1000);
         assert_eq!(
             config.output(),
             std::path::PathBuf::from("../../results/turbo-enn")
         );
         assert!(!config.trace());
 
-        let trace_config = parse_turbo_enn_config(tuning_example!(
+        let trace_config = parse_tune(tuning_example!(
             "../turbo-enn.toml/turbo-enn-trace.toml",
             "../../../../examples/tuning/turbo-enn-trace.toml"
         ))
@@ -672,7 +597,7 @@ mod serde_tests {
             std::path::PathBuf::from("../../results/turbo-enn-trace")
         );
 
-        let one_round_config = parse_turbo_enn_config(tuning_example!(
+        let one_round_config = parse_tune(tuning_example!(
             "../turbo-enn.toml/turbo-enn-one-round.toml",
             "../../../../examples/tuning/turbo-enn-one-round.toml"
         ))
@@ -688,8 +613,8 @@ mod serde_tests {
             "../turbo-enn.toml/code-pretrain.toml",
             "../../../../examples/tuning/code-pretrain.toml"
         );
-        let pretrain = parse_turbo_enn_config(pretrain_text).unwrap();
-        assert_eq!(pretrain.study, Some(TurboEnnStudy::Pretrain));
+        let pretrain = parse_tune(pretrain_text).unwrap();
+        assert_eq!(pretrain.experiment, Some(TurboEnnExperiment::Pretrain));
         assert!(pretrain.rounds() > 0);
         assert!(pretrain.output.is_none());
         assert!(pretrain.dataset().is_none());
@@ -718,7 +643,37 @@ mod serde_tests {
         assert_eq!(pretrain.length(), TRLengthConfig::new(0.01, 0.0001, 0.1));
         assert_ne!(pretrain.proposal_seed(), pretrain.acquisition_seed());
         assert_eq!(pretrain.reps(), 1);
-        let learned = parse_turbo_enn_config(tuning_example!(
+        let generated = parse_tune(tuning_example!(
+            "../turbo-enn.toml/code-pretrain-generated.toml",
+            "../../../../examples/tuning/code-pretrain-generated.toml"
+        ))
+        .unwrap();
+        assert_eq!(generated.experiment, Some(TurboEnnExperiment::Pretrain));
+        let generation = generated.generation.as_ref().unwrap();
+        assert_eq!(generation.purpose, GenerationPurpose::SystemsProbe);
+        assert_eq!(generation.max_tokens, 4096);
+        assert!(generation.corpus_prompt.is_empty());
+        assert_eq!(generation.corpus_prompt_tokens, Some(128));
+        assert!(generation.tasks.is_empty());
+        assert_eq!(
+            generated
+                .resident_enn(generated.acquisition_seed())
+                .unwrap()
+                .history_geometry,
+            crate::config::HistoryGeometry::Latent
+        );
+        assert!(
+            parse_tune(
+                &tuning_example!(
+                    "../turbo-enn.toml/code-pretrain-generated.toml",
+                    "../../../../examples/tuning/code-pretrain-generated.toml"
+                )
+                .replace("systems-probe", "coding-optimization")
+            )
+            .unwrap_err()
+            .contains("requires checkpoint and qualification_manifest")
+        );
+        let learned = parse_tune(tuning_example!(
             "../turbo-enn.toml/code-pretrain-family-learned.toml",
             "../../../../examples/tuning/code-pretrain-family-learned.toml"
         ))
@@ -727,7 +682,7 @@ mod serde_tests {
         assert!(learned_enn.fit_neighbors);
         assert_eq!(learned_enn.distance_scaling, DistanceScaling::SelfTuning);
         assert_eq!(learned_enn.local_scale_neighbors, 8);
-        let reliability = parse_turbo_enn_config(tuning_example!(
+        let reliability = parse_tune(tuning_example!(
             "../turbo-enn.toml/code-pretrain-ablation-local-reliability.toml",
             "../../../../examples/tuning/code-pretrain-ablation-local-reliability.toml"
         ))
@@ -743,50 +698,27 @@ mod serde_tests {
                 .local_scale_neighbors,
             8
         );
-        let legacy_text = pretrain_text
-            .replace("[surrogate]", "[surrogate.resident-enn]")
-            .replace("method = \"enn\"\n", "")
-            .replace("fit_candidates = 30", "candidates = 30")
-            .replace("fit_samples = 10", "samples = 10");
-        let legacy = parse_turbo_enn_config(&legacy_text).unwrap();
-        assert_eq!(
-            serde_json::to_value(&pretrain).unwrap(),
-            serde_json::to_value(&legacy).unwrap()
-        );
-        assert_eq!(pretrain.proposal_seed(), legacy.proposal_seed());
-        assert_eq!(pretrain.acquisition_seed(), legacy.acquisition_seed());
-        let repeated =
-            parse_turbo_enn_config(&pretrain_text.replace("reps = 1", "reps = 3")).unwrap();
+        let repeated = parse_tune(&pretrain_text.replace("[run]\n", "[run]\nreps = 3\n")).unwrap();
         assert_eq!(repeated.reps(), 3);
+        assert_ne!(repeated.proposal_seeded(0), repeated.proposal_seeded(1));
         assert_ne!(
-            repeated.proposal_seed_for_rep(0),
-            repeated.proposal_seed_for_rep(1)
+            repeated.acquisition_seeded(1),
+            repeated.acquisition_seeded(2)
         );
-        assert_ne!(
-            repeated.acquisition_seed_for_rep(1),
-            repeated.acquisition_seed_for_rep(2)
-        );
+        assert_eq!(repeated.proposal_seeded(0), pretrain.proposal_seeded(0));
+        let rademacher = parse_tune(&pretrain_text.replace("gaussian", "rademacher")).unwrap();
+        assert_eq!(rademacher.proposal_seeded(0), pretrain.proposal_seeded(0));
         assert_eq!(
-            repeated.proposal_seed_for_rep(0),
-            pretrain.proposal_seed_for_rep(0)
-        );
-        let rademacher =
-            parse_turbo_enn_config(&pretrain_text.replace("gaussian", "rademacher")).unwrap();
-        assert_eq!(
-            rademacher.proposal_seed_for_rep(0),
-            pretrain.proposal_seed_for_rep(0)
-        );
-        assert_eq!(
-            rademacher.acquisition_seed_for_rep(0),
-            pretrain.acquisition_seed_for_rep(0)
+            rademacher.acquisition_seeded(0),
+            pretrain.acquisition_seeded(0)
         );
         assert_eq!(
             repeated
-                .resident_enn(repeated.acquisition_seed_for_rep(2))
+                .resident_enn(repeated.acquisition_seeded(2))
                 .unwrap()
                 .ask
                 .seed,
-            repeated.acquisition_seed_for_rep(2)
+            repeated.acquisition_seeded(2)
         );
         let explicit_repeated = ConfigOverrides {
             reps: Some(2),
@@ -798,13 +730,12 @@ mod serde_tests {
             "reps greater than one require internally derived seeds"
         );
         let baseline =
-            parse_turbo_enn_config(&pretrain_text.replace("distribution = \"gaussian\"\n", ""))
-                .unwrap();
+            parse_tune(&pretrain_text.replace("distribution = \"gaussian\"\n", "")).unwrap();
         assert_eq!(baseline.perturbation(), crate::Perturbation::Gaussian);
 
-        let self_tuning = parse_turbo_enn_config(&pretrain_text.replace(
-            "method = \"enn\"\n",
-            "method = \"enn\"\ndistance_scaling = \"self_tuning\"\nlocal_scale_neighbors = 7\n",
+        let self_tuning = parse_tune(&pretrain_text.replace(
+            "[enn]\n",
+            "[enn]\nscaling = \"self-tuning\"\nlocal-neighbors = 7\n",
         ))
         .unwrap();
         let resident = self_tuning
@@ -812,89 +743,6 @@ mod serde_tests {
             .unwrap();
         assert_eq!(resident.distance_scaling, DistanceScaling::SelfTuning);
         assert_eq!(resident.local_scale_neighbors, 7);
-    }
-
-    #[test]
-    fn tune_rejects_false_configuration() {
-        let base = "version=1\nstudy='end_to_end'\nacquisition='thompson'\nlength_init=0.01\nlength_min=0.0001\nlength_max=0.1\noutput='x'\nrounds=3\ntarget_round_ms=1000";
-        assert!(
-            parse_turbo_enn_config("version=1")
-                .unwrap_err()
-                .contains("study must be 'end_to_end'")
-        );
-        assert!(
-            parse_turbo_enn_config("version=1\nstudy='kernel_probe'")
-                .unwrap_err()
-                .contains("unknown variant")
-        );
-        assert!(
-            parse_turbo_enn_config(&base.replace("rounds=3", "rounds=0"))
-                .unwrap_err()
-                .contains("rounds must be positive")
-        );
-        assert!(
-            parse_turbo_enn_config(&base.replace(
-                "target_round_ms=1000",
-                "target_round_ms=1000\nunexpected=true"
-            ))
-            .unwrap_err()
-            .contains("unknown field")
-        );
-        assert!(
-            parse_turbo_enn_config(&base.replace("acquisition='thompson'", "acquisition='pareto'"))
-                .unwrap_err()
-                .contains("only UCB or Thompson")
-        );
-        assert!(
-            parse_turbo_enn_config(
-                &base.replace("length_init=0.01", "length_init=0.01\nnum_samples=0")
-            )
-            .unwrap_err()
-            .contains("num_samples must be positive")
-        );
-        assert!(
-            parse_turbo_enn_config("version=1\n[full_space_bo]\nrounds=3")
-                .unwrap_err()
-                .contains("unknown field")
-        );
-        let pretrain = "version=1\nstudy='pretrain'\nmodel='fbt_pisa1_moe_v1'\ncorpus='stack_v3_python_pilot_v1'";
-        assert!(
-            parse_turbo_enn_config(&format!("{pretrain}\nk_neighbors=0"))
-                .unwrap_err()
-                .contains("k_neighbors")
-        );
-        assert!(
-            parse_turbo_enn_config(&format!("{pretrain}\nepistemic_scale=-1"))
-                .unwrap_err()
-                .contains("epistemic_scale")
-        );
-        assert!(
-            parse_turbo_enn_config(&format!("{pretrain}\ny_scale=-1"))
-                .unwrap_err()
-                .contains("y_scale")
-        );
-        assert!(
-            parse_turbo_enn_config(&format!("{pretrain}\nnum_candidates=0"))
-                .unwrap_err()
-                .contains("num_candidates must be positive")
-        );
-        assert!(
-            parse_turbo_enn_config(&format!("{base}\nperturbation='rademacher'"))
-                .unwrap_err()
-                .contains("only by pretrain")
-        );
-        assert!(
-            parse_turbo_enn_config(&format!(
-                "{base}\ntrust_region_shape='tensor_family_static'"
-            ))
-            .unwrap_err()
-            .contains("shape is supported only by pretrain")
-        );
-        assert!(
-            parse_turbo_enn_config(&format!("{base}\nreps=2"))
-                .unwrap_err()
-                .contains("reps greater than one are supported only by pretrain")
-        );
     }
 }
 
@@ -938,51 +786,15 @@ pub fn turbo_enn() -> OptimizerConfig {
     }
 }
 
-/// Parse one `tune` document using the existing flat TuRBO-ENN field schema.
-pub fn parse_turbo_enn_config(text: &str) -> Result<ConfigOverrides, String> {
-    let document: toml::Value = toml::from_str(text).map_err(|error| error.to_string())?;
-    let mut root = document
-        .as_table()
-        .cloned()
-        .ok_or("tune config must be a TOML table")?;
-    if root.remove("version").and_then(|value| value.as_integer()) != Some(1) {
-        return Err("version must be 1".into());
-    }
-    lower_structured_tune(&mut root)?;
-    let beta = root.remove("beta");
-    match root.get("acquisition").and_then(toml::Value::as_str) {
-        Some("ucb") => {
-            let beta = match beta {
-                Some(toml::Value::Float(value)) => value,
-                Some(toml::Value::Integer(value)) => value as f64,
-                Some(_) => return Err("beta must be a number".into()),
-                None => 2.0,
-            };
-            root.insert(
-                "acquisition".into(),
-                toml::Value::Table(toml::Table::from_iter([(
-                    "ucb".into(),
-                    toml::Value::Table(toml::Table::from_iter([(
-                        "beta".into(),
-                        toml::Value::Float(beta),
-                    )])),
-                )])),
-            );
-        }
-        _ if beta.is_some() => return Err("beta is valid only with acquisition = 'ucb'".into()),
-        _ => {}
-    }
-    let config: ConfigOverrides = toml::Value::Table(root)
-        .try_into()
-        .map_err(|error| format!("invalid TuRBO-ENN fields: {error}"))?;
-    config.validate_round_study()?;
-    Ok(config)
+/// Parse one closed, typed version 2 experiment document.
+pub fn parse_tune(text: &str) -> Result<ConfigOverrides, String> {
+    TuneSpec::parse(text)?.overrides()
 }
 
-pub fn load_turbo_enn_config(path: &std::path::Path) -> Result<(ConfigOverrides, String), String> {
+pub fn load_tune(path: &std::path::Path) -> Result<(ConfigOverrides, String), String> {
     let result = || {
         let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-        let mut config = parse_turbo_enn_config(&text)?;
+        let mut config = parse_tune(&text)?;
         let absolute = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
         let parent = absolute
             .parent()
@@ -999,21 +811,18 @@ pub fn load_turbo_enn_config(path: &std::path::Path) -> Result<(ConfigOverrides,
                 .map_err(|error| format!("dataset path {}: {error}", dataset.display()))?;
             config.dataset = Some(dataset);
         }
-        let mut resolved: toml::Value = toml::from_str(&text).map_err(|error| error.to_string())?;
-        let table = resolved
-            .as_table_mut()
-            .ok_or("tune config must be a TOML table")?;
-        table.insert(
-            "output".into(),
-            toml::Value::String(output.to_string_lossy().into_owned()),
-        );
-        if let Some(dataset) = config.dataset.as_ref() {
-            table.insert(
-                "dataset".into(),
-                toml::Value::String(dataset.to_string_lossy().into_owned()),
-            );
+        if let Some(dataset) = config.validation_dataset.as_ref() {
+            config.validation_dataset = Some(std::fs::canonicalize(parent.join(dataset)).map_err(
+                |error| format!("held-out dataset path {}: {error}", dataset.display()),
+            )?);
         }
-        let resolved = toml::to_string_pretty(&resolved).map_err(|error| error.to_string())?;
+        if let Some(trial) = &mut config.kernel_trial {
+            trial.resolve(parent)?;
+        }
+        if let Some(generation) = &mut config.generation {
+            generation.resolve(parent)?;
+        }
+        let resolved = TuneSpec::from_overrides(&config)?.to_toml()?;
         Ok((config, resolved))
     };
     result().map_err(|error: String| format!("TuRBO-ENN config {}: {error}", path.display()))
@@ -1035,12 +844,53 @@ fn validate_lengths(length: TRLengthConfig) -> Result<(), String> {
 }
 
 impl ConfigOverrides {
-    pub fn validate_round_study(&self) -> Result<(), String> {
-        let pretrain = self.validate_study_selection()?;
-        self.validate_study_fields(pretrain)?;
+    pub fn validate_experiment(&self) -> Result<(), String> {
+        let pretrain = self.validate_selection()?;
+        if self.experiment == Some(TurboEnnExperiment::Generation) {
+            let generation = self
+                .generation
+                .as_ref()
+                .ok_or("generation experiment requires [generation]")?;
+            generation.validate()?;
+            if self.reps() != 1
+                || self.corpus.is_some()
+                || self.dataset.is_some()
+                || self.objective_reference.is_some()
+                || self.kernel_trial.is_some()
+                || self.trace == Some(true)
+            {
+                return Err("generation uses explicit tasks, one repetition, and no pretrain objective or diagnostics".into());
+            }
+            if !generation.corpus_prompt.is_empty() || generation.corpus_prompt_tokens.is_some() {
+                return Err("generation experiment requires explicit tasks; corpus_prompt is for generated pretraining".into());
+            }
+            let fields = ennx_wire::json::to_value(self).map_err(|error| error.to_string())?;
+            if fields.as_map().unwrap().iter().any(|(key, value)| {
+                !value.is_null()
+                    && (key.as_str().is_some_and(|key| key.ends_with("_pairs"))
+                        || key == "scorer_stage_samples")
+            }) {
+                return Err("generation cannot contain scorer diagnostics".into());
+            }
+        } else if let Some(generation) = &self.generation {
+            if self.experiment != Some(TurboEnnExperiment::Pretrain) {
+                return Err("[generation] requires a generation or pretrain experiment".into());
+            }
+            generation.validate()?;
+            if (generation.corpus_prompt.is_empty() && generation.corpus_prompt_tokens.is_none())
+                || !generation.tasks.is_empty()
+                || self.corpus.is_none()
+            {
+                return Err("generated pretraining requires corpus, corpus_prompt, and no explicit generation tasks".into());
+            }
+            if self.kernel_trial.is_some() || self.trace == Some(true) {
+                return Err("generated pretraining cannot include kernel diagnostics".into());
+            }
+        }
+        self.validate_fields(pretrain)?;
         self.validate_seeds()?;
-        self.validate_resident_policy(pretrain)?;
-        self.validate_fixed_controller_fields()
+        self.validate_resident(pretrain)?;
+        self.validate_controller()
     }
 
     pub fn length(&self) -> TRLengthConfig {
@@ -1051,7 +901,7 @@ impl ConfigOverrides {
         length
     }
 
-    pub fn reliability_controller(&self) -> Option<crate::ReliabilityControllerConfig> {
+    pub fn reliability_controller(&self) -> Option<crate::ReliabilityPolicy> {
         (self.trust_region_kind == Some(TrustRegionKind::Reliability))
             .then_some(self.reliability_controller)
             .flatten()
@@ -1071,7 +921,7 @@ impl ConfigOverrides {
         self.reps.unwrap_or(1)
     }
 
-    pub fn target_round_ms(&self) -> u32 {
+    pub fn target_ms(&self) -> u32 {
         self.target_round_ms.unwrap_or(1000)
     }
 
@@ -1079,64 +929,8 @@ impl ConfigOverrides {
         self.trace.unwrap_or(false)
     }
 
-    pub fn model_seed(&self) -> u64 {
-        self.model_seed
-            .unwrap_or_else(|| self.derived_seed(0, "model", 0))
-    }
-
-    pub fn reference_seed(&self) -> u64 {
-        self.reference_seed
-            .unwrap_or_else(|| self.derived_seed(0, "reference", 0))
-    }
-
-    pub fn proposal_seed(&self) -> u64 {
-        self.proposal_seed_for_rep(0)
-    }
-
-    pub fn proposal_seed_for_rep(&self, rep: u32) -> u64 {
-        self.proposal_seed
-            .unwrap_or_else(|| self.derived_seed(rep, "proposal", 0))
-    }
-
-    pub fn acquisition_seed(&self) -> u64 {
-        self.acquisition_seed_for_rep(0)
-    }
-
-    pub fn acquisition_seed_for_rep(&self, rep: u32) -> u64 {
-        self.acquisition_seed
-            .unwrap_or_else(|| self.derived_seed(rep, "acquisition", 0))
-    }
-
-    pub(crate) fn derived_seed(&self, rep: u32, domain: &str, index: u64) -> u64 {
-        let mut state = 0xcbf2_9ce4_8422_2325u64;
-        let mut mix = |bytes: &[u8]| {
-            state ^= bytes.len() as u64;
-            state = crate::hash::splitmix64(state);
-            for byte in bytes {
-                state ^= u64::from(*byte);
-                state = state.wrapping_mul(0x0000_0100_0000_01b3);
-            }
-        };
-        let study = match self.study {
-            None => 0,
-            Some(TurboEnnStudy::EndToEnd) => 1,
-            Some(TurboEnnStudy::MoeLayer) => 2,
-            Some(TurboEnnStudy::Pretrain) => 3,
-        };
-        let model = match self.model {
-            None => 0,
-            Some(PretrainModel::FbtPisa1MoeV1) => 1,
-        };
-        let corpus = match self.corpus {
-            None => 0,
-            Some(PretrainCorpus::StackV3PythonPilotV1) => 1,
-        };
-        mix(b"ennx-tune-seed-v2");
-        mix(&[study, model, corpus]);
-        mix(domain.as_bytes());
-        mix(&rep.to_le_bytes());
-        mix(&index.to_le_bytes());
-        crate::hash::splitmix64(state) & 0x3fff_ffff_ffff_ffff
+    pub fn objective_reference(&self) -> ObjectiveReference {
+        self.objective_reference.unwrap_or_default()
     }
 
     pub fn dataset(&self) -> Option<&std::path::Path> {
@@ -1145,97 +939,6 @@ impl ConfigOverrides {
 
     pub fn perturbation(&self) -> crate::Perturbation {
         self.perturbation.unwrap_or_default()
-    }
-
-    /// Resolve the shared ENN/acquisition parameters consumed by Metal, OpenCL,
-    /// and CUDA resident search kernels.
-    pub fn resident_enn(&self, seed: u64) -> Result<ResidentEnnConfig, String> {
-        let defaults = crate::trials::Ask::default();
-        let effective = self.apply_to(turbo_enn());
-        let SurrogateConfig::ENN(enn) = effective.surrogate else {
-            return Err("resident search requires an ENN surrogate".into());
-        };
-        if enn.num_candidates == 0 {
-            return Err("resident ENN num_candidates must be positive".into());
-        }
-        if enn.num_samples == 0 {
-            return Err("resident ENN num_samples must be positive".into());
-        }
-        let epistemic_scale = self
-            .epistemic_scale
-            .unwrap_or(f64::from(defaults.epistemic_scale));
-        let aleatoric_scale = self
-            .aleatoric_scale
-            .unwrap_or(f64::from(defaults.aleatoric_scale));
-        let params = crate::params::ENNParams::new(enn.k, epistemic_scale, aleatoric_scale)
-            .map_err(|error| format!("resident ENN parameters: {error}"))?;
-        let neighbors = usize::try_from(params.k_neighbors)
-            .map_err(|_| "resident ENN k_neighbors does not fit usize")?;
-        let y_scale = self.y_scale.unwrap_or(f64::from(defaults.y_scale));
-        if !y_scale.is_finite() || y_scale < 0.0 || !(y_scale as f32).is_finite() {
-            return Err("resident ENN y_scale must be finite, nonnegative, and fit FP32".into());
-        }
-        for (name, value) in [
-            ("epistemic_scale", params.epistemic_scale),
-            ("aleatoric_scale", params.aleatoric_scale),
-        ] {
-            if !(value as f32).is_finite() {
-                return Err(format!("resident ENN {name} must fit FP32"));
-            }
-        }
-        let (acquisition, beta) = match effective.acquisition {
-            AcquisitionConfig::UCB { beta } => {
-                if !beta.is_finite() || !(beta as f32).is_finite() {
-                    return Err("resident ENN UCB beta must be finite FP32".into());
-                }
-                (crate::weights::AcquisitionKind::Ucb, beta as f32)
-            }
-            AcquisitionConfig::Thompson => {
-                (crate::weights::AcquisitionKind::Thompson, defaults.beta)
-            }
-            AcquisitionConfig::Random | AcquisitionConfig::Pareto => {
-                return Err("resident ENN supports only UCB or Thompson acquisition".into());
-            }
-        };
-        let distance_scaling = self.distance_scaling.unwrap_or_default();
-        let local_scale_neighbors = self.local_scale_neighbors.unwrap_or(8);
-        if local_scale_neighbors == 0 || local_scale_neighbors > 128 {
-            return Err("resident ENN local_scale_neighbors must be in 1..=128".into());
-        }
-        if distance_scaling == DistanceScaling::Global && self.local_scale_neighbors.is_some() {
-            return Err("local_scale_neighbors requires distance_scaling = 'self_tuning'".into());
-        }
-        Ok(ResidentEnnConfig {
-            ask: crate::trials::Ask {
-                neighbors,
-                epistemic_scale: params.epistemic_scale as f32,
-                aleatoric_scale: params.aleatoric_scale as f32,
-                y_scale: y_scale as f32,
-                beta,
-                acquisition,
-                seed,
-                ..defaults
-            },
-            num_candidates: enn.num_candidates,
-            num_samples: enn.num_samples,
-            fit_neighbors: self.fit_neighbors.unwrap_or(false),
-            distance_scaling,
-            local_scale_neighbors,
-        })
-    }
-
-    /// Resolve an ask for backends that retain only a bounded live history.
-    pub fn resident_ask(
-        &self,
-        live_history: usize,
-        seed: u64,
-    ) -> Result<crate::trials::Ask, String> {
-        if live_history == 0 {
-            return Err("resident ENN requires at least one live observation".into());
-        }
-        let mut ask = self.resident_enn(seed)?.ask;
-        ask.neighbors = ask.neighbors.min(live_history);
-        Ok(ask)
     }
 }
 

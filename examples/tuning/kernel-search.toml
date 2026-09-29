@@ -1,0 +1,60 @@
+# Agent-written branches, measured by the existing complete pretraining worker.
+# Paths are relative to this manifest. No fixed search/validation seed list.
+version = 1
+
+[kernel-search]
+baseline = "code-pretrain-kernel.toml"
+output = "../../.cache/ennx/kernel-search"
+pairs = 3
+validation-pairs = 2
+timeout-seconds = 180
+
+[kernel-search.gate]
+min-speedup = 1.03
+win-fraction = 0.8
+sequence-atol = 0.00001
+token-atol = 0.002
+
+[[kernel-search.candidates]]
+name = "pisa-literal"
+operator = "pisa"
+# Optional source = "candidates/attention.metal" replaces the shader source.
+# Without source, snapshot the source embedded in this build.
+defines = ["PISA_UNROLL_FRAGMENTS"]
+hypothesis = "Literal fragment indices remove dynamic private-array addressing."
+bottleneck = "PISA attention register access and accumulator lifetime."
+evidence = "docs/kernel-architecture-plan.md: AIR removes two private arrays; prior scorer-only test was -0.700 ms with 4/7 wins, inconclusive."
+falsify = "Reject as a speed claim unless complete BO loops improve by the gate on search and fresh validation seeds."
+expected-saving-ms = 30.0
+
+[[kernel-search.candidates]]
+name = "pisa-literal-rescale"
+parent = "pisa-literal"
+operator = "pisa"
+defines = ["PISA_UNROLL_FRAGMENTS", "PISA_DIRECT_RESCALE"]
+hypothesis = "Literal fragments plus direct lane rescaling remove FP32 diagonal matrix products without losing the gain to register pressure."
+bottleneck = "PISA online-softmax accumulator rescaling."
+evidence = "docs/kernel-architecture-plan.md: combined AIR compiled; no valid numerical or performance result yet. Standalone direct rescale was slower."
+falsify = "Reject on numerical or trajectory mismatch, or if repeated full-loop timing does not improve."
+expected-saving-ms = 60.0
+
+[[kernel-search.candidates]]
+name = "pisa-reuse-scores"
+operator = "pisa"
+defines = ["PISA_REUSE_SCORES"]
+hypothesis = "Reuse dead FP32 score storage for FP16 probabilities to reduce threadgroup memory by 4160 bytes without changing arithmetic."
+bottleneck = "PISA threadgroup occupancy and scratch traffic."
+evidence = "Four queries each allocate 8x65 floats plus 8x65 halves; the head-wise softmax finishes reading scores before PV consumes probabilities. Routing scratch is dead before accumulator rescaling."
+falsify = "Reject on token/sequence or controller mismatch, or if extra softmax barriers and wider probability strides erase the whole-loop benefit."
+expected-saving-ms = 30.0
+
+[[kernel-search.candidates]]
+name = "pisa-reuse-literal-rescale"
+parent = "pisa-reuse-scores"
+operator = "pisa"
+defines = ["PISA_REUSE_SCORES", "PISA_UNROLL_FRAGMENTS", "PISA_DIRECT_RESCALE"]
+hypothesis = "Combine reduced threadgroup allocation with literal register fragments and direct rescaling."
+bottleneck = "PISA scratch occupancy and accumulator rescaling."
+evidence = "Independent lifetime reduction layered onto the retained literal/direct-rescale branch; interaction is not yet measured."
+falsify = "Reject unless numerical and trajectory checks plus search and fresh-seed whole-loop gates pass."
+expected-saving-ms = 45.0

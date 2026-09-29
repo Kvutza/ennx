@@ -1,0 +1,12 @@
+load("//buck2:reindeer_rules.bzl", "app_rust_library")
+load("//build:targets.bzl", "RUST_EDITION", "WIRE_CRATES")
+
+app_rust_library(
+    name = "wire",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "ennx_wire",
+    crate_root = "src/lib.rs",
+    edition = RUST_EDITION,
+    deps = ["//rust:" + crate for crate in WIRE_CRATES],
+    visibility = ["PUBLIC"],
+)

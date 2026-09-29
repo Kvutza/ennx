@@ -167,31 +167,32 @@ def test_nextlogits(gpu):
         tokens[-1] = config.vocab - 1
         full = evaluator.logits(weights, tokens)
         next_logits = evaluator.next_logits(weights, tokens)
-        assert full.shape == (n, config.vocab)
-        assert next_logits.shape == (config.vocab,)
-        assert next_logits.dtype == np.float32
-        assert next_logits.flags.c_contiguous
-        assert np.isfinite(next_logits).all()
-        np.testing.assert_array_equal(
-            next_logits.view(np.uint32), full[-1].view(np.uint32)
-        )
+        assert_logits(full, next_logits, n, config.vocab)
         assert evaluator.workspace_bytes == workspace_bytes
     retained = next_logits.copy()
     expected = evaluator.next_logits(weights, [0])
-    for tokens in ([], [-1], [config.vocab], [0] * 141, [[0]], [1.5], [2**40]):
-        with pytest.raises((ValueError, TypeError, OverflowError)):
-            evaluator.next_logits(weights, tokens)
+    assert_invalid(evaluator, weights, config)
     for invalid in (bits, object(), gpu.MetalWeights(np.zeros(1, dtype=np.uint16))):
         with pytest.raises((ValueError, TypeError)):
             evaluator.next_logits(invalid, [0])
     # Finite BF16 weights can still overflow the LM head. The canonical layout
     # starts with final_layernorm, so scale that tensor to exercise output checks.
-    overflow = np.full(evaluator.weights_len, 0x3D80, dtype=np.uint16)
-    overflow[: config.width] = 0x7F7F
-    with pytest.raises(ValueError, match="nonfinite"):
-        evaluator.next_logits(gpu.MetalWeights(overflow), [0])
+    assert_overflow(gpu, evaluator, config.width)
     np.testing.assert_array_equal(evaluator.next_logits(weights, [0]), expected)
     np.testing.assert_array_equal(next_logits, retained)
+
+
+def assert_invalid(evaluator, weights, config):
+    for tokens in ([], [-1], [config.vocab], [0] * 141, [[0]], [1.5], [2**40]):
+        with pytest.raises((ValueError, TypeError, OverflowError)):
+            evaluator.next_logits(weights, tokens)
+
+
+def assert_overflow(gpu, evaluator, width):
+    overflow = np.full(evaluator.weights_len, 0x3D80, dtype=np.uint16)
+    overflow[:width] = 0x7F7F
+    with pytest.raises(ValueError, match="nonfinite"):
+        evaluator.next_logits(gpu.MetalWeights(overflow), [0])
 
 
 def test_searchguards(gpu):
@@ -250,9 +251,7 @@ def test_fifo(gpu):
     for step in range(8):
         proposal = state.ask(1, 4, 5, step)
         if step == 0:
-            for variance in [-1e-300, float("nan"), 1e300]:
-                with pytest.raises(ValueError):
-                    state.tell_paired(proposal, 1.0, variance, 0.0, 0.0, True)
+            assert_variances(state, proposal)
             view = state.incumbent()
             with pytest.raises(BufferError):
                 state.tell_paired(proposal, 1.0, 0.0, 0.0, 0.0, True)
@@ -263,6 +262,12 @@ def test_fifo(gpu):
         assert state.length == initial
     with pytest.raises(ValueError):
         state.tell_paired(proposal, 1.0, 0.0, 0.0, 0.0, True)
+
+
+def assert_variances(state, proposal):
+    for variance in [-1e-300, float("nan"), 1e300]:
+        with pytest.raises(ValueError):
+            state.tell_paired(proposal, 1.0, variance, 0.0, 0.0, True)
 
 
 def test_inconclusive(gpu):
@@ -305,3 +310,12 @@ def test_inconclusive(gpu):
         )
         assert state.sync() == [False]
         assert state.length == (initial_radius if step < 3 else initial_radius * 0.5)
+
+
+def assert_logits(full, next_logits, n, vocab):
+    assert full.shape == (n, vocab)
+    assert next_logits.shape == (vocab,)
+    assert next_logits.dtype == np.float32
+    assert next_logits.flags.c_contiguous
+    assert np.isfinite(next_logits).all()
+    np.testing.assert_array_equal(next_logits.view(np.uint32), full[-1].view(np.uint32))

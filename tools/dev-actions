@@ -1,0 +1,76 @@
+#!/bin/sh
+# Internal implementations; argument validation and help belong to the Rust CLI.
+set -eu
+cd "$(dirname "$0")/.."
+export BUCK_ISOLATION_DIR=${BUCK_ISOLATION_DIR:-dev}
+
+dotslash() {
+    tools/bootstrap-dotslash >/dev/null
+    tool="$PWD/.buck2-tools/bin/dotslash"
+    if [ ! -x "$tool" ] && [ -x "$tool.exe" ]; then tool="$tool.exe"; fi
+    "$tool" "$@"
+}
+
+hooks() {
+    dotslash tools/prek run "$@" --config prek.toml --all-files --show-diff-on-failure
+}
+
+format() {
+    format_status=0
+    if [ -d .jj ]; then
+        rust_sources=$(jj file list | awk '/\.rs$/ { print }')
+        if [ "$1" = check ]; then
+            printf '%s\n' "$rust_sources" | xargs rustfmt --edition 2024 --check || format_status=1
+            uvx --from ruff==0.14.14 ruff format --check . || format_status=1
+        else
+            printf '%s\n' "$rust_sources" | xargs rustfmt --edition 2024 || format_status=1
+            uvx --from ruff==0.14.14 ruff format . || format_status=1
+        fi
+    elif [ "$1" = check ]; then
+        hooks check-rust check-python-format || format_status=1
+    else
+        hooks trailing-whitespace end-of-file-fixer repair-rust repair-python-format ||
+            hooks trailing-whitespace end-of-file-fixer repair-rust repair-python-format || format_status=1
+    fi
+    python3 scripts/check_names.py || format_status=1
+    kiss --config "$PWD/.kissconfig" check . || format_status=1
+    for crate_manifest in $(rg --files rust/crates --glob Cargo.toml); do
+        kiss --config "$PWD/rust/.kissconfig" --lang rust check "$(dirname "$crate_manifest")" || format_status=1
+    done
+    return "$format_status"
+}
+
+formal() {
+    [ -d formal ] || return 0
+    (cd formal && lake build)
+    if rg -n '\b(sorry|admit)\b|^[[:space:]]*axiom\b' formal --glob '*.lean'; then
+        echo "ennx: formal proof holes are not allowed" >&2
+        exit 1
+    fi
+}
+
+test_rust() {
+    formal
+    case "${ENNX_BUILD_SYSTEM:-buck2}" in
+        buck2) ./buck2w test //buck2/tests:all --local-only ;;
+        bazel) bazel test //:check --config=release --config=constrained ;;
+    esac
+}
+
+action=$1
+shift
+case "$action" in
+    fmt) format "$@" ;;
+    build) verification=$1; shift; bash tools/build-wheels "$1" "$verification" ;;
+    test)
+        if [ "$1" = python ]; then tools/buck2-wheel-verify --tests; else test_rust; fi
+        ;;
+    toolchain) exec python3 tools/rust-toolchain "$@" ;;
+    dev)
+        format write
+        tools/build-parity
+        bash tools/build-wheels dist full
+        test_rust
+        ;;
+    *) echo "ennx: unknown internal developer action: $action" >&2; exit 1 ;;
+esac

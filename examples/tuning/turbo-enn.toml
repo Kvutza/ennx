@@ -1,10 +1,16 @@
-version = 1
-study = "end_to_end"
-acquisition = "thompson"
-trust_region_kind = "turbo"
-length_init = 0.01
-length_min = 0.0001
-length_max = 0.1
+version = 2
+experiment = "end-to-end"
 output = "../../results/turbo-enn"
+
+[run]
 rounds = 3
-target_round_ms = 1000
+target-ms = 1000
+
+[acquisition]
+method = "thompson"
+
+[trust-region]
+method = "turbo"
+initial = 0.01
+min = 0.0001
+max = 0.1

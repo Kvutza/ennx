@@ -1,35 +1,34 @@
-version = 1
+version = 2
 
-[pretrain]
-model = "fbt_pisa1_moe_v1"
-corpus = "stack_v3_python_pilot_v1"
+experiment = "pretrain"
+model = "fbt-pisa1-legacy-v1"
+corpus = "stack-v3-python-pilot-v1"
 
-[rounds]
-count = 96
-reps = 1
-target_ms = 1000
+[run]
+rounds = 96
+target-ms = 1000
 
-[perturbation]
+[proposal]
 distribution = "gaussian"
+
+[enn]
+scaling = "global"
+neighbors = 32
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+candidates = 64
+samples = 64
 
 [acquisition]
 method = "ucb"
 beta = 0.5
 
-[surrogate]
-method = "enn"
-distance_scaling = "global"
-neighbors = 32
-fit_neighbors = true
-epistemic_scale = 0.05
-aleatoric_scale = 0.05
-y_scale = 1.0
-fit_candidates = 64
-fit_samples = 64
-
 [trust-region]
 method = "turbo"
-shape = "tensor_family_learned"
-length_init = 0.01
-length_min = 0.0001
-length_max = 0.1
+shape = "tensor-family-learned"
+initial = 0.01
+min = 0.0001
+max = 0.1

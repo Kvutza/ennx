@@ -337,9 +337,9 @@ pub struct GateUpProbe {
     pub qualified: bool,
 }
 
-const GATE_UP_M: u32 = 8192;
-const GATE_UP_N: u32 = 6656;
-const GATE_UP_K: u32 = 1536;
+const GATEUP_M: u32 = 8192;
+const GATEUP_N: u32 = 6656;
+const GATEUP_K: u32 = 1536;
 
 struct GateUpBuffers {
     input: Buffer,
@@ -358,25 +358,25 @@ fn probe_value(index: usize, exponent: u16, seed: u32) -> u16 {
     exponent | (hash as u16 & 0x8000) | ((hash as u16 & 7) << 7)
 }
 
-fn gate_up_buffers(runtime: &Runtime) -> GateUpBuffers {
-    let input_values = (0..(GATE_UP_M * GATE_UP_K) as usize)
+fn gateup_buffers(runtime: &Runtime) -> GateUpBuffers {
+    let input_values = (0..(GATEUP_M * GATEUP_K) as usize)
         .map(|index| probe_value(index, 0x3800, 17))
         .collect::<Vec<_>>();
-    let weight_values = (0..(GATE_UP_K * 2 * GATE_UP_N) as usize)
+    let weight_values = (0..(GATEUP_K * 2 * GATEUP_N) as usize)
         .map(|index| probe_value(index, 0x1800, 123))
         .collect::<Vec<_>>();
-    let count = (GATE_UP_M * GATE_UP_N) as usize;
+    let count = (GATEUP_M * GATEUP_N) as usize;
     GateUpBuffers {
         input: runtime.buffer_with(&input_values),
         weights: runtime.buffer_with(&weight_values),
-        gate_up: runtime.buffer_with(&vec![0x7e00u16; (GATE_UP_M * 2 * GATE_UP_N) as usize]),
+        gate_up: runtime.buffer_with(&vec![0x7e00u16; (GATEUP_M * 2 * GATEUP_N) as usize]),
         production: runtime.buffer_with(&vec![0x7e00u16; count + 64]),
         candidate: runtime.buffer_with(&vec![0x7e00u16; count + 64]),
         count,
     }
 }
 
-fn submit_gate_up(
+fn submit_gateup(
     runtime: &Runtime,
     gemm: &mut Matmul,
     buffers: &GateUpBuffers,
@@ -389,7 +389,7 @@ fn submit_gate_up(
     } else {
         &buffers.production
     };
-    encode_gate_up_probe(
+    encode_gateup(
         runtime,
         gemm,
         command,
@@ -412,7 +412,7 @@ fn submit_gate_up(
     gpu_seconds(command).ok_or_else(|| "Metal did not report gate/up GPU timing".into())
 }
 
-fn validate_gate_up(buffers: &GateUpBuffers) -> Result<(), String> {
+fn validate_gateup(buffers: &GateUpBuffers) -> Result<(), String> {
     let read = |buffer: &Buffer| unsafe {
         std::slice::from_raw_parts(buffer.contents().cast::<u16>(), buffers.count + 64)
     };
@@ -449,7 +449,7 @@ fn median(values: &mut [f64]) -> f64 {
     values[values.len() / 2]
 }
 
-fn measure_gate_up(
+fn measure_gateup(
     order: [bool; 4],
     submit: &mut impl FnMut(bool) -> Result<f64, String>,
 ) -> Result<(f64, f64), String> {
@@ -477,7 +477,7 @@ fn measure_gate_up(
     Ok((median(&mut production), median(&mut candidate)))
 }
 
-fn encode_gate_up_probe(
+fn encode_gateup(
     runtime: &Runtime,
     gemm: &mut Matmul,
     command: &CommandBufferRef,
@@ -490,7 +490,7 @@ fn encode_gate_up_probe(
     glu: &ComputePipelineState,
 ) -> Result<(), String> {
     if candidate {
-        let parameters = [GATE_UP_M, GATE_UP_N, GATE_UP_K];
+        let parameters = [GATEUP_M, GATEUP_N, GATEUP_K];
         let encoder = command.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(fused);
         encoder.set_buffer(0, Some(input), 0);
@@ -499,8 +499,8 @@ fn encode_gate_up_probe(
         encoder.set_bytes(3, 12, parameters.as_ptr().cast());
         encoder.dispatch_thread_groups(
             MTLSize {
-                width: u64::from(GATE_UP_N).div_ceil(64),
-                height: u64::from(GATE_UP_M).div_ceil(64),
+                width: u64::from(GATEUP_N).div_ceil(64),
+                height: u64::from(GATEUP_M).div_ceil(64),
                 depth: 1,
             },
             MTLSize {
@@ -514,9 +514,9 @@ fn encode_gate_up_probe(
         gemm.encode(
             &runtime.device,
             command,
-            Matrix::half(input, GATE_UP_M, GATE_UP_K),
-            Matrix::half(weights, GATE_UP_K, 2 * GATE_UP_N),
-            Matrix::half(gate_up, GATE_UP_M, 2 * GATE_UP_N),
+            Matrix::half(input, GATEUP_M, GATEUP_K),
+            Matrix::half(weights, GATEUP_K, 2 * GATEUP_N),
+            Matrix::half(gate_up, GATEUP_M, 2 * GATEUP_N),
             false,
             1.0,
         )?;
@@ -524,10 +524,10 @@ fn encode_gate_up_probe(
         encoder.set_compute_pipeline_state(glu);
         encoder.set_buffer(0, Some(gate_up), 0);
         encoder.set_buffer(1, Some(output), 0);
-        encoder.set_bytes(2, 4, (&GATE_UP_N as *const u32).cast());
+        encoder.set_bytes(2, 4, (&GATEUP_N as *const u32).cast());
         encoder.dispatch_thread_groups(
             MTLSize {
-                width: u64::from(GATE_UP_M),
+                width: u64::from(GATEUP_M),
                 height: 1,
                 depth: 1,
             },
@@ -544,7 +544,7 @@ fn encode_gate_up_probe(
 
 /// Compare the candidate fused gate/up operation with the complete production
 /// MPS gate/up plus SwiGLU operation at the exact production shape.
-pub fn run_gate_up_probe(minimum_speedup_percent: f64) -> Result<GateUpProbe, String> {
+pub fn gateup_probe(minimum_speedup_percent: f64) -> Result<GateUpProbe, String> {
     metal::objc::rc::autoreleasepool(|| {
         let runtime = Runtime::shared()?;
         let source = include_str!("fbt_prefill.metal");
@@ -554,16 +554,16 @@ pub fn run_gate_up_probe(minimum_speedup_percent: f64) -> Result<GateUpProbe, St
             "full-space BO gate/up probe",
             "fbt_prefill_glu_half_fused",
         )?;
-        let buffers = gate_up_buffers(&runtime);
+        let buffers = gateup_buffers(&runtime);
         let mut gemm = Matmul::default();
         let mut submit = |is_candidate: bool| -> Result<f64, String> {
-            submit_gate_up(&runtime, &mut gemm, &buffers, (&fused, &glu), is_candidate)
+            submit_gateup(&runtime, &mut gemm, &buffers, (&fused, &glu), is_candidate)
         };
         submit(false)?;
         submit(true)?;
-        validate_gate_up(&buffers)?;
-        let first = measure_gate_up([false, true, false, true], &mut submit)?;
-        let second = measure_gate_up([true, false, true, false], &mut submit)?;
+        validate_gateup(&buffers)?;
+        let first = measure_gateup([false, true, false, true], &mut submit)?;
+        let second = measure_gateup([true, false, true, false], &mut submit)?;
         let ratio = 1.0 - minimum_speedup_percent / 100.0;
         let qualified = first.1 <= first.0 * ratio && second.1 <= second.0 * ratio;
         eprintln!(
@@ -587,8 +587,8 @@ mod tests {
 
     #[test]
     #[ignore = "exact production-shape gate/up feasibility probe"]
-    fn gate_up_feasibility() {
-        let result = super::run_gate_up_probe(10.0).unwrap();
+    fn gateup_feasibility() {
+        let result = super::gateup_probe(10.0).unwrap();
         assert!(result.production_first_seconds.is_finite());
         assert!(result.candidate_first_seconds.is_finite());
         assert!(result.production_second_seconds.is_finite());
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     #[ignore = "exact-shape diagnostic; exercised by tools/fbt-bo --gemm"]
-    fn bench_gemm_layouts() {
+    fn bench_layouts() {
         use crate::apple_gpu::gpu_seconds;
         use metal::MTLSize;
         use std::time::Instant;

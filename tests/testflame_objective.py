@@ -149,20 +149,9 @@ def test_streamingloss(document, config, batch_signature):
                 jax.ShapeDtypeStruct((1, layout.size), jnp.bfloat16)
             )
         for candidate in (flat, flat * jnp.bfloat16(2)):
-            expected = []
-            problem_means = []
-            for example in document["examples"]:
-                tokens = jnp.asarray([example["tokens"]])
-                logits = np.asarray(
-                    model.forward(layout.unflatten(candidate), tokens, config)
-                )[0, :-1]
-                logits = logits - logits.max(axis=-1, keepdims=True)
-                log_probs = logits - np.log(np.exp(logits).sum(axis=-1, keepdims=True))
-                losses = -log_probs[np.arange(len(logits)), example["tokens"][1:]]
-                expected.extend(losses[np.array(example["loss_mask"][1:])])
-                problem_means.append(
-                    float(losses[np.array(example["loss_mask"][1:])].mean())
-                )
+            expected, problem_means = reference_losses(
+                document, layout, candidate, config
+            )
             actual = evaluate(
                 candidate.reshape(1, -1) if batch_signature else candidate
             ).block_until_ready()
@@ -204,3 +193,19 @@ def test_index(indices):
     evaluate = SolutionEvaluator(kernel, (None, None), (None, None), 3, (2, 1))
     with pytest.raises(ValueError, match="indices"):
         evaluate.losses(None, indices)
+
+
+def reference_losses(document, layout, candidate, config):
+    expected = []
+    problem_means = []
+    for example in document["examples"]:
+        tokens = jnp.asarray([example["tokens"]])
+        logits = np.asarray(model.forward(layout.unflatten(candidate), tokens, config))[
+            0, :-1
+        ]
+        logits = logits - logits.max(axis=-1, keepdims=True)
+        log_probs = logits - np.log(np.exp(logits).sum(axis=-1, keepdims=True))
+        losses = -log_probs[np.arange(len(logits)), example["tokens"][1:]]
+        expected.extend(losses[np.array(example["loss_mask"][1:])])
+        problem_means.append(float(losses[np.array(example["loss_mask"][1:])].mean()))
+    return expected, problem_means

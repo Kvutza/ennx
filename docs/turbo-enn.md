@@ -1,6 +1,6 @@
 # Pretraining BO runbook
 
-Source checked: 2026-09-29.
+Source checked: 2026-10-01.
 
 ```sh
 ./ennx tune examples/tuning/code-pretrain.toml
@@ -12,53 +12,150 @@ The higher-budget learned-family experiment is:
 ./ennx tune examples/tuning/code-pretrain-family-learned.toml
 ```
 
-It runs 256 rounds with 32 neighbors and 64-row/64-candidate ENN fitting. The
-pretraining resolver derives its random streams, chooses its content-addressed
-output directory, and prints the artifact path.
+The free-running 4,096-token generated-pretraining experiment is:
+
+```sh
+./ennx tune examples/tuning/code-pretrain-generated.toml
+```
+
+Unlike `code-pretrain.toml`, this path does not teacher-force the corpus. It
+generates a complete continuation from its own prefix and uses negative target
+NLL on those generated contexts as the BO reward. The NLL reduction is fused
+with proposal readout; it does not add another model forward pass. One corpus
+continuation is fixed for the run so candidate and incumbent observations remain
+comparable, and the accepted portable checkpoint is written into the artifact.
+The CLI decodes and prints the initial completion and every proposed completion
+immediately after its measured round, including rejected proposals. Exact text
+is also stored as `initial/completion.txt` and
+`round-NNNN/completion.txt`; the final incumbent is `completion.txt`. Decoding,
+file output, and terminal output are deliberately outside `round_ms`.
+
+The example runs 100 rounds. The pretraining resolver derives its random
+streams, chooses its content-addressed output directory, and prints the artifact
+path.
 
 The command accepts one TOML file. The active preset is FBT/PISA/MoE,
-not the legacy dense LocalV1 study. Apple silicon and sufficient unified memory
+not the legacy dense LocalV1 experiment. Apple silicon and sufficient unified memory
 for the full model/controller/scorer are required.
+
+Prepare and validate the content-addressed corpus without allocating the model
+or starting BO:
+
+```sh
+./ennx tune examples/tuning/code-generation-enn.toml --prepare
+```
 
 ## Configuration
 
 Read [the example](../examples/tuning/code-pretrain.toml) for current values.
-Use a completed run's resolved study.toml to reproduce its settings.
+Authored and resolved experiments share the closed, Rust-typed version 2 schema.
+Unknown keys, unknown selectors, wrong value types, and incompatible choices
+fail before corpus preparation or GPU allocation. Version 1 remains readable
+for historical runs; newly resolved files use version 2. No CUE or generated
+schema files are involved. Use a completed run's resolved experiment.toml to
+reproduce its settings.
+
+Only overrides need to be written. For example:
+
+```toml
+version = 2
+experiment = "pretrain"
+model = "fbt-pisa1-legacy-v1"
+corpus = "stack-v3-python-pilot-v1"
+
+[run]
+rounds = 512
+reps = 3
+target_ms = 200
+
+[proposal]
+distribution = "gaussian"
+
+[enn]
+scaling = "self-tuning"
+local-neighbors = 8
+
+[acquisition]
+method = "ucb"
+beta = 0.75
+
+[trust-region]
+method = "reliability"
+shape = "tensor-family-learned"
+initial = 0.01
+min = 0.0001
+max = 0.1
+```
+
+This example changes optimizer settings; it does not enable free-running text
+generation. For the full generated-token workload, use the checked-in
+[coding experiment](../examples/tuning/code-generation-enn.toml), including its
+`[generation]` policy. `target_ms` is a measured goal, not a latency guarantee.
 
 | Section | Role |
 | --- | --- |
-| pretrain | Model and corpus presets |
-| rounds | Selected-candidate round count, repetitions, and target wall time |
-| perturbation | Independent Gaussian or Rademacher coordinates |
+| Root | `experiment`, model/corpus presets, optional output path |
+| run | Selected-candidate rounds, repetitions, selection, validation interval, target milliseconds |
+| data | Optional `train` and `validation` paths for already prepared data |
+| proposal | Independent Gaussian/Rademacher distribution, total candidates, arms |
+| objective | Moving-incumbent pairing or an explicit frozen-initial control variate |
 | acquisition | Selection rule; UCB beta controls its uncertainty bonus |
-| surrogate | Neighbor count, distance scaling, initial uncertainty/output scales, LOOCV fitting budget |
-| trust-region | Length bounds and tensor-family scaling mode |
+| enn | Neighbor count, history geometry, distance scaling, initial uncertainty/output scales |
+| enn.fit | LOOCV fitting candidates/samples, adaptive neighbor fitting |
+| trust-region | Tagged `turbo`, `morbo`, or `reliability` policy with length bounds, tensor-family shape, and reliability fields |
+| generation | Free-running length, sampling policy, corpus prompt, and generated-context reward |
+| seeds | Optional explicit single-run streams; normally omitted |
+| diagnostics | Optional trace, stage samples, and kernel trial sources |
 
 The neighbor count also sets the initialization observation count.
-fit_candidates and fit_samples control surrogate fitting, not proposal count:
-the pool remains four. Fitting estimates epistemic/aleatoric scales; output
+`[enn.fit] candidates` and `samples` control surrogate fitting, not proposal
+count. `[proposal] candidates` defaults to four total proposals; the current
+GPU pool requires four, split evenly across `arms` (default one). Fitting
+estimates epistemic/aleatoric scales; output
 scale comes from the fitter's outcome standard deviation. This is point fitting,
-not integration over a hyperparameter posterior.
+not integration over a hyperparameter posterior. The unchanged optimizer
+defaults are 10 neighbors, 30 fitting candidates, 10 samples, global distance
+scaling, realized history geometry, UCB beta 2, and TuRBO control. A missing
+`[run]` means 3 rounds, 1 repetition, and a 1000 ms target. Reliability policy
+defaults come from the existing controller type. Resolved files materialize
+defaults rather than requiring verbose authored files.
 
-`reps > 1` runs complete pretraining studies sequentially. The model weights
+Acquisition choices have distinct typed payloads: Thompson accepts no UCB beta;
+Pareto requires objective scales; augmented Chebyshev requires its preferences,
+alpha, and seed domain. The MORBO trust region owns its region count,
+rescalarization cadence, and clipping policy.
+Vector acquisition also requires a vector-producing reward. A selector cannot
+silently retain fields belonging to another method. The corpus preparer
+receives a Rust-validated concrete request; it does not interpret version 2
+keys or maintain a second version 2 schema. Parsing runs before timing, not
+inside the BO loop.
+
+`[objective] reference = "frozen_initial"` scores the initial model once for
+every immutable minibatch before timing. A timed round then evaluates only the
+candidate and uses its exact block-wise difference from the same-batch frozen
+anchor. This removes the incumbent forward and batch-level offsets, but changes
+the optimization target from improvement over the moving incumbent to
+improvement over the initial model. The default remains `moving_incumbent`.
+
+`[run] reps > 1` runs complete pretraining studies sequentially. The model weights
 and immutable corpus stay fixed while proposal and acquisition streams are
 derived independently for each repetition. The derivation excludes treatment
 settings and the requested round/repetition budgets, so matching ablation cells
 use the same streams and extending a run preserves its existing prefix. Do not
-put seeds in a repeated study: explicit legacy seeds are rejected when
+put seeds in a repeated experiment: explicit legacy seeds are rejected when
 `reps > 1`. Each repetition writes `rep-NNN/result.toml`, tensor updates, and
 controller records; the top-level `result.toml` reports aggregate latency and
 goal status.
 
-`fit_neighbors = true` treats the configured neighbor count as both the
+`[enn.fit] neighbors = true` treats the configured neighbor count as both the
 initialization count and the upper bound for the fitted ENN neighborhood. After
 fitting the uncertainty scales, the same leave-one-out predictive likelihood
 scores every feasible neighbor count. The winner is used by subsequent
 acquisition calls; it is reported with the fitted scales rather than hidden in
 the implementation.
 
-`distance_scaling = "self_tuning"` makes the learned squared metric local before
-neighbor ranking and inverse-variance weighting. `local_scale_neighbors = 8`
+`[enn] scaling = "self_tuning"` makes the learned squared metric local before
+neighbor ranking and inverse-variance weighting. `local_neighbors = 8`
 uses each observation's eighth-neighbor squared distance as its local radius;
 the query radius is computed from the same candidate-to-history distances on
 the GPU. The CPU leave-one-out fitter uses the identical normalization. The
@@ -67,10 +164,10 @@ fields for the original global metric.
 
 ## Reliability-aware controller
 
-`[trust-region] method = "reliability"` selects the constant-state ENN
-controller. Its `[trust-region.reliability]` table is required; no experiment
-Controller policy is supplied through TOML, and experiment seeds are derived
-from the resolved run configuration. The controller combines signals already
+`[trust-region] method = "reliability"` selects the constant-state ENN controller.
+Omitted policy fields use its typed defaults; overrides such as
+`evidence-decay` belong directly in `[trust-region]`. Experiment seeds are
+derived from the resolved run configuration. The controller combines signals already
 available after a paired evaluation:
 
 - noise-screened concordance between the candidate's predicted and realized
@@ -169,8 +266,9 @@ Report complete wall time, scorer GPU time, ask/tell time, objective count,
 accepted steps, realized FP16 changes, and fixed validation outcomes separately.
 Trace mode splits controller commands and perturbs timing; it is for attribution.
 The target requires every measured round to meet the wall-time bound, not only
-the median. No current subsecond or learning-quality claim is established.
+the median. A single free-running generated-pretraining round has measured
+500.886 ms, but the 200 ms target, sustained subsecond throughput, and
+learning-quality improvement are not established.
 
 For controlled selection diagnostics, see [bo-audit.md](bo-audit.md).
-For legacy dense configuration and historical measurements, see the
-[archived runbook](archive/turbo-enn.md); those results do not describe this preset.
+Legacy dense measurements do not describe this preset.

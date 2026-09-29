@@ -1,6 +1,7 @@
 load("@crates//:defs.bzl", "aliases", "crate_edition")
 load("@rules_rust//rust:defs.bzl", "rust_shared_library")
 load("//:bazel/python_extension.bzl", "copy_extension")
+load("//build:targets.bzl", "ENNX_PY_CRATES")
 load("//rust/crates/ennx:defs.bzl", "ennx_crate_deps")
 
 package(default_visibility = ["//visibility:public"])
@@ -11,13 +12,6 @@ ENNX_PY_SRCS = glob(
     ["src/**/*.rs"],
     exclude = ["src/ennx_py_build.rs"],
 )
-
-ENNX_PY_CRATES = [
-    "ndarray",
-    "numpy",
-    "pyo3",
-    "rand",
-]
 
 ENNX_PY_DEPS = ennx_crate_deps(ENNX_PY_CRATES)
 
@@ -64,6 +58,7 @@ rust_shared_library(
     target_compatible_with = ["@platforms//os:macos"],
     deps = ENNX_PY_DEPS + [
         "//rust/crates/ennx:ennx_metal",
+        "@crates//:metal",
     ],
 )
 

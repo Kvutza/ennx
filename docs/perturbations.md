@@ -159,7 +159,7 @@ values, doubles length after its success tolerance, halves it after its derived
 failure tolerance, and resets bounded history to the incumbent on restart.
 Measured startup and restart values seed the Metal controller before its next
 update. The generic failure tolerance is derived from the ambient parameter
-count. The FBT round study explicitly overrides it to four failures, independent
+count. The FBT round experiment explicitly overrides it to four failures, independent
 of dimension; see [its runbook](turbo-enn.md). That experimental budget makes
 contraction reachable without establishing that the controller is suitable for
 full-space weight search. A wholly quantized-away selected proposal must not incur a duplicate

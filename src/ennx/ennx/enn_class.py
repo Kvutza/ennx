@@ -48,26 +48,24 @@ def _finalizedraw(
     return draws_arr, idx_arr
 
 
+def _inputs(train_x, train_y, train_yvar):
+    train_x, train_y = (
+        np.asarray(train_x, dtype=float),
+        np.asarray(train_y, dtype=float),
+    )
+    if train_x.ndim != 2 or train_y.ndim != 2 or train_x.shape[0] != train_y.shape[0]:
+        raise ValueError((train_x.shape, train_y.shape))
+    if train_yvar is not None:
+        train_yvar = np.asarray(train_yvar, dtype=float)
+        if train_yvar.ndim != 2 or train_y.shape != train_yvar.shape:
+            raise ValueError((train_y.shape, train_yvar.shape))
+    return train_x, train_y, train_yvar
+
+
 class ENN:
     _EPS_VAR = 1e-9
 
-    @staticmethod
-    def _inputs(train_x, train_y, train_yvar):
-        train_x, train_y = (
-            np.asarray(train_x, dtype=float),
-            np.asarray(train_y, dtype=float),
-        )
-        if (
-            train_x.ndim != 2
-            or train_y.ndim != 2
-            or train_x.shape[0] != train_y.shape[0]
-        ):
-            raise ValueError((train_x.shape, train_y.shape))
-        if train_yvar is not None:
-            train_yvar = np.asarray(train_yvar, dtype=float)
-            if train_yvar.ndim != 2 or train_y.shape != train_yvar.shape:
-                raise ValueError((train_y.shape, train_yvar.shape))
-        return train_x, train_y, train_yvar
+    _inputs = staticmethod(_inputs)
 
     def __init__(
         self,

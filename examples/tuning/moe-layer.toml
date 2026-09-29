@@ -1,5 +1,7 @@
-version = 1
-study = "moe_layer"
+version = 2
+experiment = "moe-layer"
 output = "../../results/moe-layer"
+
+[run]
 rounds = 10
-target_round_ms = 1000
+target-ms = 1000

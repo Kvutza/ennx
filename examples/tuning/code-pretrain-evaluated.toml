@@ -1,0 +1,60 @@
+# Actual generated-text scoring under the fixed Qwen dense-control checkpoint.
+# Objective experiment: raw teacher likelihood favored repetitive text in the
+# observed control. Reward improvement is not established pretraining progress.
+version = 2
+
+experiment = "pretrain"
+model = "fbt-pisa1-legacy-v1"
+corpus = "stack-v3-python-pilot-v1"
+
+[run]
+rounds = 100
+target-ms = 200
+
+[proposal]
+distribution = "rademacher"
+
+[enn]
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+
+[acquisition]
+method = "ucb"
+beta = 0.75
+
+[trust-region]
+method = "turbo"
+shape = "tensor-family-learned"
+initial = 0.001
+min = 0.0001
+max = 0.1
+
+[generation]
+purpose = "systems-probe"
+max-tokens = 4096
+temperature = 0.0
+corpus-prompt-tokens = 128
+
+[generation.verify]
+mode = "accepted-prefix"
+window = 128
+max-window = 128
+passes = 2
+unroll = 2
+
+[generation.reward]
+kind = "frozen-qwen"
+checkpoint = "../../.cache/qwen-coder-1.5b"
+tokenizer-program = "../../tools/reward-tokenizer"
+backend = "fp16"
+# Optional frozen-readout experiment: readout = "mps-fp32".
+# Costs 933,494,784 extra resident bytes; the paired tile check was 22% slower.
+readout = "reference"
+# Select explicitly; the frozen evaluator does not read ENNX_QWEN_TILE_ATTN.
+# Matched 4K pair: 1.82x whole-round speedup; mean NLL is not bit-identical.
+attention = "tiled16"
+max-tokens = 32768
+timeout-ms = 60000

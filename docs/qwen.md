@@ -140,10 +140,10 @@ remains the full-prefix reference API for short inputs, while cached decode
 keeps token selection on Metal with deterministic lowest-ID tie breaking and
 must preserve greedy-token parity within the recorded BF16-cache tolerance.
 
-The reference `logits`, `next_logits`, and `losses` paths currently reject
-inputs longer than 256 tokens. This is deliberate: those APIs retain the
-materialized reference attention implementation; use `generate` for the
-long-context cached path.
+The reference `logits` and `next_logits` paths reject inputs longer than 256
+tokens. `losses` switches to bounded, cached prefill above that cutoff and
+supports the configured context. The reference backend uses 256-token chunks;
+MPS uses 2,048-token chunks. The cutoff does not change with the chunk size.
 
 For Metal bring-up only, `ENNX_QWEN_SYNC_LAYERS=1` waits after embedding and
 each transformer layer to localize a command failure. Normal evaluation keeps
@@ -168,7 +168,7 @@ command boundaries between those stages, so use it to localize cost, not as the
 production latency number. Ordinary runs do not create those boundaries. The
 2026-09-18 production profile attributed 73.86% of GPU time to cached attention;
 the exact measurements and next-kernel gate are recorded in
-the [archived sprint ledger](archive/full-space-bo-sprint.md).
+the historical Qwen experiments summarized in this document.
 
 `ENNX_QWEN_TILE_ATTN=1` selects the exact 16-query by 16-key tiled prefill
 experiment for the 128-wide production heads. Omit it to run the serial oracle;
@@ -195,3 +195,50 @@ using its losses as an experiment result.
 The optional PyTorch reference and generation path uses
 `ops/qwen/requirements.txt`; it is not imported by the Metal evaluator. Metal
 returns ordinary Python lists and does not require NumPy.
+
+## Frozen generated-text evaluator
+
+`./ennx tune examples/tuning/code-pretrain-evaluated.toml` uses this checkpoint
+as a fixed scorer for another model's 4,096-token generation. This is separate
+from Qwen weight search. Its raw teacher-likelihood reward failed the observed
+repetition control; see [the generated-text reward audit](evals.md#generated-text-reward-audit-2026-09-30).
+
+The frozen scorer selects attention explicitly in `[generation.reward]`:
+`attention = "reference"` or `attention = "tiled16"`. It does not inherit
+`ENNX_QWEN_TILE_ATTN`; the separate Qwen workflow retains its environment switch.
+The tiled kernel reuses K/V across 16 queries without dropping context or keys.
+The focused cached-attention numerical check passed on 2026-09-30.
+The matched full-generation pair measured 46.32 seconds per reference round
+versus 25.50 seconds with tiled attention; candidate tokens and acceptance
+matched, but mean NLL was not bit-identical. The evaluated example selects
+`tiled16` explicitly while the frozen-scorer default remains `reference`.
+See [the comparison and qualifications](evals.md#full-power-attention-comparison).
+
+`readout = "reference"` remains the default. The opt-in
+`readout = "mps_fp32"` expands the frozen BF16 readout exactly to FP32 once and
+uses MPS for rows of 32 or more. Smaller tails use the existing kernel. The
+expansion costs **933,494,784 additional resident bytes** at the pinned shape;
+it is never used for mutable BO candidate weights. The implementation retains
+the source buffer and falls back for a different buffer.
+
+On the full 128-by-151,936 output tile with hidden width 1,536, the synthetic
+fixture observed zero logit and token-NLL differences; selected reference logits
+also matched FP64 dot products within the test tolerance. Repeating that
+isolated readout check with the actual pinned checkpoint weights also observed
+zero logit and token-NLL differences. The activations were synthetic in both
+checks, so neither is a full-model generation result. A focused end-to-end
+small-model check covers mask gaps, readout tails, the 256/257 cache boundary,
+and another weight buffer. This is numerical evidence, not a speedup result.
+
+With active Low Power Mode disabled, three alternating timing pairs using the
+pinned checkpoint readout measured reference times of 38.272, 38.623, and
+37.783 ms, versus cached FP32 MPS times of 46.396, 47.544, and 46.656 ms.
+The cached median was about 22% slower, in addition to its 934 MB memory cost
+and 33.553 ms one-time preparation. This falsifies the cached-readout speedup
+hypothesis for this measured tile; keep `readout = "reference"`. The opt-in
+path remains available for further experiments. These are isolated readout
+timings, not whole-round timings. Neither option is a demonstrated 200 ms
+whole-round solution.
+New generated-run metadata records device, active Low Power Mode, and student
+cache context. Unknown power-policy reads are recorded as `null`; older runs
+without this field cannot be assumed to have used full power.

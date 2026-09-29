@@ -196,12 +196,10 @@ def run_noise(report: ParityReport) -> None:
 
     mu_ok = np.allclose(out.mu, rs_mu, rtol=1e-12, atol=1e-12)
     se_ok = _posteriorfields(out, rs_se, rs_se_epi, rs_se_ale, rtol=1e-10, atol=1e-10)
-    passed = mu_ok and se_ok
-
     _recordcase(
         report,
         "posterior_observation_noise",
         "ENN.posterior",
-        passed,
-        None if passed else f"mu_ok={mu_ok} se_ok={se_ok}",
+        mu_ok and se_ok,
+        None if mu_ok and se_ok else f"mu_ok={mu_ok} se_ok={se_ok}",
     )

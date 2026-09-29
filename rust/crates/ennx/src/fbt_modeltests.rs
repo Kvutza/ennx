@@ -23,12 +23,12 @@ fn apply_weights(model: &mut Model, source: &BufferRef) {
 }
 
 fn bind_weights(model: &mut Model, source: &BufferRef) -> Vec<Buffer> {
-    model.bind_parameter_row(source).unwrap()
+    model.bind_row(source).unwrap()
 }
 
 fn bo_config() -> crate::config::ConfigOverrides {
-    crate::config::parse_turbo_enn_config(
-        "version=1\nstudy='end_to_end'\nacquisition='thompson'\nlength_init=0.01\nlength_min=0.0001\nlength_max=0.1\noutput='unused'\nrounds=3\ntarget_round_ms=1000",
+    crate::config::parse_tune(
+        "version=2\nexperiment='end-to-end'\noutput='unused'\n[run]\nrounds=3\ntarget-ms=1000\n[acquisition]\nmethod='thompson'\n[trust-region]\nmethod='turbo'\ninitial=0.01\nmin=0.0001\nmax=0.1",
     )
     .unwrap()
 }
@@ -44,7 +44,7 @@ fn model_search(model: &Model, value: f32) -> crate::bf16_metal::SearchState {
 #[ignore = "full-size GPU proposal structure diagnostic; no forward passes"]
 fn proposal_structure() {
     autoreleasepool(|| {
-        let model = Model::new(super::bo::full_model_config(), 42).unwrap();
+        let model = Model::new(super::bo::full_config(), 42).unwrap();
         let mut search = model_search(&model, -1.0);
         for candidate in 0..4 {
             let proposal = search.test_candidate(123, candidate).unwrap();
@@ -158,30 +158,30 @@ fn bridge_restore() {
 #[test]
 #[ignore = "GPU diagnostic; exercised by tools/fbt-bo --check"]
 fn gpu_scorer() {
-    gpu_scorer_case(false, 256, super::GateUpImplementation::Mps);
+    scorer_case(false, 256, super::GateUpImplementation::Mps);
 }
 
 #[test]
 #[ignore = "GPU diagnostic; exercised by tools/fbt-bo --check"]
-fn gpu_scorer_optimized() {
-    gpu_scorer_case(true, 256, super::GateUpImplementation::Mps);
+fn gpu_optimized() {
+    scorer_case(true, 256, super::GateUpImplementation::Mps);
 }
 
 #[test]
 #[ignore = "GPU diagnostic; exercised by tools/fbt-bo --check"]
-fn gpu_scorer_full_ffn() {
-    gpu_scorer_case(true, 6656, super::GateUpImplementation::Mps);
+fn gpu_fullffn() {
+    scorer_case(true, 6656, super::GateUpImplementation::Mps);
 }
 
 #[test]
 #[ignore = "full-width fused Metal gate/up parity; required before configured fused runs"]
-fn gpu_gate_up_fused_metal() {
-    gpu_scorer_case(true, 6656, super::GateUpImplementation::FusedMetal);
+fn gpu_fusedgate() {
+    scorer_case(true, 6656, super::GateUpImplementation::FusedMetal);
 }
 
 #[test]
 #[ignore = "GPU diagnostic; exercised by tools/fbt-bo --check"]
-fn gpu_scorer_readout_views() {
+fn gpu_readout() {
     use crate::fbt_mps::{Matmul, Matrix};
     autoreleasepool(|| {
         let runtime = crate::apple_gpu::Runtime::shared().unwrap();
@@ -250,81 +250,154 @@ fn gpu_scorer_readout_views() {
     });
 }
 
-fn gpu_scorer_case(optimized: bool, intermediate: u32, gate_up: super::GateUpImplementation) {
-    autoreleasepool(|| {
-        let mut c = tiny(16);
-        c.width = 192;
-        c.intermediate = intermediate;
-        c.vocab = 97;
-        c.capacity = 64;
-        c.tiled_attention = true;
-        if optimized {
-            c.width = 1536;
-            c.heads = 16;
-            c.kv_heads = 8;
+fn compare_scorers(
+    reference: &mut Model,
+    gpu: &mut Model,
+    x: &[u32],
+    y: &[u32],
+    mode: ScoreMode,
+) -> (Vec<f64>, Vec<f64>) {
+    let examples = [(x, y), (y, x)];
+    let ref_single = reference.score(&x, &y, mode).unwrap();
+    let ref_single_tokens =
+        unsafe { std::slice::from_raw_parts(reference.losses.contents().cast::<f32>(), 5) };
+    eprintln!(
+        "REF_SINGLE tokens[..5]={:?} mean={}",
+        ref_single_tokens, ref_single.mean_nll
+    );
+    let expected = reference.score_batch(&examples, mode).unwrap();
+    let actual = gpu.score_batch(&examples, mode).unwrap();
+    let expected_tokens = reference.prefills[0].token_losses();
+    let actual_tokens = gpu.prefills[0].token_losses();
+    let max_error = expected_tokens
+        .iter()
+        .zip(&actual_tokens)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    for (idx, (a, b)) in expected_tokens.iter().zip(&actual_tokens).enumerate() {
+        if (a - b).abs() > 0.02 {
+            eprintln!(
+                "DRIFT at idx={idx} expected={a} actual={b} diff={}",
+                (a - b).abs()
+            );
         }
+    }
+    eprintln!("EXPECTED={:?}", &expected_tokens[..5]);
+    eprintln!("ACTUAL={:?}", &actual_tokens[..5]);
+    eprintln!(
+        "FBT_GPU_CHECK mode={mode:?} max_token_loss_error={max_error:.9} reference={:?} gpu={:?}",
+        expected.mean_nll, actual.mean_nll
+    );
+    assert!(
+        max_error < 0.02,
+        "FP16 complete-scorer token NLL drift: {max_error}"
+    );
+    for (a, b) in expected.mean_nll.iter().zip(&actual.mean_nll) {
+        assert!((a - b).abs() < 0.003);
+    }
+    (expected.mean_nll, actual.mean_nll)
+}
+
+fn assert_restored(gpu: &Model, search: &crate::bf16_metal::SearchState) {
+    let expected = search.read_best().unwrap();
+    let mut offset = 0;
+    for parameter in &gpu.parameters {
+        let bits = unsafe {
+            std::slice::from_raw_parts(
+                parameter.buffer.contents().cast::<u16>(),
+                parameter.elements,
+            )
+        };
+        assert_eq!(bits, &expected[offset..offset + parameter.elements]);
+        offset += parameter.elements;
+    }
+}
+
+fn scorer_config(optimized: bool, intermediate: u32) -> ModelConfig {
+    let mut c = tiny(16);
+    c.width = 192;
+    c.intermediate = intermediate;
+    c.vocab = 97;
+    c.capacity = 64;
+    c.tiled_attention = true;
+    if optimized {
+        c.width = 1536;
+        c.heads = 16;
+        c.kv_heads = 8;
+    }
+    c
+}
+
+fn check_execution(
+    reference: &mut Model,
+    gpu: &mut Model,
+    search: &crate::bf16_metal::SearchState,
+    examples: &[(&[u32], &[u32])],
+    optimized: bool,
+    intermediate: u32,
+    gate_up: super::GateUpImplementation,
+) {
+    if optimized && intermediate == 6656 {
+        let ordinary = gpu.score_batch(&examples, ScoreMode::Fused).unwrap();
+        apply_weights(gpu, &search.base_buffer());
+        let traced = gpu.score_traced(&examples, ScoreMode::Fused).unwrap();
+        assert_eq!(ordinary.mean_nll, traced.score.mean_nll);
+        assert!(
+            traced
+                .operations
+                .iter()
+                .any(|op| op.operation == "gate_up_weight_pack")
+        );
+        let operation = if gate_up == super::GateUpImplementation::FusedMetal {
+            "gate_up_glu"
+        } else {
+            "gate_up_gemm"
+        };
+        assert_eq!(
+            traced
+                .operations
+                .iter()
+                .filter(|op| op.operation == operation)
+                .count(),
+            2 * gpu.config.layers as usize
+        );
+    }
+
+    gpu.set_optimized(false).unwrap();
+    if optimized {
+        gpu.prefills.clear();
+        gpu.prepare_prefill(2, 64).unwrap();
+    }
+    let a = reference.score_batch(&examples, ScoreMode::Fused).unwrap();
+    let b = gpu.score_batch(&examples, ScoreMode::Fused).unwrap();
+    assert_eq!(a.mean_nll, b.mean_nll);
+}
+
+fn scorer_case(optimized: bool, intermediate: u32, gate_up: super::GateUpImplementation) {
+    autoreleasepool(|| {
+        let c = scorer_config(optimized, intermediate);
         let mut reference = Model::new(c, 42).unwrap();
         let mut gpu = Model::new(c, 42).unwrap();
         gpu.set_optimized(optimized).unwrap();
-        gpu.set_gate_up_implementation(gate_up).unwrap();
+        gpu.set_gateup(gate_up).unwrap();
         reference.prepare_prefill(2, 64).unwrap();
         gpu.prepare_prefill(2, 64).unwrap();
         let x: Vec<_> = (0..64).map(|i| i * 7 % 97).collect();
         let y: Vec<_> = (0..64).map(|i| (i * 13 + 19) % 97).collect();
         let examples = [(&x[..], &y[..]), (&y[..], &x[..])];
-        let compare = |reference: &mut Model, gpu: &mut Model, mode| {
-            let ref_single = reference.score(&x, &y, mode).unwrap();
-            let ref_single_tokens =
-                unsafe { std::slice::from_raw_parts(reference.losses.contents().cast::<f32>(), 5) };
-            eprintln!(
-                "REF_SINGLE tokens[..5]={:?} mean={}",
-                ref_single_tokens, ref_single.mean_nll
-            );
-            let expected = reference.score_batch(&examples, mode).unwrap();
-            let actual = gpu.score_batch(&examples, mode).unwrap();
-            let expected_tokens = reference.prefills[0].token_losses();
-            let actual_tokens = gpu.prefills[0].token_losses();
-            let max_error = expected_tokens
-                .iter()
-                .zip(&actual_tokens)
-                .map(|(a, b)| (a - b).abs())
-                .fold(0.0f32, f32::max);
-            for (idx, (a, b)) in expected_tokens.iter().zip(&actual_tokens).enumerate() {
-                if (a - b).abs() > 0.02 {
-                    eprintln!(
-                        "DRIFT at idx={idx} expected={a} actual={b} diff={}",
-                        (a - b).abs()
-                    );
-                }
-            }
-            eprintln!("EXPECTED={:?}", &expected_tokens[..5]);
-            eprintln!("ACTUAL={:?}", &actual_tokens[..5]);
-            eprintln!(
-                "FBT_GPU_CHECK mode={mode:?} max_token_loss_error={max_error:.9} reference={:?} gpu={:?}",
-                expected.mean_nll, actual.mean_nll
-            );
-            assert!(
-                max_error < 0.02,
-                "FP16 complete-scorer token NLL drift: {max_error}"
-            );
-            for (a, b) in expected.mean_nll.iter().zip(&actual.mean_nll) {
-                assert!((a - b).abs() < 0.003);
-            }
-            (expected.mean_nll, actual.mean_nll)
-        };
         if gate_up == super::GateUpImplementation::FusedMetal {
-            super::prefill::reset_fused_gate_up_dispatches();
+            super::prefill::reset_dispatches();
         }
-        compare(&mut reference, &mut gpu, ScoreMode::Standard);
+        compare_scorers(&mut reference, &mut gpu, &x, &y, ScoreMode::Standard);
         if gate_up == super::GateUpImplementation::FusedMetal {
             assert!(
-                super::prefill::fused_gate_up_dispatches() > 0,
+                super::prefill::fused_dispatches() > 0,
                 "normal score_batch did not dispatch the fused gate/up kernel"
             );
         }
         let mut search = model_search(&gpu, 0.0);
         for (step, force_accept) in [false, true].into_iter().enumerate() {
-            let incumbent = compare(&mut reference, &mut gpu, ScoreMode::Fused);
+            let incumbent = compare_scorers(&mut reference, &mut gpu, &x, &y, ScoreMode::Fused);
             let round = search
                 .ask_round(
                     1,
@@ -341,7 +414,7 @@ fn gpu_scorer_case(optimized: bool, intermediate: u32, gate_up: super::GateUpImp
             let proposal = search.propose_buffer(&round).unwrap();
             apply_weights(&mut reference, &proposal);
             apply_weights(&mut gpu, &proposal);
-            let candidate = compare(&mut reference, &mut gpu, ScoreMode::Fused);
+            let candidate = compare_scorers(&mut reference, &mut gpu, &x, &y, ScoreMode::Fused);
             let decision = |old: &[f64], new: &[f64]| {
                 let a = old[0] - new[0];
                 let b = old[1] - new[1];
@@ -362,7 +435,7 @@ fn gpu_scorer_case(optimized: bool, intermediate: u32, gate_up: super::GateUpImp
             let base = search.base_buffer();
             apply_weights(&mut reference, &base);
             apply_weights(&mut gpu, &base);
-            let restored = compare(&mut reference, &mut gpu, ScoreMode::Fused);
+            let restored = compare_scorers(&mut reference, &mut gpu, &x, &y, ScoreMode::Fused);
             assert_eq!(
                 restored.1,
                 if force_accept {
@@ -371,59 +444,23 @@ fn gpu_scorer_case(optimized: bool, intermediate: u32, gate_up: super::GateUpImp
                     incumbent.1
                 }
             );
-            let expected = search.read_best().unwrap();
-            let mut offset = 0;
-            for parameter in &gpu.parameters {
-                let bits = unsafe {
-                    std::slice::from_raw_parts(
-                        parameter.buffer.contents().cast::<u16>(),
-                        parameter.elements,
-                    )
-                };
-                assert_eq!(bits, &expected[offset..offset + parameter.elements]);
-                offset += parameter.elements;
-            }
+            assert_restored(&gpu, &search);
         }
-        if optimized && intermediate == 6656 {
-            let ordinary = gpu.score_batch(&examples, ScoreMode::Fused).unwrap();
-            apply_weights(&mut gpu, &search.base_buffer());
-            let traced = gpu.score_batch_traced(&examples, ScoreMode::Fused).unwrap();
-            assert_eq!(ordinary.mean_nll, traced.score.mean_nll);
-            assert!(
-                traced
-                    .operations
-                    .iter()
-                    .any(|op| op.operation == "gate_up_weight_pack")
-            );
-            let operation = if gate_up == super::GateUpImplementation::FusedMetal {
-                "gate_up_glu"
-            } else {
-                "gate_up_gemm"
-            };
-            assert_eq!(
-                traced
-                    .operations
-                    .iter()
-                    .filter(|op| op.operation == operation)
-                    .count(),
-                2 * c.layers as usize
-            );
-        }
-
-        gpu.set_optimized(false).unwrap();
-        if optimized {
-            gpu.prefills.clear();
-            gpu.prepare_prefill(2, 64).unwrap();
-        }
-        let a = reference.score_batch(&examples, ScoreMode::Fused).unwrap();
-        let b = gpu.score_batch(&examples, ScoreMode::Fused).unwrap();
-        assert_eq!(a.mean_nll, b.mean_nll);
+        check_execution(
+            &mut reference,
+            &mut gpu,
+            &search,
+            &examples,
+            optimized,
+            intermediate,
+            gate_up,
+        );
     });
 }
 
 #[test]
-fn full_model_study_preserves_model_geometry() {
-    let config = super::bo::full_model_config();
+fn model_geometry() {
+    let config = super::bo::full_config();
     // memory() validates dimensions and counts parameters without allocating them.
     assert_eq!(config.memory().unwrap().parameters, 1_065_494_016);
     assert_eq!(config.width / config.heads, 96);
@@ -653,6 +690,23 @@ fn rotate(q: &mut [f64], heads: usize, position: usize, c: ModelConfig, round: b
 }
 
 // Independent dense f64 graph. No Metal kernels or production graph orchestration.
+fn reference_ffn(m: &Model, layer: &Layer, row: &mut [f64]) {
+    let c = m.config;
+    let d = c.width as usize;
+    let n = norm(row, &weights(m, layer.norm_ffn), c.epsilon as f64);
+    let gate = project(&weights(m, layer.gate), &n);
+    let up = project(&weights(m, layer.up), &n);
+    let hidden: Vec<_> = gate
+        .iter()
+        .zip(up)
+        .map(|(&g, u)| g / (1.0 + (-g).exp()) * u)
+        .collect();
+    let branch = project(&weights(m, layer.down), &hidden);
+    for i in 0..d {
+        row[i] += c.residual_scale as f64 * branch[i];
+    }
+}
+
 fn reference_stack(m: &Model, input: &[Vec<f64>]) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
     let c = m.config;
     let d = c.width as usize;
@@ -722,18 +776,7 @@ fn reference_stack(m: &Model, input: &[Vec<f64>]) -> (Vec<Vec<f64>>, Vec<Vec<f64
             for i in 0..d {
                 x[pos][i] += c.residual_scale as f64 * branch[i];
             }
-            let n = norm(&x[pos], &weights(m, layer.norm_ffn), c.epsilon as f64);
-            let gate = project(&weights(m, layer.gate), &n);
-            let up = project(&weights(m, layer.up), &n);
-            let hidden: Vec<_> = gate
-                .iter()
-                .zip(up)
-                .map(|(&g, u)| g / (1.0 + (-g).exp()) * u)
-                .collect();
-            let branch = project(&weights(m, layer.down), &hidden);
-            for i in 0..d {
-                x[pos][i] += c.residual_scale as f64 * branch[i];
-            }
+            reference_ffn(m, layer, &mut x[pos]);
         }
     }
     let states: Vec<_> = x

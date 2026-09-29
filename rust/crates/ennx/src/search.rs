@@ -178,14 +178,16 @@ impl Optimizer {
     }
 
     /// Evaluate a device row and advance state only after successful evaluation.
-    /// An evaluator error leaves the trial pending, so it can be retried.
-    pub fn evaluate<F>(&mut self, trial: Trial, evaluator: F) -> Result<f32, String>
-    where
-        F: FnOnce(DeviceView<'_>) -> Result<f32, String>,
-    {
-        let value = evaluator(self.device_view(trial)?)?;
-        self.observe(trial, value)?;
-        Ok(value)
+    /// An oracle error leaves the trial pending, so it can be retried.
+    pub fn evaluate<O: crate::traits::Oracle>(
+        &mut self,
+        trial: Trial,
+        oracle: &mut O,
+    ) -> Result<(bool, O::Evidence), String> {
+        let (observation, evidence) = oracle.observe(self.device_view(trial)?)?;
+        observation.validate()?;
+        let accepted = self.tell(trial, observation.control().mean)?;
+        Ok((accepted, evidence))
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "cuda"))]

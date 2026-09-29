@@ -1,0 +1,57 @@
+# Free-running 4096-token systems probe for a known-bad target-reconstruction
+# vector. It exists to falsify proxy behavior and is not a pretraining recipe.
+version = 2
+
+experiment = "pretrain"
+model = "fbt-pisa1-legacy-v1"
+corpus = "stack-v3-python-pilot-v1"
+
+[run]
+rounds = 100
+target-ms = 200
+
+[proposal]
+distribution = "rademacher"
+
+[enn]
+geometry = "latent"
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+
+[acquisition]
+method = "augmented-chebyshev"
+scales = [1.0, 1.0, 1.0]
+preferences = [1.0, 1.0, 1.0]
+alpha = 0.0
+seed-domain = "code-pretrain-objectives"
+
+[trust-region]
+method = "morbo"
+regions = 4
+rescalarize = "on-restart"
+clip = true
+shape = "tensor-family-learned"
+initial = 0.001
+min = 0.0005
+max = 0.1
+
+[generation]
+purpose = "systems-probe"
+initialization = "patterned"
+max-tokens = 4096
+temperature = 0.0
+corpus-prompt-tokens = 128
+
+[generation.verify]
+mode = "accepted-prefix"
+window = 128
+max-window = 1024
+passes = 2
+unroll = 2
+
+[generation.reward]
+kind = "code-objectives"
+critical-window = 128

@@ -3,15 +3,15 @@
 //! Maintains $M$ concurrent trust regions in contiguous array memory (SoA layout)
 //! for zero-allocation CPU SIMD operations and direct GPU buffer mirroring.
 
+use deser::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
 
 use crate::trust_region::{TRLengthConfig, TrustRegionError};
 
 /// Policy for sharing observations across multiple trust regions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
 pub enum SharingPolicy {
     /// Shared: all observations update every region whose bounds contain the point.
     Shared,
@@ -396,17 +396,7 @@ impl MultiTrustRegionState {
                 y_batch.len()
             )));
         }
-        if let Some(ids) = regions {
-            if ids.len() != n || ids.iter().any(|&r| r >= self.num_regions) {
-                return Err(TrustRegionError::InvalidParameter(
-                    "generating regions do not match the observation batch".to_string(),
-                ));
-            }
-        } else if self.config.sharing_policy == SharingPolicy::Independent {
-            return Err(TrustRegionError::InvalidParameter(
-                "independent sharing requires generating regions".to_string(),
-            ));
-        }
+        self.validate_regions(regions, n)?;
 
         for r in 0..self.num_regions {
             if !self.active_mask[r] {
@@ -466,6 +456,25 @@ impl MultiTrustRegionState {
             }
         }
 
+        Ok(())
+    }
+
+    fn validate_regions(
+        &self,
+        regions: Option<&[usize]>,
+        n: usize,
+    ) -> Result<(), TrustRegionError> {
+        if let Some(ids) = regions {
+            if ids.len() != n || ids.iter().any(|&r| r >= self.num_regions) {
+                return Err(TrustRegionError::InvalidParameter(
+                    "generating regions do not match the observation batch".to_string(),
+                ));
+            }
+        } else if self.config.sharing_policy == SharingPolicy::Independent {
+            return Err(TrustRegionError::InvalidParameter(
+                "independent sharing requires generating regions".to_string(),
+            ));
+        }
         Ok(())
     }
 

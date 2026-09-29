@@ -4,3 +4,8 @@ was 5e48f4df7da90d9f7958a5ef6d69951ed485e39e.
 
 Original portions are Copyright (c) 2025 yubo research.
 Subsequent modifications are Copyright (c) 2026 ENNX Contributors.
+
+The AUTO metric estimator, LOO gate, reservoir, PCG64 and SeedSequence code
+were ported from yubo-research/enn at commit
+506e98c506eeb849cffbf53d9ddf3a3a799c6830 (dsweet/more).
+ENNX adapts its APIs and index maintenance and adds resident Metal scoring.

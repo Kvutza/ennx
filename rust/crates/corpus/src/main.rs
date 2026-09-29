@@ -5,16 +5,13 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::{Duration, Instant};
 
 use arrow_array::{Array, BooleanArray, ListArray, RecordBatch, StringArray, StructArray};
-use futures::TryStreamExt;
-use opendal::{Operator, layers, services};
-use parquet::arrow::arrow_reader::{ArrowPredicateFn, RowFilter};
-use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask};
-use parquet::errors::ParquetError;
-use parquet_opendal::AsyncReader;
-use serde::{Deserialize, Serialize};
+use deser::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+mod reader;
+use reader::collect;
 type Counts = BTreeMap<String, BTreeMap<String, usize>>;
 const BUCKETS: [&str; 4] = ["implementation", "tests", "documentation", "configuration"];
 const SPLITS: [&str; 3] = ["train", "validation", "test"];
@@ -42,15 +39,13 @@ struct Document {
 struct Selection {
     documents: BTreeMap<String, BTreeMap<String, Vec<Document>>>,
     characters: Counts,
-    #[serde(skip)]
+    #[deser(skip)]
     seen: HashSet<String>,
 }
 
-fn split(repository: &str, commit: &str) -> usize {
+fn split(repository: &str) -> usize {
     let mut hash = Sha256::new();
     hash.update(repository);
-    hash.update([0]);
-    hash.update(commit);
     match u64::from_le_bytes(hash.finalize()[..8].try_into().unwrap()) % 20 {
         18 => 1,
         19 => 2,
@@ -124,7 +119,7 @@ fn eligible(batch: &RecordBatch, active: u16) -> Result<BooleanArray> {
                 !(metadata.is_valid(row) && forks.is_valid(row) && forks.value(row))
                     && repos.is_valid(row)
                     && commits.is_valid(row)
-                    && active & (15 << (4 * split(repos.value(row), commits.value(row)))) != 0,
+                    && active & (15 << (4 * split(repos.value(row)))) != 0,
             )
         })
         .collect())
@@ -132,7 +127,6 @@ fn eligible(batch: &RecordBatch, active: u16) -> Result<BooleanArray> {
 
 fn eligible_files(batch: &RecordBatch, active: u16) -> Result<BooleanArray> {
     let repos: &StringArray = column(batch, "repo_path")?;
-    let commits: &StringArray = column(batch, "commit_id")?;
     let lists: &ListArray = column(batch, "files")?;
     let files: &StructArray = typed(lists.values().as_ref())?;
     let paths: &StringArray = field(files, "file_path")?;
@@ -142,7 +136,7 @@ fn eligible_files(batch: &RecordBatch, active: u16) -> Result<BooleanArray> {
     let offsets = lists.value_offsets();
     Ok((0..batch.num_rows())
         .map(|row| {
-            let needed = active >> (4 * split(repos.value(row), commits.value(row)));
+            let needed = active >> (4 * split(repos.value(row)));
             Some(
                 lists.is_valid(row)
                     && (offsets[row] as usize..offsets[row + 1] as usize).any(|i| {
@@ -152,18 +146,19 @@ fn eligible_files(batch: &RecordBatch, active: u16) -> Result<BooleanArray> {
                             && licenses.value(i) == "permissive"
                             && paths.is_valid(i)
                             && languages.is_valid(i)
-                            && classify(paths.value(i), languages.value(i)).is_some_and(|bucket| {
-                                needed
-                                    & (1 << BUCKETS
-                                        .iter()
-                                        .position(|name| *name == bucket)
-                                        .unwrap())
-                                    != 0
-                            })
+                            && requested_bucket(paths.value(i), languages.value(i), needed)
                     }),
             )
         })
         .collect())
+}
+
+fn requested_bucket(path: &str, language: &str, needed: u16) -> bool {
+    let Some(bucket) = classify(path, language) else {
+        return false;
+    };
+    let bit = BUCKETS.iter().position(|name| *name == bucket).unwrap();
+    needed & (1 << bit) != 0
 }
 
 impl Selection {
@@ -195,17 +190,18 @@ impl Selection {
     }
 
     fn active(&self, targets: &Counts) -> u16 {
-        SPLITS.iter().enumerate().fold(0, |mask, (index, split)| {
-            mask | targets.get(*split).map_or(0, |buckets| {
-                BUCKETS.iter().enumerate().fold(0, |bits, (b, name)| {
-                    bits | if self.characters[*split][*name] < buckets[*name] {
-                        1 << (4 * index + b)
-                    } else {
-                        0
-                    }
-                })
-            })
-        })
+        let mut mask = 0;
+        for (index, split) in SPLITS.iter().enumerate() {
+            let Some(buckets) = targets.get(*split) else {
+                continue;
+            };
+            for (bucket, name) in BUCKETS.iter().enumerate() {
+                if self.characters[*split][*name] < buckets[*name] {
+                    mask |= 1 << (4 * index + bucket);
+                }
+            }
+        }
+        mask
     }
 
     fn accept(&mut self, batch: &RecordBatch, job: &Job) -> Result<()> {
@@ -222,7 +218,7 @@ impl Selection {
         for row in 0..batch.num_rows() {
             let repository = repos.value(row);
             let commit = commits.value(row);
-            let index = split(repository, commit);
+            let index = split(repository);
             let split = SPLITS[index];
             if self.active(&job.targets) & (15 << (4 * index)) == 0 || lists.is_null(row) {
                 continue;
@@ -297,7 +293,11 @@ impl Selection {
             .flat_map(|(split, buckets)| {
                 buckets.iter().filter_map(move |(bucket, target)| {
                     let left = target.saturating_sub(self.characters[split][bucket]);
-                    (left > 0).then(|| format!("{split}/{bucket}={left}"))
+                    if left > 0 {
+                        Some(format!("{split}/{bucket}={left}"))
+                    } else {
+                        None
+                    }
                 })
             })
             .collect();
@@ -314,126 +314,12 @@ impl Selection {
     }
 }
 
-async fn collect(job: Job) -> Result<Selection> {
-    if job.targets.is_empty()
-        || job.targets.iter().any(|(s, b)| {
-            !SPLITS.contains(&s.as_str())
-                || b.len() != BUCKETS.len()
-                || BUCKETS.iter().any(|name| !b.contains_key(*name))
-        })
-    {
-        return Err("invalid corpus split/bucket targets".into());
-    }
-    let operator = if job.root.starts_with("https://") || job.root.starts_with("http://") {
-        Operator::new(services::Http::default().endpoint(&job.root))?.finish()
-    } else {
-        Operator::new(services::Fs::default().root(&job.root))?.finish()
-    }
-    .layer(layers::TimeoutLayer::new().with_timeout(Duration::from_secs(60)))
-    .layer(layers::RetryLayer::new().with_max_times(3));
-    let mut selected = Selection::new(&job.targets);
-    let active = Arc::new(AtomicU16::new(selected.active(&job.targets)));
-    let started = Instant::now();
-    let mut reported = Instant::now();
-    for (index, path) in job.paths.iter().enumerate() {
-        if active.load(Ordering::Relaxed) == 0 {
-            break;
-        }
-        eprintln!(
-            "read | shard {}/{} | {}",
-            index + 1,
-            job.paths.len(),
-            path.rsplit('/').next().unwrap_or(path)
-        );
-        let length = operator.stat(path).await?.content_length();
-        let reader = operator
-            .reader_with(path)
-            .gap(512 * 1024)
-            .chunk(8 * 1024 * 1024)
-            .concurrent(4)
-            .await?;
-        let builder =
-            ParquetRecordBatchStreamBuilder::new(AsyncReader::new(reader, length)).await?;
-        let schema = builder.parquet_schema();
-        let projection = ProjectionMask::leaves(
-            schema,
-            schema.columns().iter().enumerate().filter_map(|(i, c)| {
-                let parts = c.path().parts();
-                let keep = match parts[0].as_str() {
-                    "repo_path" | "commit_id" => true,
-                    "github_metadata" => c.name() == "is_fork",
-                    "files" => [
-                        "file_path",
-                        "language",
-                        "license_type",
-                        "is_vendor",
-                        "content_id",
-                        "content",
-                    ]
-                    .contains(&c.name()),
-                    _ => false,
-                };
-                keep.then_some(i)
-            }),
-        );
-        let filter_mask = ProjectionMask::leaves(
-            schema,
-            schema.columns().iter().enumerate().filter_map(|(i, c)| {
-                (matches!(c.path().parts()[0].as_str(), "repo_path" | "commit_id")
-                    || (c.path().parts()[0] == "github_metadata" && c.name() == "is_fork"))
-                    .then_some(i)
-            }),
-        );
-        let mask = active.clone();
-        let file_mask = ProjectionMask::leaves(
-            schema,
-            schema.columns().iter().enumerate().filter_map(|(i, c)| {
-                (matches!(c.path().parts()[0].as_str(), "repo_path" | "commit_id")
-                    || (c.path().parts()[0] == "files"
-                        && ["file_path", "language", "license_type", "is_vendor"]
-                            .contains(&c.name())))
-                .then_some(i)
-            }),
-        );
-        let predicate = ArrowPredicateFn::new(filter_mask, move |batch| {
-            Ok(eligible(&batch, mask.load(Ordering::Relaxed))
-                .map_err(|e| ParquetError::General(e.to_string()))?)
-        });
-        let mask = active.clone();
-        let files = ArrowPredicateFn::new(file_mask, move |batch| {
-            Ok(eligible_files(&batch, mask.load(Ordering::Relaxed))
-                .map_err(|e| ParquetError::General(e.to_string()))?)
-        });
-        let mut stream = builder
-            .with_batch_size(64)
-            .with_projection(projection)
-            .with_row_filter(RowFilter::new(vec![Box::new(predicate), Box::new(files)]))
-            .build()?;
-        while let Some(batch) = stream.try_next().await? {
-            selected.accept(&batch, &job)?;
-            active.store(selected.active(&job.targets), Ordering::Relaxed);
-            if reported.elapsed() >= Duration::from_secs(5) {
-                selected.report(&job, started);
-                reported = Instant::now();
-            }
-            if active.load(Ordering::Relaxed) == 0 {
-                break;
-            }
-        }
-    }
-    selected.report(&job, started);
-    if selected.active(&job.targets) != 0 {
-        return Err("source exhausted before corpus quotas were met".into());
-    }
-    Ok(selected)
-}
-
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<()> {
-    let job = serde_json::from_reader(BufReader::new(io::stdin().lock()))?;
+    let job = ennx_wire::json::from_reader(BufReader::new(io::stdin().lock()))?;
     let selected = collect(job).await?;
     let mut output = BufWriter::new(io::stdout().lock());
-    serde_json::to_writer(&mut output, &selected)?;
+    ennx_wire::json::to_writer(&mut output, &selected)?;
     output.flush()?;
     Ok(())
 }

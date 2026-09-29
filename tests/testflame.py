@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import product
 import io
 import json
 import math
@@ -20,8 +21,13 @@ from ops.flame import checkpoint, model, reference
 from ops.flame.config import Config
 
 
-@pytest.mark.parametrize("command", ["checkpoint", "parity"])
-@pytest.mark.parametrize("flag", ["-h", "--help"])
+@pytest.mark.parametrize(
+    "flag,command",
+    [
+        (case_0, case_1)
+        for case_0, case_1 in product(["-h", "--help"], ["checkpoint", "parity"])
+    ],
+)
 def test_clihelp(command, flag):
     from ops.flame import parity
 
@@ -107,8 +113,10 @@ def example():
     return config, params, tokens
 
 
-@pytest.mark.parametrize("perturbed", [False, True])
-@pytest.mark.parametrize("bf16", [False, True])
+@pytest.mark.parametrize(
+    "bf16,perturbed",
+    [(case_0, case_1) for case_0, case_1 in product([False, True], [False, True])],
+)
 def test_forwardparity(example, perturbed, bf16):
     config, params, tokens = example
     if perturbed:
@@ -129,14 +137,11 @@ def test_forwardparity(example, perturbed, bf16):
         tp, torch.from_numpy(tokens).long(), config, capture=True
     )
     np.testing.assert_allclose(actual, expected.numpy(), atol=3e-6, rtol=3e-5)
-    for layer in taps:
-        for name, value in taps[layer].items():
-            if name == "experts":
-                np.testing.assert_array_equal(traces[layer][name], value.numpy())
-            else:
-                np.testing.assert_allclose(
-                    traces[layer][name], value.numpy(), atol=3e-6, rtol=3e-5
-                )
+    assert_taps(traces, taps)
+    assert_losses(config, tokens, actual, expected)
+
+
+def assert_losses(config, tokens, actual, expected):
     losses = model.token_loss(actual, jnp.asarray(tokens))
     expected_loss = torch.nn.functional.cross_entropy(
         expected[:, :-1].reshape(-1, config.vocab),
@@ -144,6 +149,19 @@ def test_forwardparity(example, perturbed, bf16):
         reduction="none",
     ).reshape(tokens.shape[0], -1)
     np.testing.assert_allclose(losses, expected_loss.numpy(), atol=1e-6, rtol=1e-6)
+
+
+def assert_taps(traces, taps):
+    for layer, values in taps.items():
+        assert_layer(traces[layer], values)
+
+
+def assert_layer(trace, taps):
+    for name, value in taps.items():
+        if name == "experts":
+            np.testing.assert_array_equal(trace[name], value.numpy())
+        else:
+            np.testing.assert_allclose(trace[name], value.numpy(), atol=3e-6, rtol=3e-5)
 
 
 def test_causal(example):
@@ -310,12 +328,16 @@ def test_ignoredrange(monkeypatch):
     source = checkpoint.Source()
     monkeypatch.setattr(source.session, "get", lambda *args, **kwargs: Response())
     try:
-        with pytest.raises(ValueError, match="honor"):
-            source.read("__0_0.distcp", 100, 10)
-        with pytest.raises(ValueError, match="shard name"):
-            source.read("../other")
+        assert_ignored(source)
     finally:
         source.close()
+
+
+def assert_ignored(source):
+    with pytest.raises(ValueError, match="honor"):
+        source.read("__0_0.distcp", 100, 10)
+    with pytest.raises(ValueError, match="shard name"):
+        source.read("../other")
 
 
 @pytest.mark.parametrize(

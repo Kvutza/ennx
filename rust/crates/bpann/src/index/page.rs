@@ -23,6 +23,64 @@ pub enum Page {
     },
 }
 
+fn write_vector(buf: &mut Vec<u8>, vector: &[f32], num_dim: usize) {
+    for index in 0..num_dim {
+        buf.extend_from_slice(&vector.get(index).copied().unwrap_or(0.0).to_le_bytes());
+    }
+}
+
+fn serialize_internal(
+    buf: &mut Vec<u8>,
+    page_id: u32,
+    centroids: &[Vec<f32>],
+    child_page_ids: &[u32],
+    num_dim: usize,
+) {
+    buf.push(0);
+    buf.extend_from_slice(&page_id.to_le_bytes());
+    buf.extend_from_slice(&(num_dim as u32).to_le_bytes());
+    buf.extend_from_slice(&(centroids.len() as u32).to_le_bytes());
+    for (&child_id, centroid) in child_page_ids.iter().zip(centroids) {
+        buf.extend_from_slice(&child_id.to_le_bytes());
+        write_vector(buf, centroid, num_dim);
+    }
+}
+
+fn serialize_leaf(
+    buf: &mut Vec<u8>,
+    page_id: u32,
+    row_ids: &[u32],
+    row_range: Option<(u32, u32)>,
+    vectors: &[Vec<f32>],
+    stored_centroid: Option<&[f32]>,
+    num_dim: usize,
+) {
+    if let Some((start, end)) = row_range {
+        buf.push(3);
+        buf.extend_from_slice(&page_id.to_le_bytes());
+        buf.extend_from_slice(&(num_dim as u32).to_le_bytes());
+        buf.extend_from_slice(&start.to_le_bytes());
+        buf.extend_from_slice(&end.to_le_bytes());
+        write_vector(buf, stored_centroid.unwrap_or(&[]), num_dim);
+        return;
+    }
+    buf.push(if vectors.is_empty() { 2 } else { 1 });
+    buf.extend_from_slice(&page_id.to_le_bytes());
+    buf.extend_from_slice(&(num_dim as u32).to_le_bytes());
+    buf.extend_from_slice(&(row_ids.len() as u32).to_le_bytes());
+    if vectors.is_empty() {
+        for row_id in row_ids {
+            buf.extend_from_slice(&row_id.to_le_bytes());
+        }
+        write_vector(buf, stored_centroid.unwrap_or(&[]), num_dim);
+        return;
+    }
+    for (&row_id, vector) in row_ids.iter().zip(vectors) {
+        buf.extend_from_slice(&row_id.to_le_bytes());
+        write_vector(buf, vector, num_dim);
+    }
+}
+
 impl Page {
     /// Empty (mmap-backed) leaf over a contiguous row span.
     pub fn empty_leaf(page_id: u32, start: u32, end: u32, centroid: Vec<f32>) -> Self {
@@ -83,76 +141,28 @@ impl Page {
     }
 
     pub fn serialize(&self, num_dim: usize) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&PAGE_MAGIC.to_le_bytes());
+        let mut buf = PAGE_MAGIC.to_le_bytes().to_vec();
         match self {
             Page::Internal {
                 page_id,
                 centroids,
                 child_page_ids,
-            } => {
-                buf.push(0u8);
-                buf.extend_from_slice(&page_id.to_le_bytes());
-                buf.extend_from_slice(&(num_dim as u32).to_le_bytes());
-                buf.extend_from_slice(&(centroids.len() as u32).to_le_bytes());
-                for (&child_id, centroid) in child_page_ids.iter().zip(centroids.iter()) {
-                    buf.extend_from_slice(&child_id.to_le_bytes());
-                    for j in 0..num_dim {
-                        buf.extend_from_slice(
-                            &centroid.get(j).copied().unwrap_or(0.0).to_le_bytes(),
-                        );
-                    }
-                }
-            }
+            } => serialize_internal(&mut buf, *page_id, centroids, child_page_ids, num_dim),
             Page::Leaf {
                 page_id,
                 row_ids,
                 row_range,
                 vectors,
                 stored_centroid,
-            } => {
-                if let Some((start, end)) = row_range {
-                    // Kind 3: contiguous empty range leaf (no per-row id list).
-                    buf.push(3u8);
-                    buf.extend_from_slice(&page_id.to_le_bytes());
-                    buf.extend_from_slice(&(num_dim as u32).to_le_bytes());
-                    buf.extend_from_slice(&start.to_le_bytes());
-                    buf.extend_from_slice(&end.to_le_bytes());
-                    let centroid = stored_centroid.as_deref().unwrap_or(&[]);
-                    for j in 0..num_dim {
-                        buf.extend_from_slice(
-                            &centroid.get(j).copied().unwrap_or(0.0).to_le_bytes(),
-                        );
-                    }
-                    return buf;
-                }
-                if vectors.is_empty() {
-                    buf.push(2u8);
-                    buf.extend_from_slice(&page_id.to_le_bytes());
-                    buf.extend_from_slice(&(num_dim as u32).to_le_bytes());
-                    buf.extend_from_slice(&(row_ids.len() as u32).to_le_bytes());
-                    for &row_id in row_ids {
-                        buf.extend_from_slice(&row_id.to_le_bytes());
-                    }
-                    let centroid = stored_centroid.as_deref().unwrap_or(&[]);
-                    for j in 0..num_dim {
-                        buf.extend_from_slice(
-                            &centroid.get(j).copied().unwrap_or(0.0).to_le_bytes(),
-                        );
-                    }
-                    return buf;
-                }
-                buf.push(1u8);
-                buf.extend_from_slice(&page_id.to_le_bytes());
-                buf.extend_from_slice(&(num_dim as u32).to_le_bytes());
-                buf.extend_from_slice(&(row_ids.len() as u32).to_le_bytes());
-                for (&row_id, vector) in row_ids.iter().zip(vectors.iter()) {
-                    buf.extend_from_slice(&row_id.to_le_bytes());
-                    for j in 0..num_dim {
-                        buf.extend_from_slice(&vector.get(j).copied().unwrap_or(0.0).to_le_bytes());
-                    }
-                }
-            }
+            } => serialize_leaf(
+                &mut buf,
+                *page_id,
+                row_ids,
+                *row_range,
+                vectors,
+                stored_centroid.as_deref(),
+                num_dim,
+            ),
         }
         buf
     }

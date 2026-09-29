@@ -110,6 +110,7 @@ cuda_oxide(
     ennx = "//rust/crates/ennx:ennx-source",
     python = "//rust/crates/ennx-py:python-source",
     modal = "//rust/crates/modal-runner:modal-source",
+    ptx = "//rust/crates/ptx-synth:ptx-source",
     cuda = "//cuda:source",
     parity = "ops/bf16_parity.py",
 )

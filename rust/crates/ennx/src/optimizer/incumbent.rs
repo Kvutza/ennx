@@ -59,40 +59,7 @@ impl Optimizer {
         }
 
         if self.tr_state.is_morbo() {
-            let n_cand = candidate_indices.len();
-            let mut y_rows = Array2::zeros((n_cand, self.tr_state.num_metrics()));
-            for (r, &idx) in candidate_indices.iter().enumerate() {
-                let y_row = self.obs_access().y_row(idx)?;
-                for m in 0..y_rows.ncols() {
-                    y_rows[[r, m]] = y_row[m];
-                }
-            }
-            if self
-                .tr_state
-                .morbo()
-                .map(|m| m.noise_aware())
-                .unwrap_or(false)
-            {
-                if let Some(surrogate) = self.surrogate.as_ref() {
-                    let mut x_cand = Array2::zeros((n_cand, self.num_dim));
-                    for (r, &idx) in candidate_indices.iter().enumerate() {
-                        let x_row = self.obs_access().x_row(idx)?;
-                        for d in 0..self.num_dim {
-                            x_cand[[r, d]] = x_row[d];
-                        }
-                    }
-                    y_rows = surrogate.predict(&x_cand.view())?.mu;
-                }
-            }
-            let scores = self
-                .tr_state
-                .morbo_scalarize(&y_rows.view(), true)
-                .map_err(|e| ENNError::InvalidParameter(e.to_string()))?;
-            let best_pos = argmax_tie(scores.as_slice().unwrap_or(&[]), rng);
-            let best_idx = candidate_indices[best_pos];
-            self.incumbent_idx = Some(best_idx);
-            self.unit_incumbent = Some(self.obs_access().x_row(best_idx)?);
-            self.y_scalar = Some(y_rows.row(best_pos).to_owned());
+            self.pick_morbo(&candidate_indices, rng)?;
             return Ok(());
         }
 
@@ -102,12 +69,7 @@ impl Optimizer {
 
         let best_idx = candidate_indices
             .into_iter()
-            .max_by(|&a, &b| {
-                self.obs_access()
-                    .y_row(a)
-                    .and_then(|ya| self.obs_access().y_row(b).map(|yb| ya[0].total_cmp(&yb[0])))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+            .max_by(|&a, &b| self.compare_incumbents(a, b))
             .ok_or_else(|| ENNError::InvalidParameter("No incumbent candidates".to_string()))?;
 
         self.incumbent_idx = Some(best_idx);
@@ -115,5 +77,54 @@ impl Optimizer {
         self.y_scalar = Some(self.obs_access().y_row(best_idx)?);
 
         Ok(())
+    }
+
+    fn pick_morbo(
+        &mut self,
+        candidate_indices: &[usize],
+        rng: &mut dyn RngCore,
+    ) -> Result<(), ENNError> {
+        let n_cand = candidate_indices.len();
+        let mut y_rows = Array2::zeros((n_cand, self.tr_state.num_metrics()));
+        for (r, &idx) in candidate_indices.iter().enumerate() {
+            let y_row = self.obs_access().y_row(idx)?;
+            for m in 0..y_rows.ncols() {
+                y_rows[[r, m]] = y_row[m];
+            }
+        }
+        if self
+            .tr_state
+            .morbo()
+            .map(|m| m.noise_aware())
+            .unwrap_or(false)
+        {
+            if let Some(surrogate) = self.surrogate.as_ref() {
+                let mut x_cand = Array2::zeros((n_cand, self.num_dim));
+                for (r, &idx) in candidate_indices.iter().enumerate() {
+                    let x_row = self.obs_access().x_row(idx)?;
+                    for d in 0..self.num_dim {
+                        x_cand[[r, d]] = x_row[d];
+                    }
+                }
+                y_rows = surrogate.predict(&x_cand.view())?.mu;
+            }
+        }
+        let scores = self
+            .tr_state
+            .morbo_scalarize(&y_rows.view(), true)
+            .map_err(|e| ENNError::InvalidParameter(e.to_string()))?;
+        let best_pos = argmax_tie(scores.as_slice().unwrap_or(&[]), rng);
+        let best_idx = candidate_indices[best_pos];
+        self.incumbent_idx = Some(best_idx);
+        self.unit_incumbent = Some(self.obs_access().x_row(best_idx)?);
+        self.y_scalar = Some(y_rows.row(best_pos).to_owned());
+        Ok(())
+    }
+
+    fn compare_incumbents(&self, a: usize, b: usize) -> std::cmp::Ordering {
+        self.obs_access()
+            .y_row(a)
+            .and_then(|ya| self.obs_access().y_row(b).map(|yb| ya[0].total_cmp(&yb[0])))
+            .unwrap_or(std::cmp::Ordering::Equal)
     }
 }

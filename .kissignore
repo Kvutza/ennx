@@ -26,6 +26,21 @@ rust/crates/ennx/src/forward_program.rs
 # This is the Metal-specific implementation of that resident contract. It is
 # exercised through the native Metal parity and Buck integration gates.
 rust/crates/ennx/src/forward_metal.rs
+# These resident Metal command encoders bind one complete GPU graph. Their
+# local breadth mirrors the shader ABI and resource lifetime; accelerator
+# parity tests, not helper-count reductions, guard this boundary.
+rust/crates/ennx/src/bf16_metal/bounds.rs
+rust/crates/ennx/src/bf16_metal/dispatch.rs
+rust/crates/ennx/src/bf16_metal/initialization.rs
+rust/crates/ennx/src/bf16_metal/publication.rs
+rust/crates/ennx/src/bf16_metal/selection.rs
+rust/crates/ennx/src/qwen_metal/checkpoint.rs
+rust/crates/ennx/src/qwen_metal/decode.rs
+rust/crates/ennx/src/qwen_metal/generation.rs
+rust/crates/ennx/src/qwen_metal/loss.rs
+rust/crates/ennx/src/qwen_metal/prefill.rs
+rust/crates/ennx/src/qwen_metal/setup.rs
+rust/crates/ennx/src/qwen_metal/shapes.rs
 # The Metal parity benchmark deliberately owns its fixtures so it can be built
 # independently by Buck; KISS's duplicate/size rules are not actionable here.
 buck2/tests/metal.rs

@@ -1,37 +1,19 @@
-load("//buck2:reindeer_rules.bzl", "app_rust_binary")
+load("//buck2:ennx_targets.bzl", "ennx_program_targets")
+load("//build:targets.bzl", "DEV_CLI_CRATES", "DEV_CLI_PROGRAMS", "RUST_EDITION")
 
-app_rust_binary(
-    name = "ennx",
-    srcs = glob(["src/**/*.rs"]),
-    crate = "dev_cli",
-    crate_root = "src/main.rs",
-    edition = "2024",
-    deps = [
-        "//rust:clap",
-        "//rust/crates/ennx:ennx",
-        "//rust:ndarray",
-        "//rust:rand",
-        "//rust:serde",
-        "//rust:serde_json",
-        "//rust:toml",
-    ],
-    visibility = ["PUBLIC"],
-)
+ennx_program_targets(DEV_CLI_PROGRAMS, RUST_EDITION, glob(["src/**/*.rs"]))
 
 rust_test(
     name = "ennx-test",
     srcs = glob(["src/**/*.rs"]),
     crate = "dev_cli_test",
-    crate_root = "src/main.rs",
-    edition = "2024",
-    deps = [
-        "//rust:clap",
+    crate_root = [program["root"] for program in DEV_CLI_PROGRAMS if program["name"] == "ennx"][0],
+    env = {"CARGO_PKG_VERSION": [program["version"] for program in DEV_CLI_PROGRAMS if program["name"] == "ennx"][0]},
+    edition = RUST_EDITION,
+    deps = ["//rust:" + crate for crate in DEV_CLI_CRATES] + [
         "//rust/crates/ennx:ennx",
-        "//rust:ndarray",
-        "//rust:rand",
-        "//rust:serde",
-        "//rust:serde_json",
-        "//rust:toml",
+        "//rust/crates/wire:wire",
+        "//rust/crates/ptx-synth:ptx-synth",
     ],
     visibility = ["//buck2/tests:all"],
 )

@@ -1,0 +1,26 @@
+load("//buck2:reindeer_rules.bzl", "app_rust_binary", "app_rust_library")
+
+app_rust_library(
+    name = "ptx-synth",
+    srcs = glob(["src/**/*.rs"], exclude = ["src/main.rs"]),
+    crate = "ptx_synth",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    visibility = ["PUBLIC"],
+    deps = [],
+)
+
+app_rust_binary(
+    name = "ptx-synth-bin",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    edition = "2021",
+    visibility = ["PUBLIC"],
+    deps = [":ptx-synth"],
+)
+
+filegroup(
+    name = "ptx-source",
+    srcs = glob(["src/**/*.rs"]) + ["Cargo.toml"],
+    visibility = ["PUBLIC"],
+)

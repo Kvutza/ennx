@@ -17,6 +17,10 @@ type InitStats = (
 );
 
 mod access;
+mod inspection;
+mod metric;
+#[cfg(test)]
+mod metric_tests;
 pub use access::{EnnIndexAccess, EnnRowAccess};
 
 #[derive(Debug, Clone)]
@@ -56,6 +60,7 @@ pub struct ENN {
     x_sum: Array1<f64>,
     x_sumsq: Array1<f64>,
     work_dir: Option<PathBuf>,
+    metric: Option<crate::metric_auto::AutoMetric>,
 }
 
 impl ENN {
@@ -178,20 +183,7 @@ impl ENN {
         };
         crate::y_bounds::validate_bounds(&y_bounds, train_y.ncols())?;
         let bounded_outputs = !crate::y_bounds::identity_bounds(&y_bounds);
-        let (train_y, train_yvar) = if !bounded_outputs {
-            (train_y, train_yvar)
-        } else {
-            let warped_y = crate::y_bounds::warp_y(train_y.view(), &y_bounds)?;
-            let warped_yvar = match train_yvar {
-                Some(yv) => Some(crate::y_bounds::warp_yvar(
-                    train_y.view(),
-                    yv.view(),
-                    &y_bounds,
-                )?),
-                None => None,
-            };
-            (warped_y, warped_yvar)
-        };
+        let (train_y, train_yvar) = warp_training(train_y, train_yvar, &y_bounds, bounded_outputs)?;
         if scale_x && disk_driver(driver) {
             return Err(ENNError::InvalidParameter(
                 "scale_x=True is not compatible with BPANN_DISK".to_string(),
@@ -242,6 +234,7 @@ impl ENN {
         };
 
         let mut model = Self {
+            metric: None,
             backend,
             num_obs,
             num_dim,
@@ -281,7 +274,14 @@ impl ENN {
             work_dir,
             soft_threshold,
         )?;
-        Ok(Self {
+        let y_bounds = stored_work_dir
+            .as_ref()
+            .map(|dir| crate::y_bounds::load_metadata(dir, num_metrics))
+            .transpose()?
+            .flatten()
+            .unwrap_or_else(|| crate::y_bounds::unbounded_bounds(num_metrics));
+        let mut model = Self {
+            metric: None,
             backend,
             num_obs: 0,
             num_dim,
@@ -289,14 +289,18 @@ impl ENN {
             scale_x: false,
             x_scale: Array1::ones(num_dim),
             y_scale: Array1::ones(num_metrics),
-            y_bounds: crate::y_bounds::unbounded_bounds(num_metrics),
-            bounded_outputs: false,
+            bounded_outputs: !crate::y_bounds::identity_bounds(&y_bounds),
+            y_bounds,
             y_sum: Array1::zeros(num_metrics),
             y_sumsq: Array1::zeros(num_metrics),
             x_sum: Array1::zeros(num_dim),
             x_sumsq: Array1::zeros(num_dim),
             work_dir: stored_work_dir,
-        })
+        };
+        if model.backend.len() != 0 {
+            sync_backend(&mut model)?;
+        }
+        Ok(model)
     }
 
     fn validate_add(
@@ -342,6 +346,11 @@ impl ENN {
         if let Some(err) = self.validate_add(x, y, yvar) {
             return Err(err);
         }
+        if self.metric.is_some() && x.iter().chain(y.iter()).any(|v| !v.is_finite()) {
+            return Err(ENNError::InvalidParameter(
+                "AUTO metric needs finite observation rows".into(),
+            ));
+        }
         if x.nrows() > 0 {
             self.backend.wait_flush()?;
             if self.bounded_outputs {
@@ -360,13 +369,14 @@ impl ENN {
             let n = self.backend.len();
             self.y_scale = scale_moments(n, self.num_metrics, &self.y_sum, &self.y_sumsq, 0.0);
 
-            if self.scale_x {
+            if self.scale_x && self.metric.is_none() {
                 accumulate_columns(&mut self.x_sum, &mut self.x_sumsq, x.view());
                 self.x_scale = scale_moments(n, self.num_dim, &self.x_sum, &self.x_sumsq, 1e-12);
                 self.backend.mark_stale();
             }
 
             self.num_obs = n;
+            self.observe_metric(x, y)?;
         }
         Ok(())
     }
@@ -380,26 +390,6 @@ impl ENN {
     pub fn persist_index(&self) -> Result<(), ENNError> {
         crate::backend::enn_index(&self.backend)?;
         self.y_metadata()
-    }
-
-    pub fn len(&self) -> usize {
-        self.num_obs
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.num_obs == 0
-    }
-
-    pub fn num_outputs(&self) -> usize {
-        self.num_metrics
-    }
-
-    pub fn y_bounds(&self) -> &Array2<f64> {
-        &self.y_bounds
-    }
-
-    pub fn bounded_outputs(&self) -> bool {
-        self.bounded_outputs
     }
 
     pub fn natural_rows(
@@ -486,34 +476,6 @@ impl ENN {
         Ok(result)
     }
 
-    pub(crate) fn output_scale(&self) -> &Array1<f64> {
-        &self.y_scale
-    }
-
-    pub fn x_scale(&self) -> Array2<f64> {
-        self.x_scale.clone().insert_axis(ndarray::Axis(0))
-    }
-
-    pub fn y_scale(&self) -> Array2<f64> {
-        self.y_scale.clone().insert_axis(ndarray::Axis(0))
-    }
-
-    pub(crate) fn num_obs(&self) -> usize {
-        self.num_obs
-    }
-
-    pub fn num_dim(&self) -> usize {
-        self.num_dim
-    }
-
-    pub fn num_metrics(&self) -> usize {
-        self.num_metrics
-    }
-
-    pub fn has_yvar(&self) -> bool {
-        self.num_obs > 0 && self.rows().row_yvar(0).ok().flatten().is_some()
-    }
-
     pub(crate) fn backend_driver(&self) -> IndexDriver {
         self.backend.driver()
     }
@@ -537,6 +499,29 @@ impl ENN {
         }
         self.backend.search(x, search_k, exclude_nearest)
     }
+}
+
+fn warp_training(
+    train_y: Array2<f64>,
+    train_yvar: Option<Array2<f64>>,
+    y_bounds: &Array2<f64>,
+    bounded_outputs: bool,
+) -> Result<(Array2<f64>, Option<Array2<f64>>), ENNError> {
+    let result = if !bounded_outputs {
+        (train_y, train_yvar)
+    } else {
+        let warped_y = crate::y_bounds::warp_y(train_y.view(), y_bounds)?;
+        let warped_yvar = match train_yvar {
+            Some(yv) => Some(crate::y_bounds::warp_yvar(
+                train_y.view(),
+                yv.view(),
+                y_bounds,
+            )?),
+            None => None,
+        };
+        (warped_y, warped_yvar)
+    };
+    Ok(result)
 }
 
 /// Rebuild observation count and scale moments from persisted backend rows (disk reopen).

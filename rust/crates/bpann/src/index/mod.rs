@@ -1,5 +1,6 @@
 pub mod build;
 pub mod kmeans;
+mod metric;
 pub mod page;
 pub mod persist_atomic;
 pub mod search;

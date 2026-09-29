@@ -1,5 +1,17 @@
 load("//buck2:reindeer_rules.bzl", "app_rust_binary", "app_rust_library")
+load("//buck2:ennx_targets.bzl", "ennx_program_targets")
 load("//buck2/tests:suite.bzl", "test_suite")
+load("//build:targets.bzl", "ENNX_CRATES", "ENNX_PROGRAMS", "ENNX_TEST_CRATES", "RUST_EDITION")
+
+ENNX_BUCK_DEPS = ["//rust:" + crate for crate in ENNX_CRATES] + [
+    "//rust/crates/bpann:bpann",
+    "//rust/crates/wire:wire",
+]
+
+ENNX_BUCK_TEST_DEPS = ["//rust:" + crate for crate in ENNX_TEST_CRATES] + [
+    "//rust/crates/bpann:bpann",
+    "//rust/crates/wire:wire",
+]
 
 cxx_binary(
     name = "region-arithmetic",
@@ -24,25 +36,12 @@ rust_test(
     ]) + ["//examples/tuning:turbo-enn.toml"],
     crate = "ennx",
     crate_root = "src/lib.rs",
-    edition = "2024",
+    edition = RUST_EDITION,
     features = ["buck2-test-data", "opencl", "usearch-native"],
     visibility = ["PUBLIC"],
-    deps = [
+    deps = ENNX_BUCK_TEST_DEPS + [
         "//rust:opencl3",
         ":usearch-bridge",
-        "//rust/crates/bpann:bpann",
-        "//rust:memmap2",
-        "//rust:ndarray",
-        "//rust:rand",
-        "//rust:rand_chacha",
-        "//rust:rand_distr",
-        "//rust:rayon",
-        "//rust:serde",
-        "//rust:serde_json",
-        "//rust:sobol",
-        "//rust:tempfile",
-        "//rust:thiserror",
-        "//rust:toml",
     ] + select({
         "//:linux-arm64": [],
         "//:linux-x86_64": [],
@@ -104,26 +103,15 @@ app_rust_library(
     ]),
     crate = "ennx",
     crate_root = "src/lib.rs",
-    edition = "2024",
+    edition = RUST_EDITION,
     features = select({
         "//:linux-arm64": ["opencl", "usearch-native"],
         "//:linux-x86_64": ["opencl", "usearch-native"],
         "//:macos-arm64": ["metal", "usearch-native"],
     }),
     visibility = ["PUBLIC"],
-    deps = [
+    deps = ENNX_BUCK_DEPS + [
         ":usearch-bridge",
-        "//rust/crates/bpann:bpann",
-        "//rust:memmap2",
-        "//rust:ndarray",
-        "//rust:rand",
-        "//rust:rand_distr",
-        "//rust:rayon",
-        "//rust:serde",
-        "//rust:serde_json",
-        "//rust:sobol",
-        "//rust:thiserror",
-        "//rust:toml",
     ] + select({
         "//:linux-arm64": ["//rust:opencl3"],
         "//:linux-x86_64": ["//rust:opencl3"],
@@ -140,28 +128,15 @@ rust_test(
     ]) + ["//examples/tuning:turbo-enn.toml"],
     crate = "ennx",
     crate_root = "src/lib.rs",
-    edition = "2024",
+    edition = RUST_EDITION,
     features = select({
         "//:linux-arm64": ["buck2-test-data", "opencl", "usearch-native"],
         "//:linux-x86_64": ["buck2-test-data", "opencl", "usearch-native"],
         "//:macos-arm64": ["buck2-test-data", "metal", "usearch-native"],
     }),
     visibility = ["//buck2/tests:all"],
-    deps = [
+    deps = ENNX_BUCK_TEST_DEPS + [
         ":usearch-bridge",
-        "//rust/crates/bpann:bpann",
-        "//rust:memmap2",
-        "//rust:ndarray",
-        "//rust:rand",
-        "//rust:rand_chacha",
-        "//rust:rand_distr",
-        "//rust:rayon",
-        "//rust:serde",
-        "//rust:serde_json",
-        "//rust:sobol",
-        "//rust:tempfile",
-        "//rust:thiserror",
-        "//rust:toml",
     ] + select({
         "//:linux-arm64": ["//rust:opencl3"],
         "//:linux-x86_64": ["//rust:opencl3"],
@@ -190,93 +165,19 @@ app_rust_library(
     ]),
     crate = "ennx",
     crate_root = "src/lib.rs",
-    edition = "2024",
+    edition = RUST_EDITION,
     features = [
         "metal",
         "usearch-native",
     ],
-    deps = [
+    deps = ENNX_BUCK_DEPS + [
         ":usearch-bridge",
-        "//rust/crates/bpann:bpann",
-        "//rust:memmap2",
-        "//rust:ndarray",
-        "//rust:rand",
-        "//rust:rand_distr",
-        "//rust:rayon",
-        "//rust:serde",
-        "//rust:sobol",
-        "//rust:thiserror",
-        "//rust:toml",
         "//rust:metal",
     ],
     target_compatible_with = ["prelude//os/constraints:macos"],
 )
 
-app_rust_binary(
-    name = "posterior_frontier",
-    srcs = ["examples/posterior_frontier.rs"],
-    crate = "posterior_frontier",
-    crate_root = "examples/posterior_frontier.rs",
-    edition = "2024",
-    deps = [
-        ":ennx",
-        "//rust:ndarray",
-    ] + select({
-        "//:macos-arm64": ["//buck2/native:openmp-macos"],
-        "DEFAULT": [],
-    }),
-    rpath = True,
-    runtime_dependency_handling = "symlink",
-    rustc_flags = select({
-        "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
-        ],
-        "DEFAULT": [],
-    }),
-)
-
-app_rust_binary(
-    name = "trial_bench",
-    srcs = ["examples/trial_bench.rs"],
-    crate = "trial_bench",
-    crate_root = "examples/trial_bench.rs",
-    edition = "2024",
-    deps = [":ennx"] + select({
-        "//:macos-arm64": ["//buck2/native:openmp-macos"],
-        "DEFAULT": [],
-    }),
-    rpath = True,
-    runtime_dependency_handling = "symlink",
-    rustc_flags = select({
-        "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
-        ],
-        "DEFAULT": [],
-    }),
-)
-
-app_rust_binary(
-    name = "knn_frontier",
-    srcs = ["examples/knn_frontier.rs"],
-    crate = "knn_frontier",
-    crate_root = "examples/knn_frontier.rs",
-    edition = "2024",
-    deps = [
-        ":ennx_bench",
-        "//rust:ndarray",
-    ] + select({
-        "//:macos-arm64": ["//buck2/native:openmp-macos"],
-        "DEFAULT": [],
-    }),
-    rpath = True,
-    runtime_dependency_handling = "symlink",
-    rustc_flags = select({
-        "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
-        ],
-        "DEFAULT": [],
-    }),
-)
+ennx_program_targets(ENNX_PROGRAMS, RUST_EDITION, glob(["src/**/*.rs", "examples/**/*.rs"]))
 
 # Each integration crate receives the same platform features as the library.
 [
@@ -288,7 +189,7 @@ app_rust_binary(
             "src/**/*.rs",
         ]),
         crate_root = source,
-        edition = "2024",
+        edition = RUST_EDITION,
         features = select({
             "//:macos-arm64": ["metal", "usearch-native"],
             "DEFAULT": ["opencl", "usearch-native"],
@@ -298,7 +199,7 @@ app_rust_binary(
             "//rust:ndarray",
             "//rust:rand",
             "//rust:rand_chacha",
-            "//rust:serde_json",
+            "//rust/crates/wire:wire",
             "//rust:tempfile",
         ] + select({
             "//:macos-arm64": ["//buck2/native:openmp-macos", "//rust:metal"],
@@ -333,32 +234,12 @@ test_suite(
     visibility = ["//buck2/tests:all"],
 )
 
-app_rust_binary(
-    name = "turbo-enn",
-    srcs = ["src/turbo_enn.rs", "src/tune_output.rs"],
-    crate = "turbo_enn",
-    crate_root = "src/turbo_enn.rs",
-    edition = "2024",
-    deps = [":ennx", "//rust:anstream", "//rust:anstyle"],
-    visibility = ["PUBLIC"],
-)
-
-app_rust_binary(
-    name = "turbo-enn-worker",
-    srcs = ["src/turbo_enn_worker.rs"],
-    crate = "turbo_enn_worker",
-    crate_root = "src/turbo_enn_worker.rs",
-    edition = "2024",
-    deps = [":ennx"],
-    visibility = ["PUBLIC"],
-)
-
 rust_test(
     name = "turbo-enn-test",
-    srcs = ["src/turbo_enn.rs", "src/tune_output.rs"],
+    srcs = glob(["src/bin/turbo-enn/**/*.rs"]),
     crate = "turbo_enn_test",
-    crate_root = "src/turbo_enn.rs",
-    edition = "2024",
+    crate_root = [program["root"] for program in ENNX_PROGRAMS if program["name"] == "turbo-enn"][0],
+    edition = RUST_EDITION,
     deps = [":ennx", "//rust:anstream", "//rust:anstyle", "//rust:tempfile"],
     visibility = ["//buck2/tests:all"],
 )

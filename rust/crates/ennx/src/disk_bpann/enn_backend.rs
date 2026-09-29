@@ -27,9 +27,9 @@ fn apply_threshold(inner: BpannBackend) -> BpannBackend {
 }
 
 pub struct DiskBpannEnnBackend {
-    inner: BpannBackend,
-    driver: IndexDriver,
-    num_metrics: usize,
+    pub(super) inner: BpannBackend,
+    pub(super) driver: IndexDriver,
+    pub(super) num_metrics: usize,
 }
 
 impl DiskBpannEnnBackend {
@@ -82,31 +82,6 @@ impl DiskBpannEnnBackend {
         })
     }
 
-    pub fn driver(&self) -> IndexDriver {
-        self.driver
-    }
-
-    #[allow(clippy::len_without_is_empty)]
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    pub fn num_dim(&self) -> usize {
-        self.inner.num_dim()
-    }
-
-    pub fn num_metrics(&self) -> usize {
-        self.num_metrics
-    }
-
-    pub fn defers_search(&self) -> bool {
-        true
-    }
-
-    pub fn index_stale(&self) -> bool {
-        false
-    }
-
     pub fn mark_stale(&mut self) {
         self.inner.mark_stale();
     }
@@ -126,6 +101,14 @@ impl DiskBpannEnnBackend {
 
     pub fn ensure_sync(&mut self, scale_x: bool, x_scale: &Array1<f64>) -> Result<(), ENNError> {
         self.inner.ensure_scale(scale_x, x_scale).map_err(bpann_err)
+    }
+
+    pub(crate) fn set_metric(
+        &mut self,
+        scale: &Array1<f64>,
+        rebuild: bool,
+    ) -> Result<(), ENNError> {
+        self.inner.set_metric(scale, rebuild).map_err(bpann_err)
     }
 
     pub fn release_pages(&mut self) -> Result<(), ENNError> {

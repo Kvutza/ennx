@@ -33,8 +33,11 @@ from typing import Iterable
 
 
 SKIP_PARTS = {
+    ".cache",
     ".git",
     ".home",
+    ".kiss",
+    ".malvin",
     ".pixi",
     ".mypy_cache",
     ".pytest_cache",
@@ -43,6 +46,7 @@ SKIP_PARTS = {
     "__pycache__",
     "buck-out",
     "dist",
+    "ptx-synth",
     "target",
 }
 
@@ -281,8 +285,7 @@ def rust_findings(
     return findings
 
 
-def _overrides(tree: ast.AST) -> set[int]:
-    """External interfaces own their method names, not ENNX's naming policy."""
+def ext_names(tree: ast.AST) -> tuple[set[str], set[str]]:
     imports, markers = set(), set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and not node.level:
@@ -298,6 +301,12 @@ def _overrides(tree: ast.AST) -> set[int]:
             imports.update(
                 alias.asname or alias.name.split(".")[0] for alias in node.names
             )
+    return imports, markers
+
+
+def _overrides(tree: ast.AST) -> set[int]:
+    """External interfaces own their method names, not ENNX's naming policy."""
+    imports, markers = ext_names(tree)
     methods = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):

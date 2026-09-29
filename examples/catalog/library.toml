@@ -1,0 +1,405 @@
+version = 1
+scope = "Algorithm and implementation choices across ENNX, grouped by execution family."
+checked = "2026-10-03"
+
+[[family]]
+id = "vector"
+entry = "Rust optimizer_factory / Python turbo.config.factory"
+contract = "Bounded ordinary coordinate vectors; scalar or vector observations; ask/tell."
+gap = "TuneSpec does not expose general vector optimizer policies. Eval exposes only turbo_enn and turbo_zero with a small parameter surface."
+
+[[family]]
+id = "disk"
+entry = "ENN model and disk_bpann backend"
+contract = "Ordinary observation rows with disk storage and indexed neighbors."
+gap = "Disk AUTO is a Rust model API; no tune key. Full model-weight lineage is a different history representation."
+
+[[family]]
+id = "encoded"
+entry = "search::Optimizer / trials::Search / Python search"
+contract = "Encoded weight blocks, device views, bounded resident observations, sparse or procedural proposals."
+gap = "A general experiment adapter is needed; the proposal benchmark is not a model optimization workload."
+
+[[family]]
+id = "full_weight"
+entry = "./ennx tune version 2 pretrain / generation"
+contract = "Complete FP16 FBT/PISA/MoE candidates, resident ENN, explicit reward and history geometry."
+gap = "Other library surrogates and index drivers cannot be substituted by adding TOML names."
+
+[[family]]
+id = "checkpoint"
+entry = "ops.qwen / ops.flame"
+contract = "Separate BF16 checkpoint layouts, objectives, controller and precision semantics."
+gap = "Not model choices in the FBT tune schema; compare through explicit workload adapters."
+
+[[family]]
+id = "kernel"
+entry = "./ennx tune kernel-search.toml"
+contract = "Fixed model and objective; shader ABI, numerical and trajectory gates; complete-loop timing."
+gap = "Shader source programs cannot be finitely enumerated. Enumerate declared candidates, not arbitrary code."
+
+[[component]]
+id = "vector.surrogate"
+family = "vector"
+options = ["enn", "none", "gp_python"]
+access = "programmatic"
+sources = ["rust/crates/ennx/src/config.rs", "src/ennx/turbo/optimizer.py", "src/ennx/turbo/gp/model.py"]
+constraints = "Rust configuration provides ENN and None; GP uses Python GP callbacks. Resident tune requires ENN."
+
+[[component]]
+id = "vector.preset"
+family = "vector"
+options = ["turbo_enn", "turbo_zero", "lhd_only", "turbo_one_python", "experimental_multi_region"]
+access = "programmatic; eval subset"
+sources = ["rust/crates/ennx/src/optimizer_factory.rs", "src/ennx/turbo/config/factory.py", "rust/crates/dev-cli/src/bin/ennx/eval.rs"]
+constraints = "Presets compose components; do not multiply preset names by their equivalent component configurations."
+
+[[component]]
+id = "vector.candidate"
+family = "vector"
+options = ["sobol", "uniform", "raasp"]
+access = "programmatic"
+sources = ["rust/crates/ennx/src/candidates.rs"]
+constraints = "Ordinary bounded coordinates, not full-weight Rademacher/Gaussian laws."
+
+[[component]]
+id = "vector.initialization"
+family = "vector"
+options = ["lhd", "random_uniform", "hybrid", "lhd_only"]
+access = "programmatic"
+sources = ["rust/crates/ennx/src/config.rs", "rust/crates/ennx/src/strategy/mod.rs", "src/ennx/turbo/config/init_config.py"]
+constraints = "Strategy and initialization distribution are distinct choices; lhd_only has no surrogate search."
+
+[[component]]
+id = "vector.acquisition"
+family = "vector"
+options = ["ucb", "thompson", "pareto", "random"]
+access = "programmatic"
+sources = ["rust/crates/ennx/src/acquisition.rs", "rust/crates/ennx/src/config.rs"]
+constraints = "UCB/Thompson require a surrogate. Pareto selection semantics differ from weights::AcquisitionKind::Pareto."
+
+[[component]]
+id = "vector.region"
+family = "vector"
+options = ["none", "turbo", "morbo", "experimental_multi_region"]
+access = "programmatic"
+sources = ["rust/crates/ennx/src/trregncfg.rs", "rust/crates/ennx/src/mbtrregn.rs", "rust/crates/ennx/src/optimizer/multi_tr.rs"]
+constraints = "MORBO needs vector outcomes. Multi-region policy is not equivalent to multiple procedural arms."
+
+[[component]]
+id = "vector.region_sharing"
+family = "vector"
+options = ["shared", "nearest_center", "independent"]
+access = "Python experimental configuration; verify effective wiring"
+sources = ["src/ennx/turbo/config/model.py", "src/ennx/turbo/config/encode.py", "rust/crates/ennx/src/optimizer/multi_tr.rs"]
+constraints = "Declared configuration options do not establish all effective execution paths."
+
+[[component]]
+id = "vector.incumbent"
+family = "vector"
+options = ["observed", "noise_aware_posterior"]
+access = "programmatic"
+sources = ["rust/crates/ennx/src/optimizer/incumbent.rs", "rust/crates/ennx/src/incumbent_tracker.rs"]
+constraints = "Posterior-based incumbent selection needs fitted observations and a surrogate."
+
+[[component]]
+id = "enn.index"
+family = "vector"
+options = ["exact", "auto", "usearch", "bp_ann_disk", "metal", "opencl", "cuda"]
+access = "programmatic"
+sources = ["rust/crates/ennx/src/index.rs", "rust/crates/ennx/src/knn/mod.rs"]
+constraints = "Compile features, hardware, storage and data representation limit availability. Auto is dispatch, not an extra mathematical algorithm."
+
+[[component]]
+id = "enn.storage"
+family = "disk"
+options = ["in_memory", "disk"]
+access = "programmatic"
+sources = ["rust/crates/ennx/src/backend/mod.rs", "rust/crates/ennx/src/disk_bpann/enn_backend.rs"]
+constraints = "Disk BPANN requires compatible index, work directory and scaling."
+
+[[component]]
+id = "enn.metric"
+family = "disk"
+options = ["unit", "manual_diagonal", "auto_diagonal", "tied_dimensions"]
+access = "Rust model API; tune gap"
+sources = ["rust/crates/ennx/src/model/metric.rs", "rust/crates/ennx/src/metric_auto.rs", "rust/crates/ennx/src/metric_weights.rs"]
+constraints = "AUTO requires disk BPANN and scale_x=false. Tied dimensions modify the metric fitter; they are not a separate metric law."
+
+[[component]]
+id = "enn.posterior"
+family = "vector"
+options = ["marginal_prediction", "joint_function_draw", "conditional_prediction", "conditional_draw"]
+access = "programmatic operations"
+sources = ["rust/crates/ennx/src/traits/mod.rs", "rust/crates/ennx/src/posterior.rs", "rust/crates/ennx/src/draw.rs"]
+constraints = "Operations have different information contracts; not interchangeable acquisition selectors."
+
+[[component]]
+id = "enn.fitting"
+family = "vector"
+options = ["row-id-loocv", "infer-aleatoric-variance", "fixed-aleatoric-variance", "input-scaling", "output-bounds"]
+access = "programmatic"
+sources = ["rust/crates/ennx/src/fitter.rs", "rust/crates/ennx/src/fit.rs", "rust/crates/ennx/src/surrogate.rs", "rust/crates/ennx/src/y_bounds.rs"]
+constraints = "Options include fit and model policies; row-ID LOOCV remains the declared fitting objective."
+
+[[component]]
+id = "encoded.format"
+family = "encoded"
+options = ["int4", "int8", "fp4_e2m1", "fp8_e4m3", "fp8_e5m2"]
+access = "search API; proposal benchmark"
+sources = ["rust/crates/ennx/src/trials/encoding.rs", "rust/crates/dev-cli/src/bin/ennx/tune.rs"]
+constraints = "Formats require matching block encoding and evaluator; cannot replace full-weight FP16 without changing the workload."
+
+[[component]]
+id = "encoded.proposal"
+family = "encoded"
+options = ["sparse", "stream", "batch", "dense"]
+access = "search API"
+sources = ["rust/crates/ennx/src/search.rs", "rust/crates/ennx/src/trials.rs"]
+constraints = "Batch and stream are scheduling/identity interfaces, not necessarily distinct noise laws."
+
+[[component]]
+id = "encoded.acquisition"
+family = "encoded"
+options = ["ucb", "thompson", "legacy_scalar_pareto"]
+access = "weight-selection API"
+sources = ["rust/crates/ennx/src/weights.rs"]
+constraints = "Legacy scalar Pareto heuristic is explicitly distinct from multiobjective ParetoAcquisition."
+
+[[component]]
+id = "execution.backend"
+family = "encoded"
+options = ["cpu", "metal", "ane", "opencl", "cuda", "auto"]
+access = "operation-dependent"
+sources = ["rust/crates/ennx/src/capability.rs", "rust/crates/ennx/src/weights.rs"]
+constraints = "ANE is available through Core ML for eligible operations; placement must be measured from the compiled compute plan. Direct, fallback and missing support are distinct; backend availability is not residency or parity evidence."
+
+[[component]]
+id = "execution.source"
+family = "runtime"
+options = ["host", "iphone"]
+access = "./ennx iphone"
+sources = ["rust/crates/dev-cli/src/bin/ennx/iphone.rs", "apple/iphone/EnnxCompute/EnnxCompute.swift"]
+constraints = "A source names the machine that owns resident state; Metal remains the iPhone backend. Source discovery and addresses are runtime state and do not belong in experiment TOML."
+
+[[component]]
+id = "full_weight.experiment"
+family = "full_weight"
+options = ["end-to-end", "moe-layer", "pretrain", "generation"]
+access = "tune"
+sources = ["rust/crates/ennx/src/config.rs", "rust/crates/ennx/src/config/validation.rs"]
+constraints = "These select different execution paths; not comparable workloads by default."
+
+[[component]]
+id = "full_weight.model"
+family = "full_weight"
+options = [
+  "fbt-pisa1-legacy-v1",
+  "fbt-pisa1-residual1-v1",
+  "fbt-pisa1-projected-boundary-v1",
+  "fbt-pisa1-hc4-v1",
+  "fbt-pisa1-mhc4-v1",
+]
+access = "tune"
+sources = ["rust/crates/ennx/src/config.rs", "rust/crates/ennx/src/fbt_moe.rs"]
+constraints = "The legacy identifier selects the original residual architecture; the other identifiers select the declared residual, projected-boundary, HC4 and mHC4 ablations. LocalV1, Qwen and FLAME are separate paths."
+
+[[component]]
+id = "full_weight.corpus"
+family = "full_weight"
+options = ["stack-v3-python-pilot-v1", "stack-v3-python-800k-v1", "fineweb-10bt-pilot-v1", "explicit-prepared-data"]
+access = "tune"
+sources = ["rust/crates/ennx/src/config.rs", "ops/pretrain.py", "ops/fineweb.py"]
+constraints = "FineWeb pilot supports corpus-prefix scoring, not generation reward. Preserve split/provenance contracts."
+
+[[component]]
+id = "full_weight.proposal"
+family = "full_weight"
+options = ["independent", "polynomial-threshold"]
+access = "tune; enumerated"
+sources = ["rust/crates/ennx/src/procedural_pool.rs", "rust/crates/ennx/src/threshold.rs"]
+constraints = "Polynomial threshold requires Rademacher and latent geometry."
+
+[[component]]
+id = "full_weight.distribution"
+family = "full_weight"
+options = ["gaussian", "rademacher"]
+access = "tune; enumerated"
+sources = ["rust/crates/ennx/src/perturb.rs", "rust/crates/ennx/src/bf16_search.metal"]
+constraints = "Noise-law changes are research treatments; Gaussian cannot use analytic latent Rademacher edge norms."
+
+[[component]]
+id = "full_weight.pool"
+family = "full_weight"
+options = ["one-arm-four-slots", "two-arms-two-slots", "four-arms-one-slot"]
+access = "tune; enumerated"
+sources = ["rust/crates/ennx/src/procedural_pool.rs"]
+constraints = "Exactly four total candidates. Arms namespace directions around a shared incumbent; they are not independent centers."
+
+[[component]]
+id = "full_weight.geometry"
+family = "full_weight"
+options = ["realized", "latent"]
+access = "tune; enumerated"
+sources = ["rust/crates/ennx/src/config/study.rs", "rust/crates/ennx/src/bf16_metal/history.rs"]
+constraints = "Exact replayed FP16 geometry and declared orthogonal latent geometry differ mathematically."
+
+[[component]]
+id = "full_weight.metric"
+family = "full_weight"
+options = ["global", "self-tuning", "scalar", "tensor-family-static", "tensor-family-learned"]
+access = "tune; enumerated as scaling and shape axes"
+sources = ["rust/crates/ennx/src/config/study.rs", "rust/crates/ennx/src/bf16_family.rs", "rust/crates/ennx/src/bf16_metric.rs"]
+constraints = "Distance normalization and proposal shape are separate axes. Family learning is not ordinary full-coordinate disk AUTO."
+
+[[component]]
+id = "full_weight.fitting"
+family = "full_weight"
+options = ["fixed_neighbors", "fitted_neighbors"]
+access = "tune; enumerated"
+sources = ["rust/crates/ennx/src/config/resident.rs", "rust/crates/ennx/src/bf16_metal/configuration.rs"]
+constraints = "Configured neighbors remain initialization count and fitted upper bound. Fit budgets are held fixed."
+
+[[component]]
+id = "full_weight.selection"
+family = "full_weight"
+options = ["enn", "random-pool-slot"]
+access = "pretrain tune; enumerated"
+sources = ["rust/crates/ennx/src/config/study.rs", "rust/crates/ennx/src/fbt_ablation.rs"]
+constraints = "Random pool selection retains ENN fitting, acceptance and controller; not an ablation of the entire surrogate."
+
+[[component]]
+id = "full_weight.acquisition"
+family = "full_weight"
+options = ["ucb", "thompson", "pareto", "morbo-restart", "morbo-propose"]
+access = "tune; enumerated within supplied scalar/vector payload"
+sources = ["rust/crates/ennx/src/config/spec/optimizer.rs", "rust/crates/ennx/src/config/objectives.rs"]
+constraints = "Vector policies need vector rewards. MORBO owns adaptation and cannot combine with reliability. Pareto baseline lacks numeric MORBO payload, so generator does not invent it."
+
+[[component]]
+id = "full_weight.controller"
+family = "full_weight"
+options = ["turbo", "reliability", "morbo"]
+access = "tune; enumerated"
+sources = ["rust/crates/ennx/src/reliability_region.rs", "rust/crates/ennx/src/config/spec/conversion.rs"]
+constraints = "Effective MORBO adaptation is selected by vector acquisition. Equivalent controller spelling is deduplicated through resolved Rust policy."
+
+[[component]]
+id = "full_weight.reference"
+family = "full_weight"
+options = ["moving-incumbent", "frozen-initial"]
+access = "corpus-prefix tune; enumerated"
+sources = ["rust/crates/ennx/src/config/study.rs", "rust/crates/ennx/src/fbt_moe/objective.rs"]
+constraints = "Reference changes the target and objective forwards; compare validation outcomes, not raw training reward."
+
+[[component]]
+id = "generation.initialization"
+family = "full_weight"
+options = ["patterned", "gpt2", "megatron", "xavier-uniform", "checkpoint"]
+access = "tune; initializers enumerated only without checkpoint"
+sources = ["rust/crates/ennx/src/config/initialization.rs", "rust/crates/ennx/src/fbt_generation/setup.rs"]
+constraints = "Pretrain purpose forbids patterned initialization. Checkpoint qualification is a separate gate."
+
+[[component]]
+id = "generation.feedback"
+family = "full_weight"
+options = ["identity", "projected-sigmoid"]
+access = "tune; enumerated"
+sources = ["rust/crates/ennx/src/config/feedback.rs", "rust/crates/ennx/src/fbt_model/execution.rs"]
+constraints = "Changes model computation, not merely decoder scheduling."
+
+[[component]]
+id = "generation.verifier"
+family = "full_weight"
+options = ["auto", "serial", "accepted-prefix", "candidate-audit"]
+access = "tune; concrete modes enumerated"
+sources = ["rust/crates/ennx/src/config/generation.rs", "rust/crates/ennx/src/fbt_generation/setup.rs", "rust/crates/ennx/src/fbt_decode.rs"]
+constraints = "Auto is dispatch. Free-running NLL/code_objectives forbid serial. Candidate audit requires accepted_prefix and is retained as instrumentation, not swept."
+
+[[component]]
+id = "generation.decoding"
+family = "full_weight"
+options = ["fixed-temperature", "temperature-search", "eos-stopping"]
+access = "tune; held fixed by enumerator"
+sources = ["rust/crates/ennx/src/config/generation.rs", "rust/crates/ennx/src/fbt_generation/rounds.rs"]
+constraints = "Changing temperature search changes the search space. Early EOS changes token budget and is forbidden by some rewards."
+
+[[component]]
+id = "generation.reward"
+family = "full_weight"
+options = ["exact-match", "token-accuracy", "code-reconstruction", "code-contrastive", "free-running-cross-entropy", "code-objectives", "code-execution", "frozen-qwen", "command", "command-objectives"]
+access = "tune; held fixed by enumerator"
+sources = ["rust/crates/ennx/src/config/generation.rs", "rust/crates/ennx/src/fbt_generation/reward.rs", "rust/crates/ennx/src/code_environment.rs"]
+constraints = "Reward payloads require their own tasks/resources/protocols. Objective substitution creates a new family baseline, not a shared reward comparison."
+
+[[component]]
+id = "generation.purpose"
+family = "full_weight"
+options = ["systems-probe", "pretrain", "coding-optimization"]
+access = "tune; held fixed by enumerator"
+sources = ["rust/crates/ennx/src/config/generation.rs", "rust/crates/ennx/src/base_policy.rs"]
+constraints = "Purpose is a claim/qualification contract, not a performance switch. Coding optimization needs a qualified checkpoint."
+
+[[component]]
+id = "frozen_qwen.scoring"
+family = "full_weight"
+options = ["reference-backend", "fp32-backend", "fp16-backend", "reference-attention", "tiled16-attention", "reference-readout", "mps-fp32-readout"]
+access = "frozen_qwen tune; enumerated as three axes"
+sources = ["rust/crates/ennx/src/config/generation.rs", "rust/crates/ennx/src/qwen_metal.rs", "rust/crates/ennx/src/qwen_readout.rs"]
+constraints = "Frozen readout expansion consumes additional memory; numerical parity and speed must be measured separately."
+
+[[component]]
+id = "checkpoint.proposal"
+family = "checkpoint"
+options = ["correlated_gaussian", "independent_gaussian", "independent_signs"]
+access = "FLAME/Qwen workflows; tune gap"
+sources = ["ops/flame/bo.py", "ops/qwen/bo.py", "rust/crates/ennx/src/bf16_search.rs"]
+constraints = "Dense BF16 reference persistence, history and controllers differ from FBT FP16 independent laws."
+
+[[component]]
+id = "checkpoint.forward"
+family = "checkpoint"
+options = ["flame_jax", "flame_native_cuda", "flame_metal", "qwen_metal", "qwen_torch_reference"]
+access = "separate workflows"
+sources = ["ops/flame/bo.py", "rust/crates/ennx/src/flame_metal.rs", "rust/crates/ennx/src/qwen_metal.rs", "ops/qwen/model.py"]
+constraints = "Layout, precision and supported controller contracts differ. Numerical backend comparison requires fixed weights."
+
+[[component]]
+id = "kernel.operator"
+family = "kernel"
+options = ["pisa", "moe"]
+access = "kernel-search manifest"
+sources = ["rust/crates/ennx/src/config/kernel.rs", "rust/crates/dev-cli/src/bin/ennx/kernel_search.rs"]
+constraints = "Fixed host ABI; candidate sources/defines explicitly declared and snapshot."
+
+[[component]]
+id = "evaluation.task"
+family = "vector"
+options = ["sphere", "ellipsoid", "rosenbrock", "rastrigin", "ackley", "sparse_sphere"]
+access = "eval registry"
+sources = ["rust/crates/dev-cli/src/bin/ennx/eval.rs"]
+constraints = "Synthetic quality results do not qualify the billion-weight model workload."
+
+[[component]]
+id = "evaluation.agent"
+family = "full_weight"
+options = ["transcript_validation", "executable_outcome_order", "base_policy_qualification"]
+access = "contract APIs; complete agent campaign gap"
+sources = ["rust/crates/ennx/src/agent_contract.rs", "rust/crates/ennx/src/coding_outcome.rs", "rust/crates/ennx/src/base_policy.rs"]
+constraints = "Protocol and outcome contracts are not complete trained policies or agent harnesses."
+
+[[component]]
+id = "integration.adapter"
+family = "vector"
+options = ["botorch", "optuna", "ax"]
+access = "Python integration"
+sources = ["src/ennx/botorch.py", "src/ennx/optuna.py", "src/ennx/ax.py"]
+constraints = "Adapters change integration surfaces, not necessarily underlying algorithms. Account for their supported spaces and process constraints."
+
+[[component]]
+id = "declared.python_options"
+family = "vector"
+options = ["cosine_distance", "raasp_orig", "raasp_fast"]
+access = "configuration declaration; effective wiring requires audit"
+sources = ["src/ennx/turbo/config/edistmet.py", "src/ennx/turbo/config/candgencfg.py", "src/ennx/turbo/config/encode.py"]
+constraints = "Do not label a configuration enum as an executable algorithm without tracing its use."

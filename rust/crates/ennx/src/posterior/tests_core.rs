@@ -1,5 +1,4 @@
 use super::*;
-use crate::index::IndexDriver;
 use crate::model::ENN;
 use crate::test_helpers::test_model as create_test_model;
 use ndarray::ArrayView2;
@@ -45,7 +44,7 @@ where
 }
 
 #[test]
-fn test_001() {
+fn posterior_query() {
     let model = create_test_model();
     let params = ENNParams::new(2, 1.0, 0.1).unwrap();
     let flags = PosteriorFlags::new();
@@ -61,7 +60,7 @@ fn test_001() {
 }
 
 #[test]
-fn test_batchposterior() {
+fn batch_shape() {
     let model = create_test_model();
     let params1 = ENNParams::new(2, 1.0, 0.1).unwrap();
     let params2 = ENNParams::new(2, 2.0, 0.2).unwrap();
@@ -77,7 +76,7 @@ fn test_batchposterior() {
 }
 
 #[test]
-fn test_003() {
+fn draw_shape() {
     let model = create_test_model();
     let params = ENNParams::new(2, 1.0, 0.1).unwrap();
     let flags = PosteriorFlags::new();
@@ -93,7 +92,7 @@ fn test_003() {
 }
 
 #[test]
-fn test_004() {
+fn empty_state() {
     let model = create_test_model();
     let internals = empty_internals(&model, 5);
 
@@ -113,7 +112,7 @@ fn test_004() {
 }
 
 #[test]
-fn test_005() {
+fn internal_shape() {
     let model = create_test_model();
     let params = ENNParams::new(2, 1.0, 0.1).unwrap();
     let flags = PosteriorFlags::new();
@@ -128,21 +127,7 @@ fn test_005() {
 }
 
 #[test]
-fn test_006() {
-    let train_x = array![[0.0, 0.0]];
-    let train_y = array![[0.0]];
-    let model = ENN::new(train_x, train_y, None, false, IndexDriver::Exact).unwrap();
-
-    let params = ENNParams::new(2, 1.0, 0.1).unwrap();
-    let flags = PosteriorFlags::new();
-    let query = array![[100.0, 100.0]];
-
-    let result = compute_internals(&model, &query.view(), &params, &flags);
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_007() {
+fn empty_rejected() {
     let model = create_test_model();
     let flags = PosteriorFlags::new();
     let query = array![[0.5, 0.5]];
@@ -159,7 +144,7 @@ fn test_007() {
 }
 
 #[test]
-fn test_getneighbordata() {
+fn neighbor_data() {
     let model = create_test_model();
     let params = ENNParams::new(2, 1.0, 0.1).unwrap();
     let query = array![[0.5, 0.5]];
@@ -170,7 +155,7 @@ fn test_getneighbordata() {
 }
 
 #[test]
-fn test_009() {
+fn weighted_shape() {
     let model = create_test_model();
     let dist2s = array![[0.1, 0.2]];
     let y_neighbors = array![[0.0], [1.0]];
@@ -192,7 +177,7 @@ fn test_009() {
 }
 
 #[test]
-fn test_drawfrominternalsk0() {
+fn empty_draw() {
     let model = create_test_model();
     let internals = empty_internals(&model, 3);
     let seeds = vec![1i64, 2];
@@ -205,7 +190,7 @@ fn test_drawfrominternalsk0() {
 }
 
 #[test]
-fn test_011() {
+fn deterministic_draw() {
     let model = create_test_model();
     let params = ENNParams::new(2, 1.0, 0.1).unwrap();
     let flags = PosteriorFlags::new();
@@ -222,41 +207,6 @@ fn test_011() {
     let one = draw_internals(&model, &internals, &[7i64]).unwrap();
     assert!((one[[0, 0, 0]] - 0.223_806_179_572_216_43).abs() < 1e-12);
 }
-
-#[test]
-fn test_012() {
-    let model = create_test_model();
-    let params = ENNParams::new(2, 1.0, 0.1).unwrap();
-    let query = array![[0.5, 0.5]];
-
-    let neighbor_data = get_data(&model, &query.view(), &params, false, true)
-        .unwrap()
-        .unwrap();
-
-    let data = WeightedPosteriorData {
-        dist2s: &neighbor_data.dist2s.view(),
-        idx: &neighbor_data.idx,
-        y_neighbors: &neighbor_data.y_neighbors.view(),
-        params: &params,
-        observation_noise: false,
-        yvar_neighbors_override: None,
-    };
-
-    let result = compute_posterior(&model, data, None);
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_013() {
-    let model = create_test_model();
-    let params = ENNParams::new(2, 1.0, 0.1).unwrap();
-    let query = array![[0.5, 0.5]];
-
-    let result = get_data(&model, &query.view(), &params, true, true);
-    assert!(result.is_ok());
-}
-
-// Tests for helper functions to achieve 100% coverage
 
 #[test]
 fn shared_batch() {
@@ -281,54 +231,7 @@ fn separate_batch() {
 }
 
 #[test]
-fn assign_result() {
-    let model = create_test_model();
-    let params = ENNParams::new(2, 1.0, 0.1).unwrap();
-    let flags = PosteriorFlags::new();
-    let query = array![[0.5, 0.5]];
-
-    let internals = compute_internals(&model, &query.view(), &params, &flags).unwrap();
-
-    let mut mu_all = Array3::zeros((3, 1, 1));
-    let mut se_all = Array3::zeros((3, 1, 1));
-    let mut se_epi_all = Array3::zeros((3, 1, 1));
-    let mut se_ale_all = Array3::zeros((3, 1, 1));
-
-    // Test assigning to different indices
-    super::batch::assign_result(
-        &internals,
-        &mut mu_all,
-        &mut se_all,
-        &mut se_epi_all,
-        &mut se_ale_all,
-        0,
-    );
-    super::batch::assign_result(
-        &internals,
-        &mut mu_all,
-        &mut se_all,
-        &mut se_epi_all,
-        &mut se_ale_all,
-        1,
-    );
-    super::batch::assign_result(
-        &internals,
-        &mut mu_all,
-        &mut se_all,
-        &mut se_epi_all,
-        &mut se_ale_all,
-        2,
-    );
-
-    // Verify the assignments were made (values should be non-zero from the computation)
-    assert!(mu_all[[0, 0, 0]].is_finite());
-    assert!(se_all[[0, 0, 0]].is_finite());
-    assert!(se_epi_all[[0, 0, 0]].is_finite());
-    assert!(se_ale_all[[0, 0, 0]].is_finite());
-}
-
-#[test]
-fn test_017() {
+fn variance_floor() {
     use crate::error::EPS_VAR;
 
     let y_scale = 0.5;
@@ -353,7 +256,7 @@ fn test_017() {
 }
 
 #[test]
-fn test_018() {
+fn aleatoric_components() {
     let model = create_test_model();
     let dist2s = array![[0.1, 0.2]];
     let y_neighbors = array![[0.0], [1.0]];

@@ -1,7 +1,8 @@
 load("@crates//:defs.bzl", "aliases", "crate_edition")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
-load("//rust/crates/ennx:defs.bzl", "ennx_crate_deps")
+load("//build:targets.bzl", "ENNX_CRATES", "ENNX_PROGRAMS", "ENNX_TEST_CRATES")
+load("//rust/crates/ennx:defs.bzl", "ennx_crate_deps", "ennx_program_targets")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -17,29 +18,14 @@ ENNX_SHADER_SRCS = glob([
     "src/**/*.metal",
 ])
 
-ENNX_CRATES = [
-    "memmap2",
-    "ndarray",
-    "rand",
-    "rand_distr",
-    "rayon",
-    "serde",
-    "sobol",
-    "thiserror",
-    "toml",
-]
-
-ENNX_TEST_CRATES = ENNX_CRATES + [
-    "rand_chacha",
-    "tempfile",
-]
-
 ENNX_DEPS = ennx_crate_deps(ENNX_CRATES) + [
     "//rust/crates/bpann",
+    "//rust/crates/wire",
 ]
 
 ENNX_TEST_DEPS = ennx_crate_deps(ENNX_TEST_CRATES) + [
     "//rust/crates/bpann",
+    "//rust/crates/wire",
 ]
 
 cc_library(
@@ -124,6 +110,8 @@ alias(
     }),
 )
 
+ennx_program_targets(ENNX_PROGRAMS, glob(["src/**/*.rs", "examples/**/*.rs"]))
+
 rust_test(
     name = "ennx_test",
     aliases = aliases(
@@ -131,6 +119,7 @@ rust_test(
         proc_macro_dev = True,
     ),
     crate = ":ennx_cpu",
+    compile_data = ["//examples/tuning:turbo-enn.toml"],
     deps = ENNX_TEST_DEPS,
 )
 

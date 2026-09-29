@@ -9,6 +9,22 @@
 use crate::trials::{Ask, Parameter, Search, Trial};
 use crate::weights::ComputeDevice;
 
+#[path = "forward_program/recurrence.rs"]
+mod recurrence;
+pub use recurrence::*;
+#[path = "forward_program/model.rs"]
+mod model;
+pub use model::*;
+#[path = "forward_program/graph.rs"]
+mod graph;
+pub use graph::*;
+#[path = "forward_program/schedule.rs"]
+mod schedule;
+pub use schedule::*;
+#[path = "forward_program/tensor.rs"]
+mod tensor;
+pub use tensor::*;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForwardOp {
     EmbeddingLookup,
@@ -799,6 +815,44 @@ __kernel void sum_row(__global const uchar* rows, uint offset, uint row_bytes, _
     }
 
     #[test]
+    fn fbtprogram() {
+        let program = super::ModelProgram::fbt_pisa();
+        program.validate().unwrap();
+        assert!(
+            program
+                .nodes
+                .iter()
+                .any(|node| node.op == super::SemanticOp::PisaAttention)
+        );
+        assert!(
+            program
+                .tensors
+                .iter()
+                .any(|tensor| tensor.storage == super::TensorStorage::State)
+        );
+        assert!(
+            program
+                .weight_arenas
+                .iter()
+                .any(|arena| arena.overlay == "candidate")
+        );
+        // KernelPlan remains an independent execution schedule.
+        assert_eq!(program.version, super::ModelProgram::VERSION);
+        let core = program.recurrent_core.unwrap();
+        assert_eq!(core.first_layer, 1);
+        assert_eq!(core.layer_count, 2);
+        assert_eq!(
+            program
+                .layer_visits(core.training_visits)
+                .unwrap()
+                .iter()
+                .map(|visit| (visit.layer, visit.visit))
+                .collect::<Vec<_>>(),
+            vec![(0, 0), (1, 0), (2, 0), (1, 1), (2, 1), (3, 0), (4, 0)]
+        );
+    }
+
+    #[test]
     fn kda_layout() {
         let layout = KdaTensorLayout::new(1, 16_384, 8, 128, 128).unwrap();
         assert_eq!(layout.qkv_elements(), 16_777_216);
@@ -1113,3 +1167,6 @@ __kernel void sum_row(__global const uchar* rows, uint offset, uint row_bytes, _
         assert_eq!(state.rewards(), &[sum[0] as f32]);
     }
 }
+
+/// Backend-independent corruption and denoising execution semantics.
+pub mod diffusion;

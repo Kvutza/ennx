@@ -110,12 +110,12 @@ against an exact distance oracle. It does not change the production optimizer.
 
 ## Reproduce
 
-Use an existing **resolved** pretraining `study.toml`, with UCB, ten neighbors,
+Use an existing **resolved** pretraining `experiment.toml`, with UCB, ten neighbors,
 an absolute `dataset` path and a sibling `validation.ennxptn`. Apple silicon and enough memory for the
 production scorer are required.
 
 ```sh
-bash tools/bo-audit /absolute/path/to/study.toml .cache/ennx/audits
+bash tools/bo-audit /absolute/path/to/experiment.toml .cache/ennx/audits
 ```
 
 The runner creates a fresh artifact directory, captures source checksums and

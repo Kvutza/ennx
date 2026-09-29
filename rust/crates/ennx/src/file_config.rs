@@ -5,7 +5,7 @@ use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-use serde::{Deserialize, Serialize};
+use deser::{Deserialize, Serialize};
 
 static CONFIG_OVERRIDE: RwLock<Option<PathBuf>> = RwLock::new(None);
 
@@ -44,7 +44,7 @@ fn active_path() -> PathBuf {
 
 /// Tunable BPANN parameters persisted under `[bpann]` in the config file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[deser(default, deny_unknown_fields)]
 pub struct BpannConfig {
     pub index_fragment: usize,
     pub index_max: usize,
@@ -57,7 +57,7 @@ pub struct BpannConfig {
     pub soft_threshold: usize,
     /// Hard pending cap (soft-sync on caller). `None` means the key was absent in TOML;
     /// resolved to `max(PENDING_HARD, soft)` on load.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deser(default, skip_serializing_if = Option::is_none)]
     pub hard_threshold: Option<usize>,
     /// Batch size at or below which builds use a single row-ID leaf (no k-means tree).
     pub structured_limit: usize,
@@ -127,7 +127,7 @@ impl BpannConfig {
 
 /// Root document for `~/.ennx/config.toml`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[deser(default, deny_unknown_fields)]
 pub struct ConfigFile {
     pub bpann: BpannConfig,
 }
@@ -172,7 +172,7 @@ impl Config {
         self.ensure_exists()?;
         let text = fs::read_to_string(&self.path)
             .map_err(|error| format!("read config {}: {error}", self.path.display()))?;
-        let file: ConfigFile = toml::from_str(&text)
+        let file: ConfigFile = ennx_wire::toml::from_str(&text)
             .map_err(|error| format!("parse config {}: {error}", self.path.display()))?;
         file.bpann
             .validate()
@@ -188,7 +188,7 @@ impl Config {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let text = toml::to_string_pretty(file).map_err(|e| e.to_string())?;
+        let text = ennx_wire::toml::pretty_string(file).map_err(|e| e.to_string())?;
         fs::write(&self.path, text).map_err(|e| e.to_string())
     }
 
@@ -206,7 +206,7 @@ impl Config {
             {
                 fs::create_dir_all(parent).map_err(|error| error.to_string())?;
             }
-            let text = toml::to_string_pretty(&ConfigFile::default())
+            let text = ennx_wire::toml::pretty_string(&ConfigFile::default())
                 .map_err(|error| error.to_string())?;
             match fs::OpenOptions::new()
                 .write(true)

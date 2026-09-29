@@ -1,3 +1,8 @@
+load("//buck2:ennx_targets.bzl", "ennx_program_targets")
+load("//build:targets.bzl", "MODAL_RUNNER_PROGRAMS", "RUST_EDITION")
+
+ennx_program_targets(MODAL_RUNNER_PROGRAMS, RUST_EDITION, glob(["src/**/*.rs"]))
+
 filegroup(
     name = "modal-source",
     srcs = glob(["src/**/*.rs"]) + ["Cargo.toml"],

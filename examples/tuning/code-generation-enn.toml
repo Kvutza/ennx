@@ -1,0 +1,60 @@
+# Fixed-episode coding-reward pilot; not functional correctness or corpus pretraining.
+# Every candidate freely generates and scores 4096 tokens. No teacher forcing.
+version = 2
+
+experiment = "pretrain"
+model = "fbt-pisa1-legacy-v1"
+corpus = "stack-v3-python-pilot-v1"
+
+[run]
+selection = "enn"
+validation-interval = 32
+rounds = 512
+reps = 3
+target-ms = 200
+
+[proposal]
+distribution = "rademacher"
+
+[enn]
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+
+[acquisition]
+method = "ucb"
+beta = 0.75
+
+[trust-region]
+method = "turbo"
+shape = "tensor-family-learned"
+initial = 0.001
+min = 0.0001
+max = 0.1
+
+[generation]
+purpose = "systems-probe"
+max-tokens = 4096
+temperature = 0.0
+corpus-prompt-tokens = 128
+save-final-checkpoint = false
+record-tensor-updates = false
+
+[generation.verify]
+mode = "accepted-prefix"
+window = 128
+max-window = 128
+passes = 2
+unroll = 2
+
+[generation.reward]
+kind = "code-contrastive"
+max-ngram = 4
+decoys = 3
+
+[generation.signal-gate]
+rounds = 12
+min-distinct-rewards = 3
+min-reward-span = 0.000001

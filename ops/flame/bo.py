@@ -197,7 +197,7 @@ def memory_budget(size: int, history: int, sampler: str = "correlated") -> int:
     )
 
 
-def compiled_memory_budget(required, allowance, stats):
+def memory_budget(required, allowance, stats):
     if stats is None:
         raise RuntimeError("Compiler memory statistics are required for coding BO")
     workspace = stats.temp_size_in_bytes + stats.output_size_in_bytes
@@ -771,7 +771,7 @@ def run(checkpoint: Path, tokens, output: Path, settings: Settings, *, zero_scal
     if not is_native and isinstance(evaluate, SolutionEvaluator):
         evaluate = evaluate.compile(signature)
         memory = evaluate.memory_analysis()
-        required = compiled_memory_budget(
+        required = memory_budget(
             required, FORWARD_HEADROOM_BYTES[settings.sampler], memory
         )
         if required > free:

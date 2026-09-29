@@ -1,4 +1,6 @@
 use super::{Ask, ComputeDevice, DeviceView, Optimizer, Parameter, TRLengthConfig};
+use crate::objective_observation::ObjectiveObservation;
+use crate::traits::Oracle;
 
 #[cfg(feature = "opencl")]
 use super::opencl_unavailable;
@@ -22,6 +24,33 @@ fn read_view(view: DeviceView<'_>) -> Result<Vec<u8>, String> {
         return Ok(row);
     }
     Err("test requires a Metal or OpenCL view".into())
+}
+
+enum TestOutcome {
+    Error,
+    Value(f32),
+    Row(Vec<u8>, f32),
+}
+
+struct TestOracle(TestOutcome);
+
+impl Oracle for TestOracle {
+    type Evidence = f32;
+
+    fn observe(
+        &mut self,
+        candidate: DeviceView<'_>,
+    ) -> Result<(ObjectiveObservation, Self::Evidence), String> {
+        let value = match &self.0 {
+            TestOutcome::Error => return Err("evaluation failed".into()),
+            TestOutcome::Value(value) => *value,
+            TestOutcome::Row(expected, value) => {
+                assert_eq!(read_view(candidate)?, *expected);
+                *value
+            }
+        };
+        Ok((ObjectiveObservation::scalar(value, 0.0)?, value))
+    }
 }
 
 fn recycled_views(device: ComputeDevice) {
@@ -51,19 +80,13 @@ fn recycled_views(device: ComputeDevice) {
             assert_eq!(read_view(view).unwrap(), *expected);
         }
         for (trial, expected) in trials.into_iter().zip(rows).rev() {
-            assert!(
-                optimizer
-                    .evaluate(trial, |_| Err("evaluation failed".into()))
-                    .is_err()
-            );
-            assert!(optimizer.evaluate(trial, |_| Ok(f32::NAN)).is_err());
+            let mut failed = TestOracle(TestOutcome::Error);
+            assert!(optimizer.evaluate(trial, &mut failed).is_err());
+            let mut invalid = TestOracle(TestOutcome::Value(f32::NAN));
+            assert!(optimizer.evaluate(trial, &mut invalid).is_err());
             assert_eq!(optimizer.row(trial).unwrap(), expected);
-            let value = optimizer
-                .evaluate(trial, |view| {
-                    assert_eq!(read_view(view)?, expected);
-                    Ok(step as f32)
-                })
-                .unwrap();
+            let mut valid = TestOracle(TestOutcome::Row(expected, step as f32));
+            let (_, value) = optimizer.evaluate(trial, &mut valid).unwrap();
             assert_eq!(value, step as f32);
             assert!(optimizer.device_view(trial).is_err());
         }

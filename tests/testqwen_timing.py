@@ -128,70 +128,8 @@ def test_roundtime(monkeypatch, tmp_path, refresh, expected_evaluations):
     assert "weights" not in vars(evaluators[0])
     timing = report["timing"]
     settings = report["settings"]
-    assert settings["history_policy"] == "fifo_absolute"
-    assert settings["surrogate_fit_objective"] == "row_id_loocv_likelihood_fixed"
-    assert settings["perturbation_semantics"] == "dense_full_tensor_correlated_bf16"
-    assert settings["reference_seed"] == 42
-    assert settings["objective_context_tokens"] == 4
-    assert settings["context_targets"] == [4096, 16384, 32768]
-    assert settings["context_target_reached"] is False
-    assert settings["long_context_loss_path"] == (
-        "cached_causal_attention_bf16_kv_above_256"
-    )
-    assert settings["comparison_baseline"] == {
-        "name": "EGGROLL",
-        "method": "hyperscale_evolution_strategies",
-        "evaluated_in_run": False,
-    }
-    assert settings["controller"] == {
-        "dimensions": 10,
-        "evaluated_arms": 1,
-        "length": 0.01,
-        "length_min": 0.0001,
-        "length_max": 0.08,
-        "success_tolerance": 3,
-        "failure_tolerance": 10,
-        "success_counter": 0,
-        "failure_counter": 1,
-        "restarts": 0,
-    }
-    assert report["resources"] == {
-        "model_bf16_elements": 10,
-        "search": {
-            "row_bytes": 20,
-            "search_resident_bytes": 100,
-            "device_allocated_bytes": 120,
-            "recommended_working_set_bytes": 1_000,
-            "max_buffer_bytes": 2_000,
-        },
-        "perturbation_layout": {
-            "scale_scheme": "checkpoint_tensor_bf16_rms_fp32",
-            "distance_scheme": "equal_tensor_weighted_relative_squared_l2",
-            "rounding": "bf16_nearest_even",
-            "blocks": [
-                {
-                    "key": 3,
-                    "offset": 0,
-                    "elements": 4,
-                    "rms_scale": 0.5,
-                    "distance_weight": 0.1,
-                },
-                {
-                    "key": 7,
-                    "offset": 4,
-                    "elements": 6,
-                    "rms_scale": 0.25,
-                    "distance_weight": 0.2,
-                },
-            ],
-        },
-    }
-    assert timing["setup_seconds"] == pytest.approx(3.0)
-    assert timing["baseline_seconds"] == pytest.approx(1.0)
-    assert timing["export_seconds"] == 0.0
-    assert timing["bo_loop_seconds"] == pytest.approx(
-        sum(row["round_seconds"] for row in timing["rounds"])
-    )
+    assert_settings(settings, report)
+    assert_timing(timing)
     for row, evaluations in zip(timing["rounds"], expected_evaluations):
         assert row["objective_evaluations"] == evaluations
         assert row["acquisition_candidates"] == 4
@@ -283,3 +221,73 @@ def test_roundtime(monkeypatch, tmp_path, refresh, expected_evaluations):
             ],
         }
     assert json.loads((output / "run.json").read_text())["timing"] == timing
+
+
+def assert_settings(settings, report):
+    assert settings["history_policy"] == "fifo_absolute"
+    assert settings["surrogate_fit_objective"] == "row_id_loocv_likelihood_fixed"
+    assert settings["perturbation_semantics"] == "dense_full_tensor_correlated_bf16"
+    assert settings["reference_seed"] == 42
+    assert settings["objective_context_tokens"] == 4
+    assert settings["context_targets"] == [4096, 16384, 32768]
+    assert settings["context_target_reached"] is False
+    assert settings["long_context_loss_path"] == (
+        "cached_causal_attention_bf16_kv_above_256"
+    )
+    assert settings["comparison_baseline"] == {
+        "name": "EGGROLL",
+        "method": "hyperscale_evolution_strategies",
+        "evaluated_in_run": False,
+    }
+    assert settings["controller"] == {
+        "dimensions": 10,
+        "evaluated_arms": 1,
+        "length": 0.01,
+        "length_min": 0.0001,
+        "length_max": 0.08,
+        "success_tolerance": 3,
+        "failure_tolerance": 10,
+        "success_counter": 0,
+        "failure_counter": 1,
+        "restarts": 0,
+    }
+    assert report["resources"] == {
+        "model_bf16_elements": 10,
+        "search": {
+            "row_bytes": 20,
+            "search_resident_bytes": 100,
+            "device_allocated_bytes": 120,
+            "recommended_working_set_bytes": 1_000,
+            "max_buffer_bytes": 2_000,
+        },
+        "perturbation_layout": {
+            "scale_scheme": "checkpoint_tensor_bf16_rms_fp32",
+            "distance_scheme": "equal_tensor_weighted_relative_squared_l2",
+            "rounding": "bf16_nearest_even",
+            "blocks": [
+                {
+                    "key": 3,
+                    "offset": 0,
+                    "elements": 4,
+                    "rms_scale": 0.5,
+                    "distance_weight": 0.1,
+                },
+                {
+                    "key": 7,
+                    "offset": 4,
+                    "elements": 6,
+                    "rms_scale": 0.25,
+                    "distance_weight": 0.2,
+                },
+            ],
+        },
+    }
+
+
+def assert_timing(timing):
+    assert timing["setup_seconds"] == pytest.approx(3.0)
+    assert timing["baseline_seconds"] == pytest.approx(1.0)
+    assert timing["export_seconds"] == 0.0
+    assert timing["bo_loop_seconds"] == pytest.approx(
+        sum(row["round_seconds"] for row in timing["rounds"])
+    )

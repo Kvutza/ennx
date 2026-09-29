@@ -429,10 +429,16 @@ fn check_inputs(
             candidates.len()
         ));
     }
-    if outcomes.iter().any(|value| !value.is_finite()) {
-        return Err("outcomes must be finite".to_string());
-    }
+    check_outcomes(outcomes)?;
     Ok(row_bytes)
+}
+
+fn check_outcomes(outcomes: &[f32]) -> Result<(), String> {
+    outcomes
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(())
+        .ok_or_else(|| "outcomes must be finite".to_string())
 }
 
 fn cpu_weight(

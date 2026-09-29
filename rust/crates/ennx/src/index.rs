@@ -1,5 +1,5 @@
+use deser::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayView2, Axis};
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::knn::KnnBackend;
@@ -15,25 +15,25 @@ pub enum IndexError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
 pub enum IndexDriver {
     #[default]
     Exact,
     /// Exact CPU/accelerator race calibrated from real query shapes.
     Auto,
     /// USearch HNSW shortlist with deterministic exact-distance reranking.
-    #[serde(rename = "usearch")]
+    #[deser(rename = "usearch")]
     USearch,
     /// B+ANN disk index (`EnnStorage::Disk` + `work_dir`).
-    #[serde(rename = "bp_ann_disk")]
+    #[deser(rename = "bp_ann_disk")]
     BpAnnDisk,
     /// Apple Metal backend for native quantized-weight paths.
     Metal,
     /// OpenCL backend for native quantized-weight paths.
-    #[serde(rename = "opencl")]
+    #[deser(rename = "opencl")]
     OpenCl,
     /// NVIDIA CUDA exact index implemented with CUDA-Oxide.
-    #[serde(rename = "cuda")]
+    #[deser(rename = "cuda")]
     Cuda,
 }
 

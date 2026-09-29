@@ -4,9 +4,12 @@ use std::time::Instant;
 
 use cuda_core::{CudaContext, CudaStream, DeviceBuffer, LaunchConfig1D, simt::LaunchConfig};
 use ennx_cuda::{
-    Ask as ResidentAsk, Leaf as ResidentLeaf, MAX_HISTORY, Tile as ResidentTile, TrialEngine,
+    Ask as ResidentAsk, Bf16Leaf, Bf16SearchEngine, FbtPrefill, Leaf as ResidentLeaf, MAX_HISTORY,
+    Tile as ResidentTile, TrialEngine, embed_parity, feedback_parity,
 };
 use ennx_cuda_kernels::{Bf16Score, SearchState, trials};
+
+mod ptx_probe;
 
 type AppResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -97,11 +100,80 @@ fn run() -> AppResult<()> {
         "resident" => resident_parity(),
         "bench" => benchmark(&args[2..]),
         "trial-bench" => trial_benchmark(&args[2..]),
+        "bf16-bench" => bf16_benchmark(&args[2..]),
+        "bf16-curve" => bf16_curve(&args[2..]),
+        "prefill" => prefill(),
+        "model-check" => ennx_cuda::model_check().map_err(|e| io::Error::other(e).into()),
+        "diffusion" => ennx_cuda::model_diffusion(&args[2..]).map_err(|e| io::Error::other(e).into()),
+        "diffusion-check" => ennx_cuda::diffusion_check().map_err(|e| io::Error::other(e).into()),
+        "generate" => ennx_cuda::model_generate(&args[2..]).map_err(|e| io::Error::other(e).into()),
+        "generation-bench" => ennx_cuda::generation_bench(&args[2..]).map_err(|e| io::Error::other(e).into()),
+        "gemm-bench" => ennx_cuda::gemm::bench().map_err(|e| io::Error::other(e).into()),
+        "ptx-probe" => ptx_probe::run(&args[2..]),
+        "model" => ennx_cuda::model_run(&args[2..]).map_err(|e| io::Error::other(e).into()),
+        "context" => ennx_cuda::context::run(&args[2..]).map_err(|e| io::Error::other(e).into()),
         command => Err(io::Error::other(format!(
-            "unknown command {command:?}; expected parity, resident, bench, or trial-bench"
+            "unknown command {command:?}; expected parity, resident, prefill, model-check, model, generate, generation-bench, diffusion, diffusion-check, context, ptx-probe, bench, trial-bench, bf16-bench, or bf16-curve"
         ))
         .into()),
     }
+}
+
+fn prefill() -> AppResult<()> {
+    let embedding = vec![0x3c00_u16; 8192 * 512];
+    let rms = vec![0x3c00_u16; 512];
+    let qkv = vec![0x1800_u16; 512 * 640];
+    let output_weight = vec![0x1800_u16; 512 * 512];
+    let router_weight = vec![0x1800_u16; 512 * 128];
+    let mut executor = FbtPrefill::new(&embedding, &rms, &qkv, &output_weight, &router_weight)
+        .map_err(|error| io::Error::other(format!("prefill init: {error}")))?;
+    let tokens = (0..4096)
+        .map(|index| (index % 8192) as u32)
+        .collect::<Vec<_>>();
+    // Warm-up absorbs first-launch/module state. Keep all weights and scratch
+    // buffers resident for the measured repetitions.
+    let _ = executor
+        .run(&tokens)
+        .map_err(|error| io::Error::other(format!("prefill warmup: {error}")))?;
+    let mut samples = Vec::with_capacity(5);
+    let mut output = None;
+    let mut experts = None;
+    for _ in 0..5 {
+        let (result, selected, profile) = executor
+            .run(&tokens)
+            .map_err(|error| io::Error::other(format!("prefill run: {error}")))?;
+        output = Some(result);
+        experts = Some(selected);
+        samples.push(profile);
+    }
+    let output = output.ok_or_else(|| io::Error::other("prefill produced no measured output"))?;
+    // Unit input with 1/512 projections gives unit attention and output
+    // branches; the first residual is exactly two.
+    if output.len() != 4096 * 512 || output.iter().any(|&value| value != 0x4000) {
+        return Err(io::Error::other("prefill output parity failed").into());
+    }
+    let experts = experts.ok_or_else(|| io::Error::other("prefill produced no routes"))?;
+    if experts.chunks_exact(3).any(|route| route != [0, 1, 2]) {
+        return Err(io::Error::other("prefill route parity failed").into());
+    }
+    let median = |mut values: Vec<f32>| {
+        values.sort_by(f32::total_cmp);
+        values[values.len() / 2]
+    };
+    let device_ms = median(samples.iter().map(|p| p.device_ms).collect());
+    let embed_ms = median(samples.iter().map(|p| p.embed_ms).collect());
+    let rms_ms = median(samples.iter().map(|p| p.rms_ms).collect());
+    let projection_ms = median(samples.iter().map(|p| p.projection_ms).collect());
+    let tree_ms = median(samples.iter().map(|p| p.tree_ms).collect());
+    let selection_ms = median(samples.iter().map(|p| p.selection_ms).collect());
+    let attention_ms = median(samples.iter().map(|p| p.attention_ms).collect());
+    let residual_ms = median(samples.iter().map(|p| p.residual_ms).collect());
+    let routing_ms = median(samples.iter().map(|p| p.routing_ms).collect());
+    let end_to_end_ms = median(samples.iter().map(|p| p.end_to_end_ms).collect());
+    println!(
+        "FBT routed-attention slice: embedding -> RMS -> QKV -> PISA -> residual -> top-k; rows=4096 width=512 qkv=640 warmup=1 measured=5 median_embed_ms={embed_ms:.3} median_rms_ms={rms_ms:.3} median_projection_ms={projection_ms:.3} median_tree_ms={tree_ms:.3} median_selection_ms={selection_ms:.3} median_attention_ms={attention_ms:.3} median_residual_ms={residual_ms:.3} median_routing_ms={routing_ms:.3} median_device_ms={device_ms:.3} median_end_to_end_ms={end_to_end_ms:.3}"
+    );
+    Ok(())
 }
 
 fn resident_parity() -> AppResult<()> {
@@ -490,6 +562,8 @@ fn parity() -> AppResult<()> {
             }
         }
     }
+    embed_parity().map_err(io::Error::other)?;
+    feedback_parity().map_err(io::Error::other)?;
     println!("PARITY ok=true cases={cases} target=sm_75");
     Ok(())
 }
@@ -670,16 +744,353 @@ fn trial_benchmark(args: &[String]) -> AppResult<()> {
     let asks_s = count / wall_seconds;
     let candidates_s = candidates as f64 * asks_s;
     println!(
-        "TRIAL_BENCH ok=true target=sm_75 candidates={candidates} history={history} \
-         elements={elements} iterations={iterations} score_ms={:.6} pick_ms={:.6} \
-         materialize_ms={:.6} gpu_ms={:.6} wall_ms={:.6} asks_s={asks_s:.3} \
-         candidates_s={candidates_s:.3}",
+        "{{\"schema\":\"ennx.cuda.packed-bo-ask.v1\",\"target\":\"sm_75\",\"storage\":\"packed-quantized\",\"candidates\":{candidates},\"history\":{history},\"parameter_elements\":{elements},\"iterations\":{iterations},\"proposal_score_ms\":{:.6},\"pick_ms\":{:.6},\"materialize_ms\":{:.6},\"gpu_ms\":{:.6},\"wall_ms\":{:.6},\"asks_per_second\":{asks_s:.3},\"candidates_per_second\":{candidates_s:.3},\"context_tokens\":0,\"drafted_tokens\":0,\"evaluated_tokens\":0,\"repaired_tokens\":0,\"generated_tokens\":0,\"committed_tokens\":0,\"full_generation_loop\":false}}",
         score_ms / count,
         pick_ms / count,
         materialize_ms / count,
         gpu_ms / count,
         wall_seconds * 1_000.0 / count,
     );
+    Ok(())
+}
+
+#[derive(Debug)]
+struct Bf16Run {
+    candidates: usize,
+    history: usize,
+    elements: usize,
+    iterations: usize,
+    score_ms: f64,
+    pick_ms: f64,
+    materialize_ms: f64,
+    gpu_ms: f64,
+    wall_ms: f64,
+}
+
+impl Bf16Run {
+    fn write_json(&self, output: &mut String) {
+        use std::fmt::Write as _;
+        write!(
+            output,
+            "{{\"candidates\":{},\"history\":{},\"parameter_elements\":{},\"iterations\":{},\"proposal_score_ms\":{:.6},\"pick_ms\":{:.6},\"materialize_ms\":{:.6},\"gpu_ms\":{:.6},\"wall_ms\":{:.6},\"asks_per_second\":{:.3},\"candidates_per_second\":{:.3}}}",
+            self.candidates,
+            self.history,
+            self.elements,
+            self.iterations,
+            self.score_ms,
+            self.pick_ms,
+            self.materialize_ms,
+            self.gpu_ms,
+            self.wall_ms,
+            1_000.0 / self.wall_ms,
+            self.candidates as f64 * 1_000.0 / self.wall_ms,
+        )
+        .expect("writing JSON to a string cannot fail");
+    }
+}
+
+fn bf16_benchmark(args: &[String]) -> AppResult<()> {
+    let candidates: usize = parse_arg(args, 0, 4, "candidates")?;
+    let history: usize = parse_arg(args, 1, 32, "history")?;
+    let elements: usize = parse_arg(args, 2, 65_536, "elements")?;
+    let iterations: usize = parse_arg(args, 3, 50, "iterations")?;
+    bf16_args(candidates, history, elements, iterations)?;
+    pair_parity()?;
+    let run = measure_bf16(candidates, history, elements, iterations)?;
+    let mut point = String::new();
+    run.write_json(&mut point);
+    println!(
+        "{{\"schema\":\"ennx.cuda.bf16-bo-ask.v1\",\"target\":\"sm_75\",\"storage\":\"bf16\",\"distance_fusion\":\"candidate-pairs\",\"fused_pair_parity\":true,\"measurement\":{point},\"context_tokens\":0,\"drafted_tokens\":0,\"evaluated_tokens\":0,\"repaired_tokens\":0,\"generated_tokens\":0,\"committed_tokens\":0,\"full_generation_loop\":false}}"
+    );
+    Ok(())
+}
+
+fn bf16_curve(args: &[String]) -> AppResult<()> {
+    let candidates: usize = parse_arg(args, 0, 4, "candidates")?;
+    let history: usize = parse_arg(args, 1, 32, "history")?;
+    let iterations: usize = parse_arg(args, 2, 50, "iterations")?;
+    const ELEMENTS: [usize; 3] = [4_096, 65_536, 1_048_576];
+    for &elements in &ELEMENTS {
+        bf16_args(candidates, history, elements, iterations)?;
+    }
+    pair_parity()?;
+    let mut points = String::new();
+    for (index, elements) in ELEMENTS.into_iter().enumerate() {
+        if index != 0 {
+            points.push(',');
+        }
+        measure_bf16(candidates, history, elements, iterations)?.write_json(&mut points);
+    }
+    println!(
+        "{{\"schema\":\"ennx.cuda.bf16-bo-curve.v1\",\"target\":\"sm_75\",\"storage\":\"bf16\",\"distance_fusion\":\"candidate-pairs\",\"fused_pair_parity\":true,\"points\":[{points}],\"context_tokens\":0,\"drafted_tokens\":0,\"evaluated_tokens\":0,\"repaired_tokens\":0,\"generated_tokens\":0,\"committed_tokens\":0,\"full_generation_loop\":false}}"
+    );
+    Ok(())
+}
+
+fn bf16_args(
+    candidates: usize,
+    history: usize,
+    elements: usize,
+    iterations: usize,
+) -> AppResult<()> {
+    if candidates == 0 || elements == 0 || iterations == 0 {
+        return Err(
+            io::Error::other("candidates, elements, and iterations must be positive").into(),
+        );
+    }
+    if history == 0 || history > MAX_HISTORY {
+        return Err(io::Error::other(format!("history must be in 1..={MAX_HISTORY}")).into());
+    }
+    Ok(())
+}
+
+fn measure_bf16(
+    candidates: usize,
+    history: usize,
+    elements: usize,
+    iterations: usize,
+) -> AppResult<Bf16Run> {
+    let one = (1.0_f32.to_bits() >> 16) as u16;
+    let base = vec![one; elements];
+    let leaves = [Bf16Leaf {
+        key: 0x6279_6573_6961_6e_u64,
+        offset: 0,
+        length: elements as u64,
+        scale: 0.0078125,
+        weight: 1.0,
+    }];
+    let slots = history
+        .checked_add(2)
+        .ok_or_else(|| io::Error::other("BF16 benchmark slot count overflow"))?;
+    let trial_slot = (history + 1) as u32;
+    let mut engine = Bf16SearchEngine::new(&base, &leaves, slots)
+        .map_err(|error| io::Error::other(format!("BF16 benchmark init: {error}")))?;
+    engine
+        .copy_row(0, 1)
+        .map_err(|error| io::Error::other(format!("BF16 benchmark anchor: {error}")))?;
+    engine
+        .init_search(0.0, 0.0, history, 0.125, 0.001, 1.0)
+        .map_err(|error| io::Error::other(format!("BF16 benchmark search state: {error}")))?;
+    let config = ResidentAsk {
+        neighbors: history.min(8),
+        acquisition: 0,
+        epistemic_scale: 0.7,
+        aleatoric_scale: 0.05,
+        y_scale: 1.0,
+        beta: 1.2,
+    };
+    let make_seeds = |round: usize| {
+        (0..candidates)
+            .map(|candidate| {
+                0x9e37_79b9_7f4a_7c15_u64.wrapping_mul((round * candidates + candidate + 1) as u64)
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut resident_history = 1usize;
+    while resident_history < history {
+        let seeds = make_seeds(resident_history);
+        let history_config = ResidentAsk {
+            neighbors: resident_history.min(config.neighbors),
+            ..config
+        };
+        let selections = engine
+            .ask(
+                0,
+                resident_history,
+                &[trial_slot],
+                &seeds,
+                candidates,
+                0.125,
+                0x5eed_u64.wrapping_add(resident_history as u64),
+                history_config,
+            )
+            .map_err(|error| io::Error::other(format!("BF16 benchmark history ask: {error}")))?;
+        if selections.len() != 1 || selections[0].index as usize >= candidates {
+            return Err(io::Error::other("BF16 benchmark history selection is invalid").into());
+        }
+        let outcome = ((resident_history.wrapping_mul(37) % 101) as f32 - 50.0) / 25.0;
+        let summary = engine
+            .tell(&[trial_slot], &[outcome], &[0.0], history, history)
+            .map_err(|error| io::Error::other(format!("BF16 benchmark history tell: {error}")))?;
+        resident_history = summary.history;
+    }
+    if resident_history != history {
+        return Err(io::Error::other("BF16 benchmark did not fill resident history").into());
+    }
+
+    let seeds = make_seeds(history + 1);
+    engine.set_profiling(true);
+    for warmup in 0..3 {
+        let selections = engine
+            .ask(
+                0,
+                history,
+                &[trial_slot],
+                &seeds,
+                candidates,
+                0.125,
+                0xcafe_u64.wrapping_add(warmup),
+                config,
+            )
+            .map_err(|error| io::Error::other(format!("BF16 benchmark warmup: {error}")))?;
+        if selections.len() != 1 || selections[0].index as usize >= candidates {
+            return Err(io::Error::other("BF16 benchmark warmup selection is invalid").into());
+        }
+    }
+
+    let started = Instant::now();
+    let mut score_ms = 0.0_f64;
+    let mut pick_ms = 0.0_f64;
+    let mut materialize_ms = 0.0_f64;
+    let mut gpu_ms = 0.0_f64;
+    for iteration in 0..iterations {
+        let selections = engine
+            .ask(
+                0,
+                history,
+                &[trial_slot],
+                &seeds,
+                candidates,
+                0.125,
+                0xface_u64.wrapping_add(iteration as u64),
+                config,
+            )
+            .map_err(|error| io::Error::other(format!("BF16 benchmark ask: {error}")))?;
+        if selections.len() != 1
+            || selections[0].index as usize >= candidates
+            || !selections[0].score.is_finite()
+        {
+            return Err(io::Error::other("BF16 benchmark selection is invalid").into());
+        }
+        let profile = engine
+            .last_profile()
+            .ok_or_else(|| io::Error::other("BF16 benchmark profile was not recorded"))?;
+        score_ms += f64::from(profile.score_ms);
+        pick_ms += f64::from(profile.pick_ms);
+        materialize_ms += f64::from(profile.materialize_ms);
+        gpu_ms += f64::from(profile.total_ms);
+    }
+    let wall_seconds = started.elapsed().as_secs_f64();
+    let count = iterations as f64;
+    Ok(Bf16Run {
+        candidates,
+        history,
+        elements,
+        iterations,
+        score_ms: score_ms / count,
+        pick_ms: pick_ms / count,
+        materialize_ms: materialize_ms / count,
+        gpu_ms: gpu_ms / count,
+        wall_ms: wall_seconds * 1_000.0 / count,
+    })
+}
+
+fn pair_parity() -> AppResult<()> {
+    const ELEMENTS: usize = 4_097;
+    const HISTORY: usize = 4;
+    const CANDIDATES: usize = 4;
+    const TRIAL_SLOT: u32 = (HISTORY + 1) as u32;
+
+    let one = (1.0_f32.to_bits() >> 16) as u16;
+    let base = vec![one; ELEMENTS];
+    let leaves = [Bf16Leaf {
+        key: 0x7061_6972_7465_7374,
+        offset: 0,
+        length: ELEMENTS as u64,
+        scale: 0.0078125,
+        weight: 1.0,
+    }];
+    let build = || -> Result<Bf16SearchEngine, String> {
+        let mut engine = Bf16SearchEngine::new(&base, &leaves, HISTORY + 2)?;
+        engine.copy_row(0, 1)?;
+        engine.init_search(0.0, 0.0, HISTORY, 0.125, 0.001, 1.0)?;
+        Ok(engine)
+    };
+    let mut baseline = build().map_err(io::Error::other)?;
+    baseline.set_fused_pairs(false);
+    let mut fused = build().map_err(io::Error::other)?;
+    fused.set_fused_pairs(true);
+
+    let mut resident_history = 1usize;
+    for round in 1..=HISTORY {
+        let seeds = (0..CANDIDATES)
+            .map(|candidate| {
+                0x9e37_79b9_7f4a_7c15_u64.wrapping_mul((round * CANDIDATES + candidate + 1) as u64)
+            })
+            .collect::<Vec<_>>();
+        let config = ResidentAsk {
+            neighbors: resident_history.min(3),
+            acquisition: 0,
+            epistemic_scale: 0.7,
+            aleatoric_scale: 0.05,
+            y_scale: 1.0,
+            beta: 1.2,
+        };
+        let baseline_selection = baseline
+            .ask(
+                0,
+                resident_history,
+                &[TRIAL_SLOT],
+                &seeds,
+                CANDIDATES,
+                0.125,
+                0x600d_u64 + round as u64,
+                config,
+            )
+            .map_err(|error| io::Error::other(format!("BF16 pair baseline parity: {error}")))?;
+        let fused_selection = fused
+            .ask(
+                0,
+                resident_history,
+                &[TRIAL_SLOT],
+                &seeds,
+                CANDIDATES,
+                0.125,
+                0x600d_u64 + round as u64,
+                config,
+            )
+            .map_err(|error| io::Error::other(format!("BF16 pair fused parity: {error}")))?;
+        if baseline_selection.len() != 1
+            || fused_selection.len() != 1
+            || baseline_selection[0].index != fused_selection[0].index
+            || baseline_selection[0].score.to_bits() != fused_selection[0].score.to_bits()
+        {
+            return Err(io::Error::other(format!(
+                "BF16 fused-pair selection mismatch at round {round}: baseline={baseline_selection:?}, fused={fused_selection:?}"
+            ))
+            .into());
+        }
+        let baseline_row = baseline
+            .read(TRIAL_SLOT as usize)
+            .map_err(io::Error::other)?;
+        let fused_row = fused.read(TRIAL_SLOT as usize).map_err(io::Error::other)?;
+        if baseline_row != fused_row {
+            return Err(io::Error::other(format!(
+                "BF16 fused-pair materialization mismatch at round {round}"
+            ))
+            .into());
+        }
+        if round < HISTORY {
+            let outcome = (round as f32 - 2.0) * 0.25;
+            let baseline_summary = baseline
+                .tell(&[TRIAL_SLOT], &[outcome], &[0.0], HISTORY, HISTORY)
+                .map_err(io::Error::other)?;
+            let fused_summary = fused
+                .tell(&[TRIAL_SLOT], &[outcome], &[0.0], HISTORY, HISTORY)
+                .map_err(io::Error::other)?;
+            if baseline_summary.accepted != fused_summary.accepted
+                || baseline_summary.history != fused_summary.history
+                || baseline_summary.length.to_bits() != fused_summary.length.to_bits()
+                || baseline_summary.best.to_bits() != fused_summary.best.to_bits()
+            {
+                return Err(io::Error::other(format!(
+                    "BF16 fused-pair tell mismatch at round {round}"
+                ))
+                .into());
+            }
+            resident_history = baseline_summary.history;
+        }
+    }
     Ok(())
 }
 

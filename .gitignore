@@ -1,11 +1,14 @@
 target/
+/tmp/
+/.pytest_cache/
+/.ruff_cache/
 /dist/
 /Cargo.Bazel.lock
 /Cargo.lock
 /MODULE.bazel.lock
 /pixi.lock
-*kernel
-*metal
+/*kernel
+/*metal
 test
 minimal_test
 kernel_processing

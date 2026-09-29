@@ -1,6 +1,6 @@
 //! Reliability-aware, density-normalized trust-region control.
 
-use serde::{Deserialize, Serialize};
+use deser::{Deserialize, Serialize};
 
 use crate::trust_region::TRLengthConfig;
 
@@ -9,8 +9,8 @@ const MIN_POSITIVE: f64 = 1.0e-12;
 
 /// User-tunable policy for the full-weight ENN controller.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ReliabilityControllerConfig {
+#[deser(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct ReliabilityPolicy {
     /// Neighbor rank used for the incumbent's raw metric radius.
     pub local_scale_neighbors: usize,
     /// Discount applied to past correct/incorrect ordering evidence.
@@ -39,7 +39,7 @@ pub struct ReliabilityControllerConfig {
     pub escape_rounds: u32,
 }
 
-impl Default for ReliabilityControllerConfig {
+impl Default for ReliabilityPolicy {
     fn default() -> Self {
         Self {
             local_scale_neighbors: 8,
@@ -59,7 +59,7 @@ impl Default for ReliabilityControllerConfig {
     }
 }
 
-impl ReliabilityControllerConfig {
+impl ReliabilityPolicy {
     pub fn validate(self) -> Result<Self, String> {
         let probabilities = [
             ("evidence_decay", self.evidence_decay),
@@ -153,7 +153,7 @@ pub struct ReliabilityTelemetry {
 /// Constant-state controller over ENN ranking, progress, and local density.
 #[derive(Debug, Clone)]
 pub struct ReliabilityController {
-    config: ReliabilityControllerConfig,
+    config: ReliabilityPolicy,
     bounds: TRLengthConfig,
     length: f64,
     correct: f64,
@@ -167,10 +167,7 @@ pub struct ReliabilityController {
 }
 
 impl ReliabilityController {
-    pub fn new(
-        config: ReliabilityControllerConfig,
-        bounds: TRLengthConfig,
-    ) -> Result<Self, String> {
+    pub fn new(config: ReliabilityPolicy, bounds: TRLengthConfig) -> Result<Self, String> {
         let config = config.validate()?;
         let telemetry = ReliabilityTelemetry {
             action: ReliabilityAction::Hold,
@@ -202,7 +199,7 @@ impl ReliabilityController {
         })
     }
 
-    pub const fn config(&self) -> ReliabilityControllerConfig {
+    pub const fn config(&self) -> ReliabilityPolicy {
         self.config
     }
 
@@ -410,9 +407,9 @@ mod tests {
     }
 
     #[test]
-    fn reliable_progress_expands() {
+    fn reliable_progress() {
         let mut controller = ReliabilityController::new(
-            ReliabilityControllerConfig {
+            ReliabilityPolicy {
                 minimum_evidence: 1.0,
                 reliability_threshold: 0.4,
                 ..Default::default()
@@ -427,9 +424,9 @@ mod tests {
     }
 
     #[test]
-    fn unreliable_stagnation_shrinks() {
+    fn unreliable_stagnation() {
         let mut controller = ReliabilityController::new(
-            ReliabilityControllerConfig {
+            ReliabilityPolicy {
                 minimum_evidence: 1.0,
                 reliability_threshold: 0.9,
                 ..Default::default()
@@ -443,8 +440,8 @@ mod tests {
     }
 
     #[test]
-    fn reliable_stagnation_forces_fresh_escape() {
-        let config = ReliabilityControllerConfig {
+    fn stagnant_escape() {
+        let config = ReliabilityPolicy {
             minimum_evidence: 1.0,
             reliability_threshold: 0.4,
             stagnation_patience: 2,
@@ -461,8 +458,8 @@ mod tests {
     }
 
     #[test]
-    fn config_rejects_false_policy() {
-        let error = ReliabilityControllerConfig {
+    fn invalid_policy() {
+        let error = ReliabilityPolicy {
             expand_factor: 1.0,
             ..Default::default()
         }

@@ -6,8 +6,8 @@ _DEPS = [
     "//rust:opendal",
     "//rust:parquet",
     "//rust:parquet_opendal",
-    "//rust:serde",
-    "//rust:serde_json",
+    "//rust:deser",
+    "//rust/crates/wire:wire",
     "//rust:sha2",
     "//rust:tokio",
 ]

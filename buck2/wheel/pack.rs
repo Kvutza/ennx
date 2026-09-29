@@ -57,10 +57,7 @@ fn files_below(root: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn add_optimizer(
-    args: &Args,
-    wheel_files: &mut BTreeMap<String, Vec<u8>>,
-) -> io::Result<()> {
+fn add_optimizer(args: &Args, wheel_files: &mut BTreeMap<String, Vec<u8>>) -> io::Result<()> {
     let fixture_root = args.src_dir.join("tests/fixtures");
     for source in files_below(&fixture_root)? {
         let relative = source.strip_prefix(&fixture_root).unwrap();
@@ -243,8 +240,7 @@ fn zip(entries: &BTreeMap<String, Vec<u8>>) -> Vec<u8> {
     out
 }
 
-fn main() -> io::Result<()> {
-    let args = args();
+fn collect_payloads(args: &Args) -> io::Result<(BTreeMap<String, Vec<u8>>, String, String)> {
     let source_package = args.src_dir.join("src").join(&args.package);
     let all_files = files_below(&args.src_dir)?;
     let extensions: Vec<_> = all_files
@@ -313,6 +309,12 @@ fn main() -> io::Result<()> {
         format!("{dist_info}/licenses/NOTICE"),
         fs::read(args.src_dir.join("NOTICE"))?,
     );
+    Ok((wheel_files, dist_info, tag))
+}
+
+fn main() -> io::Result<()> {
+    let args = args();
+    let (mut wheel_files, dist_info, tag) = collect_payloads(&args)?;
     let mut metadata = format!(
         "Metadata-Version: 2.3\nName: {}\nVersion: {}\nSummary: Epistemic Nearest Neighbors\nRequires-Python: {}\nRequires-Dist: numpy>=2.1\nRequires-Dist: scipy>=1.11\nRequires-Dist: botorch>=0.18.1,<0.19\nRequires-Dist: optuna>=5.0,<5.1\nRequires-Dist: ax-platform>=1.3.1,<1.4\nDescription-Content-Type: text/markdown; charset=UTF-8\n\n",
         args.package, args.version, args.python_requires

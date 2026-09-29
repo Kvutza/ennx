@@ -1,4 +1,4 @@
-use serde::Serialize;
+use deser::Serialize;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
@@ -115,9 +115,9 @@ impl UpdateLog {
             radius: f32,
             accepted: bool,
             tensor_id: usize,
-            #[serde(flatten)]
+            #[deser(flatten)]
             tensor: &'a Tensor,
-            #[serde(flatten)]
+            #[deser(flatten)]
             metrics: Metrics,
         }
         for round in &self.rounds {
@@ -128,7 +128,7 @@ impl UpdateLog {
                 tensor.proposal_scale = round.scales[tensor_id];
                 tensor.trust_multiplier =
                     tensor.proposal_scale / tensor.initial_rms.max(1e-6) as f32;
-                serde_json::to_writer(
+                ennx_wire::json::to_writer(
                     &mut *writer,
                     &Record {
                         round: round.index,
@@ -173,10 +173,10 @@ mod tests {
         log.push(2, 18, 0.25, true, vec![(0, 0.0)]).unwrap();
         let mut bytes = Vec::new();
         log.write_to(&mut bytes).unwrap();
-        let rows: Vec<serde_json::Value> = String::from_utf8(bytes)
+        let rows: Vec<ennx_wire::json::Value> = String::from_utf8(bytes)
             .unwrap()
             .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
+            .map(|line| ennx_wire::json::from_str(line).unwrap())
             .collect();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["changed_fraction"], 0.5);

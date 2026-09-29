@@ -12,7 +12,7 @@ use crate::tuning::current_tuning;
 pub const LEAF_CAPACITY: usize = 32;
 pub const SKIP_NEIGHBORS: usize = 3;
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, deser::Serialize, deser::Deserialize)]
 pub struct IndexHeader {
     pub num_dim: usize,
     pub indexed_rows: usize,
@@ -329,8 +329,8 @@ impl BpannIndex {
         let header_path = index_dir.join("header.json");
         let text = fs::read_to_string(&header_path)
             .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
-        let header: IndexHeader =
-            serde_json::from_str(&text).map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
+        let header: IndexHeader = ennx_wire::json::from_str(&text)
+            .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
         let pages_path = index_dir.join("pages.bin");
         let file =
             File::open(&pages_path).map_err(|e| BpannError::InvalidParameter(e.to_string()))?;

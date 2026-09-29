@@ -11,3 +11,8 @@ native-flame = []
 cuda-core.workspace = true
 cuda-host.workspace = true
 ennx-cuda-kernels = { path = "kernels" }
+ennx-wire.workspace = true
+memmap2 = "0.9"
+deser.workspace = true
+ptx-synth.workspace = true
+half = "2.7"

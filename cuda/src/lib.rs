@@ -12,22 +12,160 @@ use cuda_host::embedded::{ArtifactPayloadKind, EmbeddedModuleError, OwnedArtifac
 use ennx_cuda_kernels::trials;
 pub use ennx_cuda_kernels::{
     BatchValue, Bf16Change, Bf16Leaf, Bf16Score, CenterStep, DenseLeaf, DenseLinearParams,
-    DenseTerm, DenseTile, KNN_K, Leaf, MAX_DEPTH, MAX_HISTORY, SearchState, Seed, Selection,
-    SparseEdit, THREADS, TellParams, TellSummary, Tile,
+    DenseTerm, DenseTile, FbtShape, FeedbackShape, KNN_K, Leaf, MAX_DEPTH, MAX_HISTORY,
+    MatmulShape, MoeShape, PisaShape, RouteShape, RoutedTile, SearchState, Seed, Selection,
+    SparseEdit, THREADS, TellParams, TellSummary, Tile, fbt_model,
 };
 
 pub type CudaResult<T> = Result<T, String>;
+pub mod gemm;
+mod precision;
+
+/// Verify column-major checkpoint packing and token-major device lookup with
+/// values that expose token/column transposition errors.
+pub fn embed_parity() -> CudaResult<()> {
+    const ROWS: usize = 3;
+    const WIDTH: usize = 17;
+    const VOCAB: usize = 19;
+    let context = CudaContext::new(0).map_err(cuda_error)?;
+    let stream = context.default_stream();
+    // SAFETY: the generated bindings load the matching embedded FBT module.
+    let module = unsafe { fbt_model::load(&context) }.map_err(cuda_error)?;
+    let checkpoint = (0..WIDTH * VOCAB)
+        .map(|index| index as u16)
+        .collect::<Vec<_>>();
+    let packed = prefill::pack_embedding(&checkpoint, WIDTH, VOCAB);
+    let tokens = [3_u32, 7, 18];
+    let weights = DeviceBuffer::from_host(&stream, &packed).map_err(cuda_error)?;
+    let tokens_device = DeviceBuffer::from_host(&stream, &tokens).map_err(cuda_error)?;
+    let mut output = DeviceBuffer::zeroed(&stream, ROWS * WIDTH).map_err(cuda_error)?;
+    let shape =
+        FbtShape::new(ROWS as u32, WIDTH as u32, VOCAB as u32, 1.0e-5).map_err(str::to_string)?;
+    let launch = module
+        .prepare_embed_packed(LaunchConfig1D::new(ROWS as u32, 256, 0))
+        .map_err(cuda_error)?;
+    module
+        .embed_packed(
+            &stream,
+            &launch,
+            &weights,
+            &tokens_device,
+            &mut output,
+            shape,
+        )
+        .map_err(cuda_error)?;
+    context.check_err().map_err(cuda_error)?;
+    let actual = read_prefix(&output, &stream, ROWS * WIDTH)?;
+    let mut expected = Vec::with_capacity(ROWS * WIDTH);
+    for token in tokens {
+        for column in 0..WIDTH {
+            expected.push(checkpoint[column * VOCAB + token as usize]);
+        }
+    }
+    if actual != expected {
+        return Err("CUDA packed embedding parity mismatch".into());
+    }
+    Ok(())
+}
+
+/// Exercise the CUDA feedback primitives on-device with exact FP16 fixtures.
+pub fn feedback_parity() -> CudaResult<()> {
+    let context = CudaContext::new(0).map_err(cuda_error)?;
+    let stream = context.default_stream();
+    // SAFETY: the generated bindings load the matching embedded FBT module.
+    let module = unsafe { fbt_model::load(&context) }.map_err(cuda_error)?;
+    let mut shape = FeedbackShape::fbt(4, 2).map_err(str::to_string)?;
+    shape.token_unit_rms = 0;
+    shape.fused_unit_rms = 0;
+    let elements = (shape.rows * shape.width) as usize;
+    let history = vec![0x3c00_u16; elements];
+    let tokens = vec![0x4000_u16; elements];
+    let value = vec![0x4000_u16; elements];
+    let logit = vec![0_u16; elements];
+    let history = DeviceBuffer::from_host(&stream, &history).map_err(cuda_error)?;
+    let tokens = DeviceBuffer::from_host(&stream, &tokens).map_err(cuda_error)?;
+    let value = DeviceBuffer::from_host(&stream, &value).map_err(cuda_error)?;
+    let logit = DeviceBuffer::from_host(&stream, &logit).map_err(cuda_error)?;
+    let mut previous = DeviceBuffer::zeroed(&stream, elements).map_err(cuda_error)?;
+    let mut normalized = DeviceBuffer::zeroed(&stream, elements).map_err(cuda_error)?;
+    let mut fused = DeviceBuffer::zeroed(&stream, shape.rows as usize).map_err(cuda_error)?;
+    let mut output = DeviceBuffer::zeroed(&stream, elements).map_err(cuda_error)?;
+    let shift_launch = module
+        .prepare_feedback_shift(LaunchConfig1D::new(shape.rows, 256, 0))
+        .map_err(cuda_error)?;
+    let norm_launch = module
+        .prepare_feedback_norm(LaunchConfig1D::new(shape.rows, 256, 0))
+        .map_err(cuda_error)?;
+    let combine_launch = module
+        .prepare_feedback_combine(LaunchConfig1D::new(shape.rows, 256, 0))
+        .map_err(cuda_error)?;
+    // Generated launch contracts validate the shapes and disjoint outputs.
+    module
+        .feedback_shift(
+            &stream,
+            &shift_launch,
+            &history,
+            &mut previous,
+            &mut fused,
+            shape,
+        )
+        .map_err(cuda_error)?;
+    shape.token_unit_rms = 1;
+    module
+        .feedback_norm(&stream, &norm_launch, &history, &mut normalized, shape)
+        .map_err(cuda_error)?;
+    shape.token_unit_rms = 0;
+    module
+        .feedback_combine(
+            &stream,
+            &combine_launch,
+            &value,
+            &logit,
+            &tokens,
+            &fused,
+            &mut output,
+            shape,
+        )
+        .map_err(cuda_error)?;
+    context.check_err().map_err(cuda_error)?;
+    let previous = read_prefix(&previous, &stream, elements)?;
+    let normalized = read_prefix(&normalized, &stream, elements)?;
+    let fused = read_prefix(&fused, &stream, shape.rows as usize)?;
+    let output = read_prefix(&output, &stream, elements)?;
+    if fused != [0, 1, 0, 1]
+        || previous[..shape.width as usize].iter().any(|&v| v != 0)
+        || previous[shape.width as usize..2 * shape.width as usize]
+            .iter()
+            .any(|&v| v != 0x3c00)
+        || normalized.iter().any(|&v| v != 0x3c00)
+        || output[..shape.width as usize].iter().any(|&v| v != 0x4000)
+        || output[shape.width as usize..2 * shape.width as usize]
+            .iter()
+            .any(|&v| v != 0x3c00)
+    {
+        return Err("CUDA feedback parity mismatch".into());
+    }
+    Ok(())
+}
 
 #[cfg(feature = "native-flame")]
 pub mod flame;
 
 mod bf16_search;
 pub use bf16_search::{Bf16SearchEngine, ProposalDescription, TellOutput};
+pub mod context;
 mod knn;
+mod model;
+mod prefill;
 pub use knn::{
     BatchOutput, BatchSpec, CudaIndex, DrawOutput, KnnProfile, PosteriorOutput, PosteriorSpec,
     WeightedOutput, WeightedSpec,
 };
+pub use model::run::{
+    bench as generation_bench, check as model_check, generate as model_generate, run as model_run,
+};
+pub use model::{FbtModel, GenerationOutput, ModelOutput, WaveProfile};
+pub use prefill::{FbtPrefill, FbtPrefillProfile};
 
 static TRIAL_BUNDLE: OnceLock<Result<OwnedArtifactBundle, String>> = OnceLock::new();
 #[repr(C)]
@@ -1607,3 +1745,5 @@ fn trial_layout(row_bytes: usize, leaves: &[Leaf], tiles: &[Tile]) -> CudaResult
 fn cuda_error(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
+
+pub use model::diffusion_run::{check as diffusion_check, run as model_diffusion};

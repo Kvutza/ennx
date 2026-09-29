@@ -1,4 +1,4 @@
-//! Immutable fixed-shape token streams for the 4K pretraining study.
+//! Immutable fixed-shape token streams for the 4K pretraining experiment.
 
 use std::path::Path;
 
@@ -75,6 +75,30 @@ impl PretrainDataset {
         self.sequences / 2
     }
 
+    pub(crate) fn sequences(&self) -> u32 {
+        self.sequences
+    }
+
+    pub(crate) fn prefix(&self, count: usize) -> Result<&[u16], String> {
+        self.tokens.get(..count).ok_or_else(|| {
+            format!(
+                "context workload needs {count} distinct corpus positions, dataset contains {}",
+                self.tokens.len()
+            )
+        })
+    }
+
+    pub(crate) fn sequence(&self, index: u32) -> Result<&[u16], String> {
+        if index >= self.sequences {
+            return Err(format!(
+                "pretraining sequence {index} exceeds the {} available sequences",
+                self.sequences
+            ));
+        }
+        let start = index as usize * CONTEXT as usize;
+        Ok(&self.tokens[start..start + CONTEXT as usize])
+    }
+
     pub(crate) fn batch(&self, index: u32) -> Result<&[u16], String> {
         if index >= self.batches() {
             return Err(format!(
@@ -107,18 +131,21 @@ mod tests {
     }
 
     #[test]
-    fn loads_fixed_batches() {
+    fn fixed_batches() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("pretrain.bin");
         std::fs::write(&path, document(4)).unwrap();
         let data = PretrainDataset::load(&path).unwrap();
         assert_eq!(data.batches(), 2);
+        assert_eq!(data.sequences(), 4);
+        assert_eq!(data.sequence(3).unwrap().len(), CONTEXT as usize);
+        assert!(data.sequence(4).is_err());
         assert_eq!(data.batch(1).unwrap().len(), 2 * CONTEXT as usize);
         assert!(data.batch(2).is_err());
     }
 
     #[test]
-    fn rejects_out_of_vocabulary_tokens() {
+    fn invalid_tokens() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("pretrain.bin");
         let mut bytes = document(2);

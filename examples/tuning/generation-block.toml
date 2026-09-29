@@ -1,0 +1,50 @@
+# Measures incumbent-draft block verification before the 4096-token run.
+version = 2
+output = "../../.cache/ennx/runs/generation-block-suffix-repair"
+
+experiment = "generation"
+model = "fbt-pisa1-legacy-v1"
+
+[run]
+rounds = 1
+target-ms = 200
+
+[proposal]
+distribution = "rademacher"
+
+[enn]
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+
+[acquisition]
+method = "ucb"
+beta = 0.75
+
+[trust-region]
+method = "turbo"
+shape = "tensor-family-learned"
+initial = 0.01
+min = 0.0001
+max = 0.1
+
+[generation]
+purpose = "systems-probe"
+max-tokens = 32
+temperature = 0.0
+
+[generation.verify]
+mode = "accepted-prefix"
+window = 128
+max-window = 128
+passes = 2
+unroll = 2
+
+[generation.reward]
+kind = "token-accuracy"
+
+[[generation.tasks]]
+prompt = [1, 2, 3, 4]
+expected = [5, 6, 7, 8]

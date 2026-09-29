@@ -1,4 +1,4 @@
-//! 2D hypervolume calculation for maximization problems.
+//! Exact hypervolume calculation for bounded maximization problems.
 
 use ndarray::{ArrayView1, ArrayView2};
 use thiserror::Error;
@@ -15,6 +15,96 @@ pub enum HypervolumeError {
     /// Reference point has wrong shape.
     #[error("ref_point must have 2 elements, got shape {0:?}")]
     InvalidRefPoint(usize),
+    /// Input and reference dimensions disagree.
+    #[error("y has {columns} columns but ref_point has {reference} elements")]
+    DimensionMismatch { columns: usize, reference: usize },
+}
+
+/// Exact dominated hypervolume for maximization in one or more dimensions.
+///
+/// The resident optimizer has at most 128 observations and eight objectives,
+/// so an exact recursive slicing algorithm is preferable to a sampled proxy.
+/// Dominated rows are removed before slicing.
+pub fn hypervolume_max(
+    y: &ArrayView2<f64>,
+    ref_point: &ArrayView1<f64>,
+) -> Result<f64, HypervolumeError> {
+    if y.ndim() != 2 {
+        return Err(HypervolumeError::InvalidDimension(y.shape().to_vec()));
+    }
+    if y.ncols() != ref_point.len() {
+        return Err(HypervolumeError::DimensionMismatch {
+            columns: y.ncols(),
+            reference: ref_point.len(),
+        });
+    }
+    if y.ncols() == 0 || y.nrows() == 0 {
+        return Ok(0.0);
+    }
+    let mut points = y
+        .rows()
+        .into_iter()
+        .filter(|row| {
+            row.iter()
+                .zip(ref_point)
+                .all(|(value, reference)| value.is_finite() && value > reference)
+        })
+        .map(|row| row.to_vec())
+        .collect::<Vec<_>>();
+    pareto_prune(&mut points);
+    let reference = ref_point.iter().copied().collect::<Vec<_>>();
+    Ok(slice_volume(&points, &reference))
+}
+
+fn dominates(left: &[f64], right: &[f64]) -> bool {
+    left.iter().zip(right).all(|(a, b)| a >= b) && left.iter().zip(right).any(|(a, b)| a > b)
+}
+
+fn pareto_prune(points: &mut Vec<Vec<f64>>) {
+    let keep = (0..points.len())
+        .map(|index| {
+            !(0..points.len()).any(|other| {
+                other != index
+                    && (dominates(&points[other], &points[index])
+                        || (points[other] == points[index] && other < index))
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut cursor = 0;
+    points.retain(|_| {
+        let retain = keep[cursor];
+        cursor += 1;
+        retain
+    });
+}
+
+fn slice_volume(points: &[Vec<f64>], reference: &[f64]) -> f64 {
+    if points.is_empty() {
+        return 0.0;
+    }
+    if reference.len() == 1 {
+        return points
+            .iter()
+            .map(|point| point[0])
+            .fold(reference[0], f64::max)
+            - reference[0];
+    }
+    let axis = reference.len() - 1;
+    let mut edges = points.iter().map(|point| point[axis]).collect::<Vec<_>>();
+    edges.sort_by(f64::total_cmp);
+    edges.dedup_by(|left, right| left.total_cmp(right).is_eq());
+    let mut previous = reference[axis];
+    let mut volume = 0.0;
+    for edge in edges {
+        let projected = points
+            .iter()
+            .filter(|point| point[axis] >= edge)
+            .map(|point| point[..axis].to_vec())
+            .collect::<Vec<_>>();
+        volume += (edge - previous) * slice_volume(&projected, &reference[..axis]);
+        previous = edge;
+    }
+    volume
 }
 
 /// Calculate 2D hypervolume for maximization problems.
@@ -163,6 +253,23 @@ mod tests {
         let y = array![[1.0, 1.0], [0.2, 0.2], [0.5, 0.5]];
         let result = hypervolume_origin(&y.view());
         assert!((result - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn volume_3d() {
+        let y = array![[1.0, 1.0, 1.0], [2.0, 0.5, 0.5]];
+        let reference = array![0.0, 0.0, 0.0];
+        let volume = hypervolume_max(&y.view(), &reference.view()).unwrap();
+        assert!((volume - 1.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn volume_parity() {
+        let y = array![[1.0, 0.5], [0.5, 1.0], [0.2, 0.2]];
+        let reference = array![0.0, 0.0];
+        let exact = hypervolume_max(&y.view(), &reference.view()).unwrap();
+        let specialized = hypervolume2d_max(&y.view(), &reference.view()).unwrap();
+        assert!((exact - specialized).abs() < 1e-12);
     }
 
     #[test]

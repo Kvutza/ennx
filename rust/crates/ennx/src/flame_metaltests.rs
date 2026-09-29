@@ -55,44 +55,6 @@ fn cpu_logits(c: FlameConfig, bits: &[u16], tokens: &[i32]) -> Vec<f32> {
         .collect();
     let h = c.width as usize;
     let n = tokens.len();
-    let linear = |x: &[f32], offset: usize, inside: usize, outside: usize| -> Vec<f32> {
-        x.chunks_exact(inside)
-            .flat_map(|row| {
-                (0..outside)
-                    .map(|o| {
-                        row.iter()
-                            .zip(&w[offset + o * inside..offset + (o + 1) * inside])
-                            .fold(0.0f32, |sum, (&a, &b)| a.mul_add(b, sum))
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    };
-    let norm = |x: &[f32], offset: usize| -> Vec<f32> {
-        x.chunks_exact(h)
-            .flat_map(|row| {
-                let inv = (row.iter().map(|&v| v * v).sum::<f32>() / h as f32 + c.epsilon)
-                    .sqrt()
-                    .recip();
-                row.iter()
-                    .enumerate()
-                    .map(|(i, &v)| (v * inv) * w[offset + i])
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    };
-    let mlp = |x: &[f32], first: usize, second: usize, hidden: usize| -> Vec<f32> {
-        let gates = linear(x, first, h, 2 * hidden);
-        let activation: Vec<f32> = gates
-            .chunks_exact(2 * hidden)
-            .flat_map(|row| {
-                (0..hidden)
-                    .map(|i| (row[i] / (1.0 + (-row[i]).exp())) * row[hidden + i])
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        linear(&activation, second, hidden, h)
-    };
     let mut x: Vec<f32> = tokens
         .iter()
         .flat_map(|&t| {
@@ -102,62 +64,17 @@ fn cpu_logits(c: FlameConfig, bits: &[u16], tokens: &[i32]) -> Vec<f32> {
         })
         .collect();
     for (i, layer) in layout.layers.iter().enumerate() {
-        let z = norm(&x, layer.attention_norm);
-        let qkv = linear(&z, layer.qkv, h, 3 * h);
-        let d = h / c.heads as usize;
-        let mut q = vec![0.0f32; n * h];
-        let mut k = q.clone();
-        let mut v = q.clone();
-        for pos in 0..n {
-            for head in 0..c.heads as usize {
-                for j in 0..d {
-                    let src = pos * 3 * h + head * 3 * d;
-                    let dst = pos * h + head * d + j;
-                    let partner = (j + d / 2) % d;
-                    let sign = if j < d / 2 { -1.0 } else { 1.0 };
-                    let angle =
-                        pos as f32 * c.rope_base.powf(-((2 * (j % (d / 2))) as f32) / d as f32);
-                    q[dst] = qkv[src + j] * angle.cos() + sign * qkv[src + partner] * angle.sin();
-                    k[dst] = qkv[src + d + j] * angle.cos()
-                        + sign * qkv[src + d + partner] * angle.sin();
-                    v[dst] = qkv[src + 2 * d + j];
-                }
-            }
-        }
-        let mut attended = vec![0.0f32; n * h];
-        for pos in 0..n {
-            for head in 0..c.heads as usize {
-                let mut scores: Vec<f32> = (0..=pos)
-                    .map(|past| {
-                        (0..d).fold(0.0f32, |sum, j| {
-                            q[pos * h + head * d + j].mul_add(k[past * h + head * d + j], sum)
-                        }) / (d as f32).sqrt()
-                    })
-                    .collect();
-                let peak = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                for s in &mut scores {
-                    *s = (*s - peak).exp();
-                }
-                let sum = scores.iter().sum::<f32>();
-                for s in &mut scores {
-                    *s /= sum;
-                }
-                for j in 0..d {
-                    attended[pos * h + head * d + j] = scores
-                        .iter()
-                        .enumerate()
-                        .fold(0.0f32, |sum, (past, &score)| {
-                            score.mul_add(v[past * h + head * d + j], sum)
-                        });
-                }
-            }
-        }
-        let update = linear(&attended, layer.projection, h, h);
+        let z = cpu_norm(c, &w, &x, layer.attention_norm);
+        let qkv = cpu_linear(&w, &z, layer.qkv, h, 3 * h);
+        let attended = cpu_attention(c, &qkv, n);
+        let update = cpu_linear(&w, &attended, layer.projection, h, h);
         for (x, a) in x.iter_mut().zip(update) {
             *x += a;
         }
-        let z = norm(&x, layer.mlp_norm);
-        let mut update = mlp(
+        let z = cpu_norm(c, &w, &x, layer.mlp_norm);
+        let mut update = cpu_mlp(
+            c,
+            &w,
             &z,
             layer.first,
             layer.second,
@@ -168,45 +85,157 @@ fn cpu_logits(c: FlameConfig, bits: &[u16], tokens: &[i32]) -> Vec<f32> {
             } as usize,
         );
         if i != 0 {
-            let logits = linear(&z, layer.router, h, c.experts as usize);
-            for row in 0..n {
-                let values = &logits[row * c.experts as usize..(row + 1) * c.experts as usize];
-                let peak = values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                let mut probs: Vec<f32> = values.iter().map(|&x| (x - peak).exp()).collect();
-                let sum = probs.iter().sum::<f32>();
-                for p in &mut probs {
-                    *p /= sum;
-                }
-                let mut ids: Vec<usize> = (0..c.experts as usize).collect();
-                ids.sort_by(|&a, &b| probs[b].partial_cmp(&probs[a]).unwrap().then(a.cmp(&b)));
-                let mut routed = vec![0.0f32; h];
-                for &e in &ids[..c.top_k as usize] {
-                    let hidden = c.expert_width as usize;
-                    let expert = mlp(
-                        &z[row * h..(row + 1) * h],
-                        layer.expert_first + e * 2 * hidden * h,
-                        layer.expert_second + e * h * hidden,
-                        hidden,
-                    );
-                    for j in 0..h {
-                        routed[j] += probs[e] * expert[j];
-                    }
-                }
-                for j in 0..h {
-                    update[row * h + j] += routed[j];
-                }
-            }
+            cpu_routed(c, &w, layer, &z, n, &mut update);
         }
         for (x, update) in x.iter_mut().zip(update) {
             *x += update;
         }
     }
-    linear(
-        &norm(&x, layout.final_norm),
+    cpu_linear(
+        &w,
+        &cpu_norm(c, &w, &x, layout.final_norm),
         layout.output,
         h,
         c.vocab as usize,
     )
+}
+
+fn cpu_linear(w: &[f32], x: &[f32], offset: usize, inside: usize, outside: usize) -> Vec<f32> {
+    x.chunks_exact(inside)
+        .flat_map(|row| {
+            (0..outside)
+                .map(|o| cpu_dot(row, &w[offset + o * inside..offset + (o + 1) * inside]))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn cpu_dot(row: &[f32], weights: &[f32]) -> f32 {
+    row.iter()
+        .zip(weights)
+        .fold(0.0f32, |sum, (&a, &b)| a.mul_add(b, sum))
+}
+
+fn cpu_norm(c: FlameConfig, w: &[f32], x: &[f32], offset: usize) -> Vec<f32> {
+    let h = c.width as usize;
+    x.chunks_exact(h)
+        .flat_map(|row| {
+            let inv = (row.iter().map(|&v| v * v).sum::<f32>() / h as f32 + c.epsilon)
+                .sqrt()
+                .recip();
+            row.iter()
+                .enumerate()
+                .map(|(i, &v)| (v * inv) * w[offset + i])
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn cpu_mlp(
+    c: FlameConfig,
+    w: &[f32],
+    x: &[f32],
+    first: usize,
+    second: usize,
+    hidden: usize,
+) -> Vec<f32> {
+    let h = c.width as usize;
+    let gates = cpu_linear(w, x, first, h, 2 * hidden);
+    let activation: Vec<f32> = gates
+        .chunks_exact(2 * hidden)
+        .flat_map(|row| {
+            (0..hidden)
+                .map(|i| (row[i] / (1.0 + (-row[i]).exp())) * row[hidden + i])
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    cpu_linear(w, &activation, second, hidden, h)
+}
+
+fn cpu_routed(c: FlameConfig, w: &[f32], layer: &Layer, z: &[f32], n: usize, update: &mut [f32]) {
+    let h = c.width as usize;
+    let logits = cpu_linear(w, &z, layer.router, h, c.experts as usize);
+    for row in 0..n {
+        let values = &logits[row * c.experts as usize..(row + 1) * c.experts as usize];
+        let peak = values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let mut probs: Vec<f32> = values.iter().map(|&x| (x - peak).exp()).collect();
+        let sum = probs.iter().sum::<f32>();
+        for p in &mut probs {
+            *p /= sum;
+        }
+        let mut ids: Vec<usize> = (0..c.experts as usize).collect();
+        ids.sort_by(|&a, &b| probs[b].partial_cmp(&probs[a]).unwrap().then(a.cmp(&b)));
+        let mut routed = vec![0.0f32; h];
+        for &e in &ids[..c.top_k as usize] {
+            let hidden = c.expert_width as usize;
+            let expert = cpu_mlp(
+                c,
+                w,
+                &z[row * h..(row + 1) * h],
+                layer.expert_first + e * 2 * hidden * h,
+                layer.expert_second + e * h * hidden,
+                hidden,
+            );
+            for j in 0..h {
+                routed[j] += probs[e] * expert[j];
+            }
+        }
+        for j in 0..h {
+            update[row * h + j] += routed[j];
+        }
+    }
+}
+
+fn cpu_attention(c: FlameConfig, qkv: &[f32], n: usize) -> Vec<f32> {
+    let h = c.width as usize;
+    let d = h / c.heads as usize;
+    let mut q = vec![0.0f32; n * h];
+    let mut k = q.clone();
+    let mut v = q.clone();
+    for pos in 0..n {
+        for head in 0..c.heads as usize {
+            for j in 0..d {
+                let src = pos * 3 * h + head * 3 * d;
+                let dst = pos * h + head * d + j;
+                let partner = (j + d / 2) % d;
+                let sign = if j < d / 2 { -1.0 } else { 1.0 };
+                let angle = pos as f32 * c.rope_base.powf(-((2 * (j % (d / 2))) as f32) / d as f32);
+                q[dst] = qkv[src + j] * angle.cos() + sign * qkv[src + partner] * angle.sin();
+                k[dst] =
+                    qkv[src + d + j] * angle.cos() + sign * qkv[src + d + partner] * angle.sin();
+                v[dst] = qkv[src + 2 * d + j];
+            }
+        }
+    }
+    let mut attended = vec![0.0f32; n * h];
+    for pos in 0..n {
+        for head in 0..c.heads as usize {
+            let mut scores: Vec<f32> = (0..=pos)
+                .map(|past| {
+                    (0..d).fold(0.0f32, |sum, j| {
+                        q[pos * h + head * d + j].mul_add(k[past * h + head * d + j], sum)
+                    }) / (d as f32).sqrt()
+                })
+                .collect();
+            let peak = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            for s in &mut scores {
+                *s = (*s - peak).exp();
+            }
+            let sum = scores.iter().sum::<f32>();
+            for s in &mut scores {
+                *s /= sum;
+            }
+            for j in 0..d {
+                attended[pos * h + head * d + j] = scores
+                    .iter()
+                    .enumerate()
+                    .fold(0.0f32, |sum, (past, &score)| {
+                        score.mul_add(v[past * h + head * d + j], sum)
+                    });
+            }
+        }
+    }
+    attended
 }
 
 #[test]

@@ -6,11 +6,26 @@ module(
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "openmp", version = "21.1.5.bcr.2")
 bazel_dep(name = "apple_support", version = "1.24.2")
-bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "rules_cc", version = "0.2.22")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 bazel_dep(name = "rules_python", version = "2.2.0")
 bazel_dep(name = "rules_rust", version = "0.71.3")
 bazel_dep(name = "buildifier_prebuilt", version = "8.5.1.2")
+
+# OpenGrm is not yet published in the Bazel Central Registry. Keep both it and
+# the OpenFst revision it declares pinned so grammar corpora are reproducible.
+bazel_dep(name = "opengrm", version = "0.0.0")
+git_override(
+    module_name = "opengrm",
+    commit = "ce0d58aa1d6ae84151ca1531c695e4e9debed77f",
+    remote = "https://github.com/google-research/opengrm.git",
+)
+bazel_dep(name = "openfst", version = "0.0.0", repo_name = "com_google_openfst")
+git_override(
+    module_name = "openfst",
+    commit = "4a2f04b8ec3b445d153c653d49aa5d055811e90d",
+    remote = "https://github.com/google-research/openfst.git",
+)
 
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.defaults(python_version = "3.13")

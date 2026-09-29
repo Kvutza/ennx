@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use bpann::BpannBackend;
 use ndarray::{Array1, ArrayView1, ArrayView2, Axis};
+
+use crate::disk_bpann::DiskBpannEnnBackend;
 
 /// Stable row identifier returned by the compact BPANN history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -21,8 +22,9 @@ pub struct IndexedObservation {
 /// regenerates those rows separately and uses the returned [`ObservationId`]s
 /// to resolve only the shortlist loaded into `Search::replace_history`.
 pub struct BpannHistory {
-    backend: BpannBackend,
+    backend: DiskBpannEnnBackend,
     descriptor_dim: usize,
+    scale: Array1<f64>,
 }
 
 impl BpannHistory {
@@ -30,11 +32,12 @@ impl BpannHistory {
         if descriptor_dim == 0 {
             return Err("BPANN history descriptor dimension must be positive".to_string());
         }
-        let backend = BpannBackend::new_empty(work_dir, descriptor_dim, 1)
+        let backend = DiskBpannEnnBackend::new_empty(work_dir, descriptor_dim, 1)
             .map_err(|error| error.to_string())?;
         Ok(Self {
             backend,
             descriptor_dim,
+            scale: Array1::ones(descriptor_dim),
         })
     }
 
@@ -73,19 +76,18 @@ impl BpannHistory {
             u64::try_from(self.backend.len())
                 .map_err(|_| "BPANN observation ID exceeds u64 range".to_string())?,
         );
+        let descriptor = descriptor.insert_axis(Axis(0));
+        let outcome = Array1::from_vec(vec![f64::from(value)]);
+        let outcome = outcome.view().insert_axis(Axis(0));
         self.backend
-            .append_row(
-                &descriptor.to_owned(),
-                &Array1::from_vec(vec![f64::from(value)]),
-                None,
-            )
+            .append_rows(&descriptor, &outcome, None)
             .map_err(|error| error.to_string())?;
         Ok(id)
     }
 
     pub fn sync(&mut self) -> Result<(), String> {
         self.backend
-            .ensure_sync()
+            .ensure_sync(false, &self.scale)
             .map_err(|error| error.to_string())
     }
 
@@ -110,19 +112,16 @@ impl BpannHistory {
         }
         let (_, indices) = self
             .backend
-            .search(queries, neighbors, false)
+            .search(
+                queries,
+                i32::try_from(neighbors)
+                    .map_err(|_| "BPANN neighbor count exceeds i32".to_string())?,
+                false,
+            )
             .map_err(|error| error.to_string())?;
         indices
             .axis_iter(Axis(0))
-            .map(|row| {
-                row.iter()
-                    .map(|&index| {
-                        u64::try_from(index)
-                            .map(ObservationId)
-                            .map_err(|_| format!("BPANN returned invalid observation ID {index}"))
-                    })
-                    .collect()
-            })
+            .map(|row| row.iter().map(|&index| observation_id(index)).collect())
             .collect()
     }
 
@@ -276,4 +275,10 @@ mod tests {
             }]
         );
     }
+}
+
+fn observation_id(index: i64) -> Result<ObservationId, String> {
+    u64::try_from(index)
+        .map(ObservationId)
+        .map_err(|_| format!("BPANN returned invalid observation ID {index}"))
 }

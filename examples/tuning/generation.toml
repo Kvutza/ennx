@@ -1,0 +1,56 @@
+# Execution smoke workload, not a language-quality benchmark. Token IDs use
+# the native 8192-entry vocabulary. Replace tasks/reward with the real evaluator.
+version = 2
+output = "../../.cache/ennx/runs/generation"
+
+experiment = "generation"
+model = "fbt-pisa1-legacy-v1"
+
+[run]
+rounds = 12
+target-ms = 200
+
+[proposal]
+distribution = "gaussian"
+
+[enn]
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+
+[acquisition]
+method = "ucb"
+beta = 0.75
+
+[trust-region]
+method = "turbo"
+shape = "tensor-family-learned"
+initial = 0.01
+min = 0.0001
+max = 0.1
+
+[generation]
+purpose = "systems-probe"
+max-tokens = 16
+temperature = 0.6457
+temperature-bounds = [0.0001, 0.9997]
+temperature-step = 0.2
+# checkpoint = "../../.cache/ennx/model.fp16"
+# save_checkpoint = "../../.cache/ennx/model-next.fp16"
+# Optional seed and eos_token; omitted seeds come from system entropy and are logged.
+
+[generation.reward]
+kind = "token-accuracy"
+# External alternative: kind = "command", program = "./evaluator", args = [],
+# timeout_ms = 1000. Receives request.json and response.json paths, without a shell.
+# Return {"rewards": [score_per_task, ...]}; higher is better. Evaluator time counts.
+
+[[generation.tasks]]
+prompt = [1, 2, 3, 4]
+expected = [5, 6, 7, 8]
+
+[[generation.tasks]]
+prompt = [8, 7, 6, 5]
+expected = [4, 3, 2, 1]

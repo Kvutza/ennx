@@ -4,11 +4,11 @@
 //! updated when an operation becomes resident, gains an explicit fallback, or is
 //! removed from a backend.
 
-use serde::{Deserialize, Serialize};
+use deser::{Deserialize, Serialize};
 
 /// Execution backend tracked by the capability matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
 pub enum Backend {
     Cpu,
     Cuda,
@@ -18,7 +18,7 @@ pub enum Backend {
 
 /// Library operation tracked for backend parity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
 pub enum Operation {
     ExactDist,
     AnnIndex,
@@ -32,7 +32,7 @@ pub enum Operation {
 
 /// Capability status for one backend/operation pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
 pub enum Support {
     Direct,
     Fallback,

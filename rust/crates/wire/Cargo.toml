@@ -1,0 +1,13 @@
+[package]
+name = "ennx-wire"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Native Deser JSON and TOML I/O for ENNX"
+
+[dependencies]
+deser.workspace = true
+deser-json = { version = "=0.9.1", features = ["speedups"] }
+deser-toml = "=0.9.1"
+deser-value = "=0.9.1"

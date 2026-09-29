@@ -283,8 +283,6 @@ impl ParetoAcquisition {
         }
 
         let n = objectives.nrows();
-        let m = objectives.ncols();
-
         if n == 0 {
             return Vec::new();
         }
@@ -301,37 +299,10 @@ impl ParetoAcquisition {
                     continue;
                 }
 
-                // Check if i dominates j (all objectives >= and at least one >)
-                let mut all_gte = true;
-                let mut any_gt = false;
-                for k in 0..m {
-                    if objectives[[i, k]] < objectives[[j, k]] {
-                        all_gte = false;
-                        break;
-                    }
-                    if objectives[[i, k]] > objectives[[j, k]] {
-                        any_gt = true;
-                    }
-                }
-
-                if all_gte && any_gt {
+                if dominates(objectives, i, j) {
                     dominated[i].push(j);
-                } else if !all_gte {
-                    // Check if j dominates i
-                    let mut j_gte = true;
-                    let mut j_gt = false;
-                    for k in 0..m {
-                        if objectives[[j, k]] < objectives[[i, k]] {
-                            j_gte = false;
-                            break;
-                        }
-                        if objectives[[j, k]] > objectives[[i, k]] {
-                            j_gt = true;
-                        }
-                    }
-                    if j_gte && j_gt {
-                        domination_count[i] += 1;
-                    }
+                } else if dominates(objectives, j, i) {
+                    domination_count[i] += 1;
                 }
             }
         }
@@ -430,6 +401,18 @@ impl ParetoAcquisition {
             seed,
         ))
     }
+}
+
+fn dominates(objectives: &ArrayView2<f64>, left: usize, right: usize) -> bool {
+    let mut strictly_better = false;
+    for objective in 0..objectives.ncols() {
+        let ordering = objectives[[left, objective]].total_cmp(&objectives[[right, objective]]);
+        if ordering.is_lt() {
+            return false;
+        }
+        strictly_better |= ordering.is_gt();
+    }
+    strictly_better
 }
 
 impl Default for ParetoAcquisition {

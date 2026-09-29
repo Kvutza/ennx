@@ -1,0 +1,26 @@
+load("@crates//:defs.bzl", "aliases", "crate_deps", "crate_edition")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("//build:targets.bzl", "DEV_CLI_CRATES", "DEV_CLI_PROGRAMS")
+load("//rust/crates/ennx:defs.bzl", "ennx_program_targets")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+DEV_CLI_DEPS = crate_deps(DEV_CLI_CRATES) + [
+    "//rust/crates/ennx:ennx_accelerators",
+    "//rust/crates/wire",
+]
+
+ennx_program_targets(DEV_CLI_PROGRAMS, glob(["src/**/*.rs"]))
+
+rust_test(
+    name = "ennx_test",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(normal_dev = True, proc_macro_dev = True),
+    crate_name = "dev_cli_test",
+    crate_root = [program["root"] for program in DEV_CLI_PROGRAMS if program["name"] == "ennx"][0],
+    rustc_env = {"CARGO_PKG_VERSION": [program["version"] for program in DEV_CLI_PROGRAMS if program["name"] == "ennx"][0]},
+    edition = crate_edition(),
+    deps = DEV_CLI_DEPS,
+)

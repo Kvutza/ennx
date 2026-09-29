@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use serde::Deserialize;
+use deser::Deserialize;
 
 use crate::forward_program::KdaPackedLinear;
 use crate::trials::Parameter;
@@ -19,7 +19,7 @@ struct Manifest {
     weights: String,
     scales: String,
     biases: String,
-    #[serde(default)]
+    #[deser(default)]
     linear: Vec<LinearManifest>,
 }
 
@@ -33,11 +33,11 @@ struct LinearManifest {
     output_width: usize,
     bits: u8,
     group_size: usize,
-    #[serde(default)]
+    #[deser(default)]
     element_offset: usize,
-    #[serde(default)]
+    #[deser(default)]
     perturb_whole: u32,
-    #[serde(default)]
+    #[deser(default)]
     perturb_threshold: u32,
 }
 
@@ -61,7 +61,7 @@ impl PackedModel {
         let manifest_path = directory.join(MANIFEST);
         let manifest_text = fs::read_to_string(&manifest_path)
             .map_err(|error| format!("cannot read {}: {error}", manifest_path.display()))?;
-        let manifest: Manifest = toml::from_str(&manifest_text)
+        let manifest: Manifest = ennx_wire::toml::from_str(&manifest_text)
             .map_err(|error| format!("invalid {}: {error}", manifest_path.display()))?;
         let packed = read_file(directory, &manifest.weights)?;
         let scales = read_f32(directory, &manifest.scales)?;

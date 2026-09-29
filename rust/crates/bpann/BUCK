@@ -1,4 +1,5 @@
 load("//buck2:reindeer_rules.bzl", "app_rust_library")
+load("//build:targets.bzl", "BPANN_CRATES", "BPANN_TEST_CRATES", "RUST_EDITION")
 
 filegroup(
     name = "bpann-source",
@@ -11,17 +12,9 @@ app_rust_library(
     srcs = glob(["src/**/*.rs"]),
     crate = "bpann",
     crate_root = "src/lib.rs",
-    edition = "2024",
+    edition = RUST_EDITION,
     visibility = ["PUBLIC"],
-    deps = [
-        "//rust:memmap2",
-        "//rust:ndarray",
-        "//rust:rand",
-        "//rust:rayon",
-        "//rust:serde",
-        "//rust:serde_json",
-        "//rust:thiserror",
-    ],
+    deps = ["//rust:" + crate for crate in BPANN_CRATES] + ["//rust/crates/wire:wire"],
 )
 
 rust_test(
@@ -29,17 +22,7 @@ rust_test(
     srcs = glob(["src/**/*.rs"]),
     crate = "bpann",
     crate_root = "src/lib.rs",
-    edition = "2024",
+    edition = RUST_EDITION,
     visibility = ["//buck2/tests:all"],
-    deps = [
-        "//rust:memmap2",
-        "//rust:ndarray",
-        "//rust:rand",
-        "//rust:rand_chacha",
-        "//rust:rayon",
-        "//rust:serde",
-        "//rust:serde_json",
-        "//rust:tempfile",
-        "//rust:thiserror",
-    ],
+    deps = ["//rust:" + crate for crate in BPANN_TEST_CRATES] + ["//rust/crates/wire:wire"],
 )

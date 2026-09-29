@@ -20,15 +20,7 @@ pub(crate) fn draw_internals(
     let num_seeds = function_seeds.len();
 
     if k == 0 {
-        let mut draws = Array3::zeros((num_seeds, n, m));
-        for s in 0..num_seeds {
-            for i in 0..n {
-                for j in 0..m {
-                    draws[[s, i, j]] = internals.mu[[i, j]];
-                }
-            }
-        }
-        return Ok(draws);
+        return Ok(draw_empty(internals, num_seeds, n, m));
     }
 
     // Fuse hash → weighted sum per seed: never materialize u[s,i,k,j].
@@ -49,19 +41,7 @@ pub(crate) fn draw_internals(
     }
 
     let out_stride = n * m;
-    let mut scale = vec![0.0f64; n * m];
-    let mut w_flat = vec![0.0f64; n * k * m];
-    let mut mu_flat = vec![0.0f64; n * m];
-    for i in 0..n {
-        for j in 0..m {
-            let l2_safe = internals.l2[[i, j]].max(1e-12);
-            scale[i * m + j] = internals.se[[i, j]] / l2_safe;
-            mu_flat[i * m + j] = internals.mu[[i, j]];
-            for ki in 0..k {
-                w_flat[(i * k + ki) * m + j] = internals.w_normalized[[i, ki, j]];
-            }
-        }
-    }
+    let (scale, w_flat, mu_flat) = pack_moments(internals, n, k, m);
 
     let mut draws = Array3::zeros((num_seeds, n, m));
     let draws_flat = draws
@@ -189,4 +169,39 @@ fn draw_scalar(
     }
 
     Ok(draws)
+}
+
+fn draw_empty(internals: &DrawInternals, num_seeds: usize, n: usize, m: usize) -> Array3<f64> {
+    let mut draws = Array3::zeros((num_seeds, n, m));
+    for s in 0..num_seeds {
+        for i in 0..n {
+            for j in 0..m {
+                draws[[s, i, j]] = internals.mu[[i, j]];
+            }
+        }
+    }
+    draws
+}
+
+fn pack_moments(
+    internals: &DrawInternals,
+    n: usize,
+    k: usize,
+    m: usize,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let mut scale = vec![0.0f64; n * m];
+    let mut w_flat = vec![0.0f64; n * k * m];
+    let mut mu_flat = vec![0.0f64; n * m];
+    for i in 0..n {
+        for j in 0..m {
+            let l2_safe = internals.l2[[i, j]].max(1e-12);
+            scale[i * m + j] = internals.se[[i, j]] / l2_safe;
+            mu_flat[i * m + j] = internals.mu[[i, j]];
+            for ki in 0..k {
+                w_flat[(i * k + ki) * m + j] = internals.w_normalized[[i, ki, j]];
+            }
+        }
+    }
+
+    (scale, w_flat, mu_flat)
 }

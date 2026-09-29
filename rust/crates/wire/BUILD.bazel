@@ -1,0 +1,17 @@
+load("@crates//:defs.bzl", "aliases", "crate_deps", "crate_edition")
+load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//build:targets.bzl", "WIRE_CRATES")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+rust_library(
+    name = "wire",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "ennx_wire",
+    crate_root = "src/lib.rs",
+    edition = crate_edition(),
+    deps = crate_deps(WIRE_CRATES),
+)

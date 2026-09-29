@@ -14,7 +14,6 @@ pub use crate::bf16_search::{ParamBlock, Proposal, Proposals, SearchState};
 pub use crate::dense::{
     DenseLeaf, DenseLinear, DenseResult, DenseTerm, DenseView, METAL_OPS, OPENCL_OPS, ParamBuffer,
     apply as apply_dense, dist2 as dense_dist2, linear as dense_linear,
-    tensor_key as dense_tensor_key,
 };
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub use crate::flame_metal::{
@@ -27,9 +26,13 @@ pub use crate::forward_metal::{
     KdaMoeMetalModel, KdaMoeMetalWeights,
 };
 pub use crate::forward_program::{
-    ForwardEvaluator, ForwardOp, ForwardProgram, KdaControlRequest, KdaDispatch, KdaEncoder,
+    Backend, BackendCapability, BackendSchedule, Compiler, Exactness, Extent, ForwardEvaluator,
+    ForwardOp, ForwardProgram, FusionBoundary, KdaControlRequest, KdaDispatch, KdaEncoder,
     KdaForwardRequest, KdaMoeDispatch, KdaMoeLayerRequest, KdaPackedLinear, KdaTensorLayout,
-    KernelPlan, PackedAffinePlan, ResidentBoState, ResidentRound, WorkAxis, WorkGrid, WorkTile,
+    KernelPlan, LayerVisit, ModelProgram, PackedAffinePlan, ProgramFunction, ProgramKind,
+    RecurrentCore, ResidentBoState, ResidentRound, ScheduledKernel, SemanticNode, SemanticOp,
+    TensorDType, TensorLayout, TensorLifetime, TensorSpec, TensorStorage, WeightArenaSpec,
+    WorkAxis, WorkGrid, WorkTile,
 };
 pub use crate::forward_weights::PackedModel;
 pub use crate::knn::{KnnIndex, KnnPlan, KnnProfile};
@@ -54,11 +57,13 @@ pub use crate::weights::{
 pub use ennx_cuda::flame::{FlameConfig, FlameEvaluator};
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
+pub use crate::context_metal::ContextCache;
+#[cfg(all(target_os = "macos", feature = "metal"))]
 pub use crate::fbt_model::{
-    GateUpProbe, RoundLatencyRecord, RoundLatencyStudy, run_gate_up_probe, run_round_study,
+    GateUpProbe, RoundLatencyExperiment, RoundLatencyRecord, gateup_probe, round_experiment,
 };
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub use crate::fbt_moe::{
-    ActualBoResult, GroupedMoeProbe, run_grouped_moe_probe, run_grouped_moe_probe_with_dataset,
-    run_pretrain,
+    ActualBoResult, GroupedMoeProbe, context_loop, moe_dataset, moe_probe, run_generated,
+    run_generation, run_pretrain,
 };

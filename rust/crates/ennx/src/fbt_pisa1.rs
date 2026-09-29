@@ -1,10 +1,18 @@
 //! Fixed-shape PISA-1 attention for the proposed 4K subsecond scorer.
 
 use crate::apple_gpu::{Runtime, gpu_seconds, thread_group};
+use crate::context::probe::half as decode_half;
 use metal::{
-    Buffer, BufferRef, CommandBufferRef, ComputePipelineState, MTLCommandBufferStatus, MTLSize,
+    Buffer, BufferRef, CommandBufferRef, ComputeCommandEncoderRef, ComputePipelineState,
+    MTLCommandBufferStatus, MTLSize,
 };
 use std::time::Instant;
+
+#[path = "fbt_pisa1/cache.rs"]
+mod cache;
+mod certify;
+mod dirty;
+mod fallback;
 
 const CONTEXT: u32 = 4096;
 const BATCH: u32 = 2;
@@ -30,19 +38,27 @@ pub(crate) struct Pisa1Probe {
 
 struct Pipelines {
     leaf_means: ComputePipelineState,
+    leaf_range: ComputePipelineState,
     upper_means: ComputePipelineState,
+    upper_range: ComputePipelineState,
     select: ComputePipelineState,
     attention: ComputePipelineState,
     select_attention: ComputePipelineState,
     select_attention_q4: ComputePipelineState,
+    exact_attention: ComputePipelineState,
+    query_tile: u32,
 }
 
 pub(crate) struct Pisa1 {
+    context: u32,
     pipelines: Pipelines,
     pyramid: Buffer,
     blocks: Buffer,
     output: Buffer,
     oracle_output: Buffer,
+    exact_output: Buffer,
+    cached: std::cell::OnceCell<Result<crate::context_metal::ContextKernels, String>>,
+    indexed: std::cell::OnceCell<Result<crate::context_metal::ContextKernels, String>>,
 }
 
 #[derive(Clone, Copy)]
@@ -60,12 +76,22 @@ fn dispatch(
     threads: u64,
 ) {
     let encoder = command.new_compute_command_encoder();
+    dispatch_on(&encoder, pipeline, buffers, groups, threads);
+    encoder.end_encoding();
+}
+
+fn dispatch_on(
+    encoder: &ComputeCommandEncoderRef,
+    pipeline: &ComputePipelineState,
+    buffers: &[&BufferRef],
+    groups: MTLSize,
+    threads: u64,
+) {
     encoder.set_compute_pipeline_state(pipeline);
     for (index, buffer) in buffers.iter().enumerate() {
         encoder.set_buffer(index as u64, Some(buffer), 0);
     }
     encoder.dispatch_thread_groups(groups, thread_group(threads));
-    encoder.end_encoding();
 }
 
 fn complete(command: &CommandBufferRef) -> Result<f64, String> {
@@ -78,16 +104,30 @@ fn complete(command: &CommandBufferRef) -> Result<f64, String> {
 }
 
 impl Pipelines {
-    fn new(runtime: &Runtime) -> Result<Self, String> {
-        let source = include_str!("fbt_pisa1.metal");
-        let compile = |name| runtime.precise(source, "PISA-1 attention", name);
+    fn new(runtime: &Runtime, context: u32) -> Result<Self, String> {
+        let source_text = format!(
+            "#define PISA_CONTEXT {context}\n{}",
+            include_str!("fbt_pisa1.metal")
+        );
+        let source = source_text.as_str();
+        let compile = |name| runtime.pipeline(source, "PISA-1 attention", name);
+        let production_source =
+            format!("#define PISA_SKIP_IDENTITY_RESCALE\n#define PISA_QUERY_TILE 4\n{source}");
         let result = Self {
             leaf_means: compile("fbt_pisa1_leaf_means")?,
+            leaf_range: compile("fbt_pisa1_leaf_range")?,
             upper_means: compile("fbt_pisa1_upper_means")?,
+            upper_range: compile("fbt_pisa1_upper_range")?,
             select: compile("fbt_pisa1_select")?,
             attention: compile("fbt_pisa1_attention")?,
             select_attention: compile("fbt_pisa1_select_attention")?,
-            select_attention_q4: compile("fbt_pisa1_select_attention_q4")?,
+            exact_attention: compile("fbt_pisa1_exact_attention")?,
+            select_attention_q4: runtime.pipeline(
+                &production_source,
+                "PISA-1 attention",
+                "fbt_pisa1_select_attention_q4",
+            )?,
+            query_tile: 4,
         };
         if result.select_attention_q4.thread_execution_width() != 32
             || result
@@ -106,15 +146,57 @@ impl Pipelines {
 }
 
 impl Pisa1 {
+    pub(crate) fn for_trial(
+        runtime: &Runtime,
+        trial: Option<&crate::config::KernelTrial>,
+    ) -> Result<Self, String> {
+        let mut result = Self::new(runtime)?;
+        if let Some(path) = trial.and_then(|trial| trial.pisa.as_ref()) {
+            let source = std::fs::read_to_string(path)
+                .map_err(|error| format!("read PISA candidate {}: {error}", path.display()))?;
+            let source = format!("#define PISA_SKIP_IDENTITY_RESCALE\n{source}");
+            let pipeline = runtime.pipeline_metal4(
+                &source,
+                "PISA kernel trial",
+                "fbt_pisa1_select_attention_q4",
+                &[],
+            )?;
+            if pipeline.thread_execution_width() != 32
+                || pipeline.max_total_threads_per_threadgroup() < 128
+                || pipeline.static_threadgroup_memory_length()
+                    > runtime.device.max_threadgroup_memory_length()
+            {
+                return Err("PISA candidate exceeds the production launch resource limits".into());
+            }
+            result.pipelines.select_attention_q4 = pipeline;
+        }
+        Ok(result)
+    }
+
     pub(crate) fn new(runtime: &Runtime) -> Result<Self, String> {
+        Self::with_context(runtime, CONTEXT)
+    }
+
+    pub(crate) fn with_context(runtime: &Runtime, context: u32) -> Result<Self, String> {
+        if !(4096..=crate::context::MAX_CONTEXT).contains(&context) || !context.is_power_of_two() {
+            return Err("PISA context must be a power of two in 4096..2097152".into());
+        }
         Ok(Self {
-            pipelines: Pipelines::new(runtime)?,
-            pyramid: runtime.buffer::<u16>((BATCH * NODES * HEAD_DIM) as usize),
+            context,
+            pipelines: Pipelines::new(runtime, context)?,
+            pyramid: runtime.buffer::<u16>((BATCH * (2 * context / BLOCK - 1) * HEAD_DIM) as usize),
             blocks: runtime.buffer_with(&vec![u32::MAX; (ROWS * SELECTED) as usize + 64]),
             output: runtime.buffer_with(&vec![0x7e00u16; (ROWS * QUERY_WIDTH) as usize + 64]),
             oracle_output: runtime
                 .buffer_with(&vec![0x7e00u16; (ROWS * QUERY_WIDTH) as usize + 64]),
+            exact_output: runtime.buffer_with(&vec![0x7e00u16; (ROWS * QUERY_WIDTH) as usize + 64]),
+            cached: std::cell::OnceCell::new(),
+            indexed: std::cell::OnceCell::new(),
         })
+    }
+
+    pub(crate) fn context(&self) -> u32 {
+        self.context
     }
 
     fn encode_pyramid(&self, command: &CommandBufferRef, qkv: &BufferRef) {
@@ -138,6 +220,41 @@ impl Pisa1 {
         );
     }
 
+    fn pyramid_rows(&self, encoder: &ComputeCommandEncoderRef, qkv: &BufferRef, rows: u32) {
+        self.pyramid_output(encoder, qkv, &self.pyramid, rows);
+    }
+
+    pub(crate) fn pyramid_output(
+        &self,
+        encoder: &ComputeCommandEncoderRef,
+        qkv: &BufferRef,
+        pyramid: &BufferRef,
+        rows: u32,
+    ) {
+        debug_assert_eq!(rows % self.context, 0);
+        let batch = rows / self.context;
+        dispatch_on(
+            encoder,
+            &self.pipelines.leaf_means,
+            &[qkv, pyramid],
+            MTLSize {
+                width: u64::from(self.context / BLOCK),
+                height: u64::from(batch),
+                depth: 1,
+            },
+            64,
+        );
+        encoder.memory_barrier_with_resources(&[pyramid]);
+        dispatch_on(
+            encoder,
+            &self.pipelines.upper_means,
+            &[pyramid],
+            thread_group(u64::from(batch)),
+            64,
+        );
+        encoder.memory_barrier_with_resources(&[pyramid]);
+    }
+
     fn encode_selection(&self, command: &CommandBufferRef, qkv: &BufferRef) {
         dispatch(
             command,
@@ -149,13 +266,9 @@ impl Pisa1 {
     }
 
     fn encode_attention(&self, command: &CommandBufferRef, qkv: &BufferRef) {
-        dispatch(
-            command,
-            &self.pipelines.select_attention_q4,
-            &[qkv, &self.pyramid, &self.blocks, &self.output],
-            thread_group(u64::from(ROWS / 4)),
-            128,
-        );
+        let encoder = command.new_compute_command_encoder();
+        self.attention_range(&encoder, qkv, 0, ROWS);
+        encoder.end_encoding();
     }
 
     fn encode_oracle(&self, command: &CommandBufferRef, qkv: &BufferRef) {
@@ -184,23 +297,55 @@ impl Pisa1 {
         self.encode(command, qkv, None);
     }
 
+    pub(crate) fn pyramid_layer(
+        &self,
+        encoder: &ComputeCommandEncoderRef,
+        qkv: &BufferRef,
+        rows: u32,
+    ) {
+        self.pyramid_rows(encoder, qkv, rows);
+    }
+
+    pub(crate) fn attention_rows(
+        &self,
+        encoder: &ComputeCommandEncoderRef,
+        qkv: &BufferRef,
+        rows: u32,
+    ) {
+        self.attention_range(encoder, qkv, 0, rows);
+    }
+
+    pub(crate) fn attention_range(
+        &self,
+        encoder: &ComputeCommandEncoderRef,
+        qkv: &BufferRef,
+        start: u32,
+        rows: u32,
+    ) {
+        self.attention_from(encoder, qkv, &self.pyramid, start, rows);
+    }
+
+    fn exact_range(&self, command: &CommandBufferRef, qkv: &BufferRef, start: u32, rows: u32) {
+        let range = [start, rows];
+        let encoder = command.new_compute_command_encoder();
+        encoder.set_compute_pipeline_state(&self.pipelines.exact_attention);
+        encoder.set_buffer(0, Some(qkv), 0);
+        encoder.set_buffer(1, Some(&self.exact_output), 0);
+        encoder.set_bytes(
+            2,
+            std::mem::size_of_val(&range) as u64,
+            range.as_ptr().cast(),
+        );
+        encoder.dispatch_thread_groups(
+            thread_group(u64::from(rows * QUERY_HEADS)),
+            thread_group(64),
+        );
+        encoder.memory_barrier_with_resources(&[&self.exact_output]);
+        encoder.end_encoding();
+    }
+
     pub(crate) fn output(&self) -> &BufferRef {
         &self.output
-    }
-}
-
-fn decode_half(bits: u16) -> f32 {
-    let exponent = (bits >> 10) & 31;
-    let fraction = f32::from(bits & 1023);
-    let magnitude = match exponent {
-        0 => fraction * 2.0f32.powi(-24),
-        31 => f32::NAN,
-        _ => (1024.0 + fraction) * 2.0f32.powi(i32::from(exponent) - 25),
-    };
-    if bits & 0x8000 == 0 {
-        magnitude
-    } else {
-        -magnitude
     }
 }
 
@@ -318,39 +463,13 @@ fn validate_selection(pisa: &Pisa1, qkv: &BufferRef) -> Result<(), String> {
             .copied()
             .filter(|&block| block != u32::MAX)
             .collect::<Vec<_>>();
-        if valid.len() != expected_count
-            || valid.iter().any(|&block| block > current)
-            || (0..valid.len()).any(|left| valid[left + 1..].contains(&valid[left]))
-            || !valid.contains(&0)
-            || !valid.contains(&current)
-            || (current > 0 && !valid.contains(&(current - 1)))
-        {
+        if !causal_selection(&valid, current, expected_count) {
             return Err(format!(
                 "PISA-1 invalid forced/causal selection at row {row}"
             ));
         }
     }
-    let mut selections = 0usize;
-    let mut unique = 0usize;
-    for sequence in 0..BATCH {
-        for first in (0..CONTEXT).step_by(4) {
-            let mut union = [u32::MAX; 4 * SELECTED as usize];
-            let mut union_len = 0usize;
-            for local in 0..4 {
-                let row = sequence * CONTEXT + first + local;
-                for &block in &actual[(row * SELECTED) as usize..((row + 1) * SELECTED) as usize] {
-                    if block != u32::MAX {
-                        selections += 1;
-                        if !union[..union_len].contains(&block) {
-                            union[union_len] = block;
-                            union_len += 1;
-                        }
-                    }
-                }
-            }
-            unique += union_len;
-        }
-    }
+    let (selections, unique) = selection_reuse(actual);
     eprintln!(
         "TURBO_ENN_PISA1_QUERY_TILE tile=4 selections={} unique_blocks={} kv_reuse={:.3}",
         selections,
@@ -358,6 +477,36 @@ fn validate_selection(pisa: &Pisa1, qkv: &BufferRef) -> Result<(), String> {
         selections as f64 / unique as f64,
     );
     Ok(())
+}
+
+fn selection_reuse(actual: &[u32]) -> (usize, usize) {
+    let (sequence_width, tile_width) = ((CONTEXT * SELECTED) as usize, 4 * SELECTED as usize);
+    let mut selections = 0usize;
+    let mut unique = 0usize;
+    for sequence in actual[..(ROWS * SELECTED) as usize].chunks_exact(sequence_width) {
+        for tile in sequence.chunks_exact(tile_width) {
+            let mut union = [u32::MAX; 4 * SELECTED as usize];
+            let mut union_len = 0usize;
+            for &block in tile.iter().filter(|&&block| block != u32::MAX) {
+                selections += 1;
+                if !union[..union_len].contains(&block) {
+                    union[union_len] = block;
+                    union_len += 1;
+                }
+            }
+            unique += union_len;
+        }
+    }
+    (selections, unique)
+}
+
+fn causal_selection(valid: &[u32], current: u32, expected_count: usize) -> bool {
+    valid.len() == expected_count
+        && valid.iter().all(|&block| block <= current)
+        && !(0..valid.len()).any(|left| valid[left + 1..].contains(&valid[left]))
+        && valid.contains(&0)
+        && valid.contains(&current)
+        && (current == 0 || valid.contains(&(current - 1)))
 }
 
 fn validate_attention(pisa: &Pisa1, qkv: &BufferRef) -> Result<f64, String> {
@@ -439,7 +588,7 @@ fn validate_attention(pisa: &Pisa1, qkv: &BufferRef) -> Result<f64, String> {
     Ok(maximum)
 }
 
-fn validate_q4_oracle(pisa: &Pisa1) -> Result<f64, String> {
+fn validate_q4(pisa: &Pisa1) -> Result<f64, String> {
     let elements = (ROWS * QUERY_WIDTH) as usize;
     let q4 = half_values(&pisa.output, elements);
     let q1 = half_values(&pisa.oracle_output, elements);
@@ -506,10 +655,11 @@ fn check_parity(runtime: &Runtime, pisa: &Pisa1, qkv: &BufferRef) -> Result<f64,
     if selected != oracle {
         return Err("PISA-1 Q4 selection differs from Q1".into());
     }
-    Ok(validate_attention(pisa, qkv)?.max(validate_q4_oracle(pisa)?))
+    let fixed_error = validate_attention(pisa, qkv)?.max(validate_q4(pisa)?);
+    Ok(fixed_error.max(fallback::validate(runtime, pisa, qkv)?))
 }
 
-pub(crate) fn run_pisa1_probe(
+pub(crate) fn pisa_probe(
     runtime: &Runtime,
     qkv: &BufferRef,
     rounds: u32,

@@ -96,12 +96,11 @@ def test_003():
 
 def test_004():
     rng = np.random.default_rng(0)
-    n_train, n_whatif, d = 8, 3, 3
-    train_x = rng.standard_normal((n_train, d))
+    train_x = rng.standard_normal((8, 3))
     train_y = train_x.sum(axis=1, keepdims=True).astype(float)
-    x_whatif = rng.standard_normal((n_whatif, d))
+    x_whatif = rng.standard_normal((3, 3))
     y_whatif = x_whatif.sum(axis=1, keepdims=True).astype(float)
-    x_test = rng.standard_normal((5, d))
+    x_test = rng.standard_normal((5, 3))
     params = ENNParams(k_neighbors=4, epistemic_scale=1.0, aleatoric_scale=0.0)
     flags = PosteriorFlags(exclude_nearest=True, observation_noise=True)
     function_seeds = [11, 12, 13]

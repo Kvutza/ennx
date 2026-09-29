@@ -1,5 +1,5 @@
 use opencl3::context::Context;
-use opencl3::device::{get_all_devices, Device, CL_DEVICE_TYPE_ALL};
+use opencl3::device::{CL_DEVICE_TYPE_ALL, Device, get_all_devices};
 use opencl3::program::Program;
 
 const SOURCE: &str = r#"

@@ -1,13 +1,12 @@
 //! Shared Apple GPU runtime used by ENNX Metal backends.
 
 use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use metal::objc::{
     __send_message as send_message,
-    runtime::{Object, Sel},
+    runtime::{BOOL, Class, Object, Sel, YES},
 };
 use metal::{
     Buffer, CommandBufferRef, CommandQueue, CompileOptions, ComputePipelineState, Device,
@@ -67,6 +66,33 @@ pub(crate) fn gpu_interval(command: &CommandBufferRef) -> Option<(f64, f64)> {
 
 pub(crate) fn gpu_seconds(command: &CommandBufferRef) -> Option<f64> {
     gpu_interval(command).map(|(start, end)| end - start)
+}
+
+/// Read the active power-source policy without changing system settings.
+pub(crate) fn power_mode() -> Result<bool, String> {
+    let class = Class::get("NSProcessInfo").ok_or("NSProcessInfo unavailable")?;
+    let info =
+        unsafe { send_message::<Class, (), *mut Object>(class, Sel::register("processInfo"), ()) }
+            .map_err(|error| format!("read process info: {error:?}"))?;
+    if info.is_null() {
+        return Err("NSProcessInfo returned nil".into());
+    }
+    let enabled = unsafe {
+        send_message::<Object, (), BOOL>(info, Sel::register("isLowPowerModeEnabled"), ())
+    }
+    .map_err(|error| format!("read Low Power Mode: {error:?}"))?;
+    Ok(enabled == YES)
+}
+
+/// Reject performance comparisons made under the OS energy-saving policy.
+/// Read-only; normal optimization rounds do not call this benchmark guard.
+pub(crate) fn require_power() -> Result<(), String> {
+    if power_mode()? {
+        return Err(
+            "Low Power Mode is enabled; turn it off for kernel performance comparisons".into(),
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn trace(stage: &str) {
@@ -144,6 +170,16 @@ impl Runtime {
         bool_constants: &[(u64, bool)],
     ) -> Result<ComputePipelineState, String> {
         self.compile(source, label, name, false, Some(4 << 16), bool_constants)
+    }
+
+    pub(crate) fn pipeline_metal4(
+        &self,
+        source: &str,
+        label: &str,
+        name: &str,
+        bool_constants: &[(u64, bool)],
+    ) -> Result<ComputePipelineState, String> {
+        self.compile(source, label, name, true, Some(4 << 16), bool_constants)
     }
 
     fn compile(
@@ -354,9 +390,9 @@ impl Runtime {
 }
 
 fn source_hash(source: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    source.hash(&mut hasher);
-    hasher.finish()
+    let mut hasher = std::hash::DefaultHasher::new();
+    std::hash::Hash::hash(&source, &mut hasher);
+    std::hash::Hasher::finish(&hasher)
 }
 
 fn target_name(name: &str) -> Target {

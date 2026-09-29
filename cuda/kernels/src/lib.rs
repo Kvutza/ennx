@@ -1,3 +1,5 @@
+#![feature(f16)]
+
 use cuda_device::{
     DisjointSlice, SharedArray, cuda_module, kernel, launch_bounds, launch_contract, thread, warp,
 };
@@ -14,6 +16,12 @@ pub use knn::{
     PosteriorParams, WeightedParams,
 };
 use knn::{block_sum, init_pairs, row_distance, sort_pairs, warp_distance, write_list};
+mod diffusion;
+mod fbt;
+pub use diffusion::diffusion_model;
+pub use fbt::{
+    FbtShape, FeedbackShape, MatmulShape, MoeShape, PisaShape, RouteShape, RoutedTile, fbt_model,
+};
 
 pub const MODULE_NAME: &str = env!("CARGO_PKG_NAME");
 pub const THREADS: u32 = 256;
@@ -1625,6 +1633,219 @@ pub mod trials {
                     f32::INFINITY
                 } else {
                     distances.add(thread_index as usize).read()
+                };
+            }
+        }
+    }
+
+    #[kernel(unchecked_indexing)]
+    #[launch_bounds(THREADS)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), dynamic_shared = 0)]
+    pub fn distance2_bf16(
+        rows: &[u16],
+        history_slots: &[u32],
+        reference: &[u16],
+        reference_scales: &[f32],
+        state: &[SearchState],
+        seeds: &[Seed],
+        leaves: &[Bf16Leaf],
+        tiles: &[DenseTile],
+        mut partials: DisjointSlice<f32>,
+        mut tile_status: DisjointSlice<u32>,
+        mut params: Bf16Score,
+    ) {
+        static mut VALUES: SharedArray<f32, 512> = SharedArray::UNINIT;
+        static mut DISTANCES: SharedArray<f32, 256> = SharedArray::UNINIT;
+        static mut WARP_STATUS: SharedArray<u32, 16> = SharedArray::UNINIT;
+
+        if params.resident != 0 {
+            params.history = state[0].history;
+            params.coefficient = state[0].length as f32;
+            params.neighbors = params.neighbors.min(params.history);
+        }
+        let block_index = thread::blockIdx_x();
+        let pairs = params.candidates.div_ceil(2);
+        if block_index >= pairs * params.tiles {
+            return;
+        }
+        let pair = block_index / params.tiles;
+        let first_candidate = pair * 2;
+        let second_candidate = first_candidate + 1;
+        let tile_index = block_index % params.tiles;
+        let thread_index = thread::threadIdx_x();
+        let lane = warp::lane_id();
+        let warp_index = thread_index / 32;
+        let values = unsafe { SharedArray::as_raw_mut_ptr(&raw mut VALUES) };
+        let distances = unsafe { SharedArray::as_raw_mut_ptr(&raw mut DISTANCES) };
+        let warp_status = unsafe { SharedArray::as_raw_mut_ptr(&raw mut WARP_STATUS) };
+        if thread_index < params.history {
+            unsafe {
+                distances.add(thread_index as usize).write(0.0);
+                distances
+                    .add(MAX_HISTORY + thread_index as usize)
+                    .write(0.0);
+            }
+        }
+        if lane == 0 {
+            unsafe {
+                warp_status.add(warp_index as usize).write(0);
+                warp_status.add(WARPS + warp_index as usize).write(0);
+            }
+        }
+        thread::sync_threads();
+
+        let tile = tiles[tile_index as usize];
+        let leaf = leaves[tile.leaf as usize];
+        let inverse_rms = if params.correlated == 1 {
+            reference_scales[tile.leaf as usize]
+        } else {
+            1.0
+        };
+        let first_coefficient = if params.correlated == 1 {
+            candidate_radius(state[0], first_candidate)
+        } else {
+            params.coefficient
+        };
+        let second_coefficient = if params.correlated == 1 {
+            candidate_radius(state[0], second_candidate)
+        } else {
+            params.coefficient
+        };
+        let base_offset = params.base_slot as usize * params.row_stride as usize;
+        let mut tile_offset = 0u32;
+        while tile_offset < tile.length {
+            let local = tile_offset + thread_index;
+            let mut first_invalid = false;
+            let mut second_invalid = false;
+            let mut first_changed = false;
+            let mut second_changed = false;
+            if local < tile.length {
+                let element = u64::from(tile.start + local);
+                let index = leaf.offset + element;
+                let base = rows[base_offset + index as usize];
+                let first = bf16_candidate(
+                    base,
+                    leaf,
+                    element,
+                    seeds[first_candidate as usize],
+                    first_coefficient,
+                    reference,
+                    inverse_rms,
+                    params.correlated,
+                    first_candidate,
+                );
+                let second = bf16_candidate(
+                    base,
+                    leaf,
+                    element,
+                    seeds[second_candidate as usize],
+                    second_coefficient,
+                    reference,
+                    inverse_rms,
+                    params.correlated,
+                    second_candidate,
+                );
+                first_invalid = !bf16_finite(first);
+                second_invalid = !bf16_finite(second);
+                first_changed = first != base;
+                second_changed = second != base;
+                unsafe {
+                    values.add(thread_index as usize).write(bf16_decode(first));
+                    values
+                        .add(THREADS as usize + thread_index as usize)
+                        .write(bf16_decode(second));
+                }
+            }
+            let first_flags =
+                u32::from(warp::any(first_invalid)) | (u32::from(warp::any(first_changed)) << 1);
+            let second_flags =
+                u32::from(warp::any(second_invalid)) | (u32::from(warp::any(second_changed)) << 1);
+            if lane == 0 {
+                unsafe {
+                    let status = warp_status.add(warp_index as usize);
+                    status.write(status.read() | first_flags);
+                    let status = warp_status.add(WARPS + warp_index as usize);
+                    status.write(status.read() | second_flags);
+                }
+            }
+            thread::sync_threads();
+
+            let tile_length = (tile.length - tile_offset).min(THREADS);
+            let mut history_base = 0u32;
+            while history_base < params.history {
+                let observation = history_base + warp_index;
+                let mut first_sum = 0.0f32;
+                let mut second_sum = 0.0f32;
+                if observation < params.history {
+                    let row_offset =
+                        history_slots[observation as usize] as usize * params.row_stride as usize;
+                    let mut item = lane;
+                    while item < tile_length {
+                        let element = u64::from(tile.start + tile_offset + item);
+                        let observed =
+                            bf16_decode(rows[row_offset + (leaf.offset + element) as usize]);
+                        let first_delta = unsafe { values.add(item as usize).read() } - observed;
+                        let second_delta =
+                            unsafe { values.add(THREADS as usize + item as usize).read() }
+                                - observed;
+                        first_sum += first_delta * first_delta * leaf.weight;
+                        second_sum += second_delta * second_delta * leaf.weight;
+                        item += 32;
+                    }
+                }
+                let first_partial = warp::reduce_sum_f32(first_sum);
+                let second_partial = warp::reduce_sum_f32(second_sum);
+                if lane == 0 && observation < params.history {
+                    unsafe {
+                        let first = distances.add(observation as usize);
+                        first.write(first.read() + first_partial);
+                        let second = distances.add(MAX_HISTORY + observation as usize);
+                        second.write(second.read() + second_partial);
+                    }
+                }
+                history_base += WARPS as u32;
+            }
+            thread::sync_threads();
+            tile_offset += THREADS;
+        }
+
+        let first_invalid = warp_invalid(warp_status);
+        let second_invalid = warp_invalid(unsafe { warp_status.add(WARPS) });
+        if thread_index == 0 {
+            let mut first_flags = 0;
+            let mut second_flags = 0;
+            let mut index = 0;
+            while index < WARPS {
+                unsafe {
+                    first_flags |= warp_status.add(index).read();
+                    second_flags |= warp_status.add(WARPS + index).read();
+                }
+                index += 1;
+            }
+            unsafe {
+                *tile_status
+                    .get_unchecked_mut((first_candidate * params.tiles + tile_index) as usize) =
+                    first_flags;
+                *tile_status
+                    .get_unchecked_mut((second_candidate * params.tiles + tile_index) as usize) =
+                    second_flags;
+            }
+        }
+        if thread_index < params.history {
+            let first_output = ((first_candidate * params.tiles + tile_index) * params.history
+                + thread_index) as usize;
+            let second_output = ((second_candidate * params.tiles + tile_index) * params.history
+                + thread_index) as usize;
+            unsafe {
+                *partials.get_unchecked_mut(first_output) = if first_invalid {
+                    f32::INFINITY
+                } else {
+                    distances.add(thread_index as usize).read()
+                };
+                *partials.get_unchecked_mut(second_output) = if second_invalid {
+                    f32::INFINITY
+                } else {
+                    distances.add(MAX_HISTORY + thread_index as usize).read()
                 };
             }
         }

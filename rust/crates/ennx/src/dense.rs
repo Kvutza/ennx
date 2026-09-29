@@ -54,15 +54,6 @@ pub struct DenseTerm {
     pub coefficient: f32,
 }
 
-/// Stable leaf key for a named tensor shared with external model runtimes.
-pub fn tensor_key(name: &str) -> u64 {
-    name.as_bytes()
-        .iter()
-        .fold(1_469_598_103_934_665_603, |key, byte| {
-            (key ^ u64::from(*byte)).wrapping_mul(1_099_511_628_211)
-        })
-}
-
 impl DenseTerm {
     pub fn new(seed: u64, coefficient: f32) -> Result<Self, String> {
         if !coefficient.is_finite() {
@@ -398,7 +389,7 @@ mod tests {
     #[test]
     fn tensor_keys() {
         assert_eq!(
-            tensor_key("blk.27.attn_q.weight"),
+            crate::hash::tensor_key("blk.27.attn_q.weight"),
             3_843_877_851_495_245_630
         );
     }

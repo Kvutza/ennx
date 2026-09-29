@@ -1,0 +1,60 @@
+# https://github.com/google-research/google-research/tree/master/mbpp
+# Task 602 belongs to MBPP's training split, not its evaluation split.
+# First three cases are MBPP's published checks; the remainder are ENNX additions.
+# This is a fixed-task training environment, not an official benchmark result.
+schema = "ennx.code_environment.v1"
+source = "https://github.com/google-research/google-research/blob/master/mbpp/mbpp.jsonl"
+task_id = 602
+split = "train"
+tokenizer = "../../.cache/pretrain/stack-v3-python-smoke/tokenizer.json"
+entrypoint = "first_repeated_char"
+prompt = '''# Return the first character encountered twice, or the string None.
+# Examples: abcabc -> a; abc -> None; 123123 -> 1.
+def first_repeated_char(str1):
+    """Return a repeated character, or the string None if none repeats."""
+'''
+prompt_tokens = [5, 2471, 351, 2161, 6711, 763, 6366, 313, 278, 89, 522, 14, 646, 351, 1411, 528, 16, 201, 5, 1198, 1232, 28, 3514, 69, 5823, 743, 342, 29, 3514, 69, 743, 528, 29, 5794, 3659, 743, 410, 16, 201, 337, 2161, 65, 271, 339, 749, 65, 2141, 10, 500, 19, 325, 277, 532, 6766, 342, 306, 339, 749, 6711, 14, 646, 351, 1411, 528, 374, 305, 400, 306, 3544, 85, 1606, 201]
+reference = '''    for index, character in enumerate(str1):
+        if character in str1[:index]:
+            return character
+    return "None"
+'''
+negative = '''    return "__incorrect__"
+'''
+
+[[cases]]
+args = ["abcabc"]
+expected = "a"
+[[cases]]
+args = ["abc"]
+expected = "None"
+[[cases]]
+args = ["123123"]
+expected = "1"
+[[cases]]
+args = [""]
+expected = "None"
+[[cases]]
+args = ["a"]
+expected = "None"
+[[cases]]
+args = ["aa"]
+expected = "a"
+[[cases]]
+args = ["abba"]
+expected = "b"
+[[cases]]
+args = ["abcbad"]
+expected = "b"
+[[cases]]
+args = ["😀a😀"]
+expected = "😀"
+[[cases]]
+args = [" a "]
+expected = " "
+[[cases]]
+args = ["AaA"]
+expected = "A"
+[[cases]]
+args = ["abcdefggfedcba"]
+expected = "g"

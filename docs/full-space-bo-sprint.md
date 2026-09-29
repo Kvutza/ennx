@@ -22,9 +22,14 @@ semantics-preserving kernel optimization.
 - Preserve tied weights, tensor coverage, fixed scales, and rounded candidate
   identity between selection and evaluation.
 - Do not reuse activations or KV state across changed model weights.
-- The active performance target is a complete 4K, batch-two, two-pass round
-  under one second. Report 16K/32K separately when those contexts are tested;
-  buffer capacity alone is not throughput or quality evidence.
+- The active performance target is a complete subsecond round with a
+  million-token context window: proposal, perturbation, generation, configured
+  pre-training score, evaluation, and optimizer update. On 2026-10-05 the user
+  clarified that a million new tokens per second is not required. Declare the
+  occupied prompt and generated output separately; 1,024 new tokens is the
+  initial engineering workload, not a model output-length requirement.
+  Establish correctness at 4K and scaling at 64K before larger runs. Report
+  prompt, drafted, evaluated, repaired, generated, and committed counts.
 - Compare against random selection and eventually forward-budget-matched
   full-space ES. Merely naming EGGROLL/ES is not a completed comparison.
 
@@ -50,4 +55,4 @@ An original implementation of a paper's mechanism still needs provenance and
 license review before importing any external code.
 
 See [current state](handoff.md), [measurement checklist](kernel-architecture-plan.md),
-and [archived research/experiment ledger](archive/full-space-bo-sprint.md).
+and the current evidence ledger in [handoff.md](handoff.md).

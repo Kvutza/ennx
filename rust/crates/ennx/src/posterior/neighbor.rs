@@ -337,11 +337,7 @@ pub(crate) fn conditional_data(
         )
     };
 
-    let dist2_whatif = if n_whatif > 0 {
-        distance_matrix(x, x_whatif, model.scale_x, &model.x_scale.view())
-    } else {
-        Array2::zeros((batch_size, 0))
-    };
+    let dist2_whatif = whatif_distances(model, x, x_whatif);
 
     let n_candidates = dist2_train.ncols() + dist2_whatif.ncols();
     if conditional_ready(&dist2_train, &dist2_whatif, batch_size, n_candidates)?.is_none() {
@@ -389,6 +385,22 @@ pub(crate) fn conditional_data(
         return Ok(None);
     }
 
+    let y_neighbors = conditional_outcomes(model, y_whatif, &ids_all, batch_size, k_out, n_train);
+
+    let dist2s = dist2_all
+        .slice_axis(Axis(1), ndarray::Slice::from(..k_out))
+        .to_owned();
+    Ok(Some(NeighborData::new(dist2s, ids_all, y_neighbors, k_out)))
+}
+
+fn conditional_outcomes(
+    model: &ENN,
+    y_whatif: &ArrayView2<f64>,
+    ids_all: &[Vec<usize>],
+    batch_size: usize,
+    k_out: usize,
+    n_train: usize,
+) -> Array2<f64> {
     let num_metrics = model.num_metrics();
     let mut y_neighbors = Array2::zeros((batch_size * k_out, num_metrics));
 
@@ -404,10 +416,7 @@ pub(crate) fn conditional_data(
         }
     }
 
-    let dist2s = dist2_all
-        .slice_axis(Axis(1), ndarray::Slice::from(..k_out))
-        .to_owned();
-    Ok(Some(NeighborData::new(dist2s, ids_all, y_neighbors, k_out)))
+    y_neighbors
 }
 
 #[cfg(test)]
@@ -688,5 +697,13 @@ mod tests {
         let d1 = distance_matrix(&x.view(), &y.view(), true, &scale.view());
         assert!((d0[[0, 0]] - 4.0).abs() < 1e-12);
         assert!((d1[[0, 0]] - 1.0).abs() < 1e-12);
+    }
+}
+
+fn whatif_distances(model: &ENN, x: &ArrayView2<f64>, x_whatif: &ArrayView2<f64>) -> Array2<f64> {
+    if x_whatif.nrows() > 0 {
+        distance_matrix(x, x_whatif, model.scale_x, &model.x_scale.view())
+    } else {
+        Array2::zeros((x.nrows(), 0))
     }
 }

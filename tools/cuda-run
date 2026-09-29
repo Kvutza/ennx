@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+
+action=${1:-}
+[ -n "$action" ] || { echo "ennx cuda: missing action" >&2; exit 2; }
+shift
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cargo_home=${CARGO_HOME:-"$HOME/.cargo"}
+cargo_bin="$cargo_home/bin/cargo"
+[ -x "$cargo_bin" ] || cargo_bin=cargo
+
+export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda-13.0}
+export CUDA_PATH=${CUDA_PATH:-$CUDA_HOME}
+export CUDA_TOOLKIT_PATH=${CUDA_TOOLKIT_PATH:-$CUDA_HOME}
+export CUDA_OXIDE_LLC=${CUDA_OXIDE_LLC:-/usr/bin/llc-21}
+export LIBCLANG_PATH=${LIBCLANG_PATH:-/usr/lib/llvm-21/lib}
+export LLVM_CONFIG_PATH=${LLVM_CONFIG_PATH:-/usr/bin/llvm-config-21}
+export CARGO_PROFILE_RELEASE_LTO=false
+export PATH="$cargo_home/bin:/usr/lib/llvm-21/bin:$CUDA_HOME/bin:$PATH"
+
+cd "$repo_dir/cuda"
+case "$action" in
+    build) exec "$cargo_bin" oxide build --arch sm_75 "$@" ;;
+    context)
+        "$cargo_bin" oxide build --arch sm_75 >&2
+        exec ../target/release/ennx-cuda context "$@"
+        ;;
+    parity|resident|prefill|model-check|model|generate|diffusion|diffusion-check|ptx-probe|bench) exec "$cargo_bin" oxide run --arch sm_75 -- "$action" "$@" ;;
+    sanitize)
+        if [ "$#" -gt 0 ]; then
+            exec compute-sanitizer --tool memcheck --error-exitcode 99 \
+                ../target/release/ennx-cuda "$@"
+        fi
+        for command in parity resident prefill model-check diffusion-check context; do
+            compute-sanitizer --tool memcheck --error-exitcode 99 \
+                ../target/release/ennx-cuda "$command" "$@"
+        done
+        ;;
+    *) echo "ennx cuda: unknown native action: $action" >&2; exit 2 ;;
+esac

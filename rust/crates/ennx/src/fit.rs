@@ -9,16 +9,13 @@ use crate::model::ENN;
 use crate::params::ENNParams;
 use crate::posterior::{WeightedPosteriorData, compute_posterior, index_search};
 
-const LOCAL_SCALE_FLOOR: f64 = 1.0e-12;
+const SCALE_FLOOR: f64 = 1.0e-12;
 
 /// Normalize a square matrix of squared distances by per-row local radii.
 ///
 /// Each radius is the `k`th positive-or-zero off-diagonal distance. The
 /// geometric mean keeps the result dimensionless while preserving symmetry.
-pub fn self_tuned_distances(
-    distances: &ArrayView2<f64>,
-    k: usize,
-) -> Result<Array2<f64>, ENNError> {
+pub fn tuned_distances(distances: &ArrayView2<f64>, k: usize) -> Result<Array2<f64>, ENNError> {
     let n = distances.nrows();
     if distances.ncols() != n || k == 0 {
         return Err(ENNError::InvalidParameter(
@@ -43,7 +40,7 @@ pub fn self_tuned_distances(
                 .map(|column| distances[[row, column]])
                 .collect::<Vec<_>>();
             values.sort_by(f64::total_cmp);
-            values[k.min(values.len()) - 1].max(LOCAL_SCALE_FLOOR)
+            values[k.min(values.len()) - 1].max(SCALE_FLOOR)
         })
         .collect::<Vec<_>>();
     Ok(Array2::from_shape_fn((n, n), |(row, column)| {
@@ -239,7 +236,7 @@ pub fn row_loglik<R: Rng>(
 ///
 /// This is equivalent to `row_loglik` for backends that retain observation
 /// geometry but cannot afford to materialize every high-dimensional row.
-fn validate_distance_loglik(
+fn validate_loglik(
     distances: &ArrayView2<f64>,
     y: &ArrayView2<f64>,
     yvar: Option<&ArrayView2<f64>>,
@@ -387,7 +384,7 @@ pub fn distance_loglik<R: Rng>(
     y_std: Option<&ArrayView1<f64>>,
 ) -> Result<Vec<f64>, ENNError> {
     let n = y.nrows();
-    validate_distance_loglik(distances, y, yvar, paramss, p)?;
+    validate_loglik(distances, y, yvar, paramss, p)?;
     if n <= 1 {
         return Ok(vec![0.0; paramss.len()]);
     }
@@ -461,14 +458,7 @@ fn score_rows(
     paramss: &[ENNParams],
     y_std: Option<&ArrayView1<f64>>,
 ) -> Result<Vec<f64>, ENNError> {
-    for params in paramss {
-        ENNParams::new(
-            params.k_neighbors,
-            params.epistemic_scale,
-            params.aleatoric_scale,
-        )
-        .map_err(|e| ENNError::InvalidParameter(e.to_string()))?;
-    }
+    validate_params(paramss)?;
     if rows.is_empty() || model.len() <= 1 {
         return Ok(vec![0.0; paramss.len()]);
     }
@@ -541,6 +531,18 @@ fn score_rows(
     Ok(scores)
 }
 
+fn validate_params(paramss: &[ENNParams]) -> Result<(), ENNError> {
+    for params in paramss {
+        ENNParams::new(
+            params.k_neighbors,
+            params.epistemic_scale,
+            params.aleatoric_scale,
+        )
+        .map_err(|e| ENNError::InvalidParameter(e.to_string()))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,16 +554,16 @@ mod tests {
     use rand::rngs::StdRng;
 
     #[test]
-    fn self_tuning_is_symmetric_finite_and_uses_local_radii() {
+    fn tuned_geometry() {
         let distances = array![[0.0, 1.0, 100.0], [1.0, 0.0, 81.0], [100.0, 81.0, 0.0]];
-        let tuned = self_tuned_distances(&distances.view(), 1).unwrap();
+        let tuned = tuned_distances(&distances.view(), 1).unwrap();
         assert_eq!(tuned[[0, 1]], 1.0);
         assert!((tuned[[0, 2]] - 100.0 / 9.0).abs() < 1.0e-12);
         assert_eq!(tuned[[0, 2]], tuned[[2, 0]]);
         assert!(tuned.iter().all(|value| value.is_finite()));
 
         let duplicates = array![[0.0, 0.0], [0.0, 0.0]];
-        let tuned = self_tuned_distances(&duplicates.view(), 1).unwrap();
+        let tuned = tuned_distances(&duplicates.view(), 1).unwrap();
         assert!(tuned.iter().all(|value| value.is_finite()));
     }
 
@@ -583,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn distance_likelihood_matches_rows() {
+    fn likelihood_rows() {
         let x = array![[0.0, 0.0], [1.0, 0.0], [0.5, 1.0], [2.0, -0.5]];
         let y = array![[0.2], [-0.4], [1.1], [0.7]];
         let yvar = array![[0.01], [0.04], [0.02], [0.03]];

@@ -1,4 +1,13 @@
 from __future__ import annotations
+from typing import NamedTuple, Any
+
+
+class EnnFixture(NamedTuple):
+    model: Any
+    train_x: Any
+    train_y: Any
+    train_yvar: Any
+    rng: Any
 
 
 def sphere_objective(x):
@@ -17,7 +26,7 @@ def enn_model(n=20, d=3, seed=0, yvar_scale=0.1):
     train_y = (train_x.sum(axis=1, keepdims=True)).astype(float)
     train_yvar = yvar_scale * np.ones_like(train_y)
     model = ENN(train_x, train_y, train_yvar)
-    return model, train_x, train_y, train_yvar, rng
+    return EnnFixture(model, train_x, train_y, train_yvar, rng)
 
 
 def enn_rows(model):

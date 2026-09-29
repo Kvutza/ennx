@@ -1,5 +1,6 @@
 """NumPy-only coverage of paired finite-population screening."""
 
+from itertools import product
 from dataclasses import FrozenInstanceError
 
 import numpy as np
@@ -84,15 +85,20 @@ def test_variance():
     assert not paired_losses([1, 3], [2, 6], 4, acceptance_se=3).accepted
 
 
-@pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize(
-    "acceptance_se,conclusive",
+    "acceptance_se,conclusive,reverse",
     [
-        (0, True),
-        (np.nextafter(2.0, 0.0), True),
-        (2.0, False),
-        (np.nextafter(2.0, np.inf), False),
-        (3.0, False),
+        (*case_0, case_1)
+        for case_0, case_1 in product(
+            [
+                (0, True),
+                (np.nextafter(2.0, 0.0), True),
+                (2.0, False),
+                (np.nextafter(2.0, np.inf), False),
+                (3.0, False),
+            ],
+            [False, True],
+        )
     ],
 )
 def test_threshold(reverse, acceptance_se, conclusive):
@@ -146,9 +152,15 @@ def test_bias():
     assert result.improvement == -1 and not result.accepted
 
 
-@pytest.mark.parametrize("reverse", [False, True])
-@pytest.mark.parametrize("population", [2, 20])
-@pytest.mark.parametrize("low,high", [(1, 1 + 1e-8), (0, 1e-50)])
+@pytest.mark.parametrize(
+    "low,high,population,reverse",
+    [
+        (*case_0, case_1, case_2)
+        for case_0, case_1, case_2 in product(
+            [(1, 1 + 1e-8), (0, 1e-50)], [2, 20], [False, True]
+        )
+    ],
+)
 def test_fp32ties(reverse, population, low, high):
     candidate, incumbent = [low, low], [high, high]
     if reverse:
@@ -175,20 +187,25 @@ def test_uncertaingain(reverse):
 
 
 @pytest.mark.parametrize(
-    "values",
+    "side,values",
     [
-        [],
-        [1],
-        [[1, 2]],
-        [1, -1],
-        [np.nan, 1],
-        [np.inf, 1],
-        [-np.inf, 1],
-        [1j, 2],
-        ["1", "2"],
+        (case_0, case_1)
+        for case_0, case_1 in product(
+            ["candidate", "incumbent"],
+            [
+                [],
+                [1],
+                [[1, 2]],
+                [1, -1],
+                [np.nan, 1],
+                [np.inf, 1],
+                [-np.inf, 1],
+                [1j, 2],
+                ["1", "2"],
+            ],
+        )
     ],
 )
-@pytest.mark.parametrize("side", ["candidate", "incumbent"])
 def test_invalidlosses(values, side):
     inputs = {"candidate": [1, 2], "incumbent": [1, 2]}
     inputs[side] = values
@@ -213,13 +230,18 @@ def test_acceptance(acceptance_se):
         paired_losses([1, 2], [2, 3], 4, acceptance_se)
 
 
-@pytest.mark.parametrize("side", ["candidate", "incumbent"])
 @pytest.mark.parametrize(
-    "values,population,statistic",
+    "values,population,statistic,side",
     [
-        ([1e39, 1e39], 2, "mean"),
-        ([1e308, 1e308], 2, "mean"),
-        ([0, 1e20], 4, "variance"),
+        (*case_0, case_1)
+        for case_0, case_1 in product(
+            [
+                ([1e39, 1e39], 2, "mean"),
+                ([1e308, 1e308], 2, "mean"),
+                ([0, 1e20], 4, "variance"),
+            ],
+            ["candidate", "incumbent"],
+        )
     ],
 )
 def test_fp32overflow(side, values, population, statistic):

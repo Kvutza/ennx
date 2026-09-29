@@ -15,6 +15,11 @@ use crate::smnsrch::{N_LIMIT, ScoreQueriesFlat, score_queries};
 pub const PAPER_URL: &str = "https://arxiv.org/abs/2511.15557";
 pub use crate::tuning::{PENDING_HARD, PENDING_SOFT};
 
+#[path = "backend/access.rs"]
+mod access;
+#[path = "backend/metric.rs"]
+mod metric;
+
 pub struct BpannBackend {
     work_dir: PathBuf,
     pub(crate) train_x: MmapColumnStore,
@@ -73,7 +78,11 @@ impl BpannBackend {
 
         let n = train_x_store.nrows;
         let index_dir = work_dir.join("index");
-        let indexed_rows = obs::load_rows(&work_dir).unwrap_or(0).min(n);
+        let indexed_rows = if metric::metric_matches(&work_dir, scale_x, &x_scale) {
+            obs::load_rows(&work_dir).unwrap_or(0).min(n)
+        } else {
+            0
+        };
         let indices = if index_dir.join("header.json").exists() && indexed_rows > 0 {
             vec![BpannIndex::open(index_dir.clone())?]
         } else {
@@ -175,9 +184,11 @@ impl BpannBackend {
 
     pub fn ensure_scale(&mut self, scale_x: bool, x_scale: &Array1<f64>) -> Result<(), BpannError> {
         if self.scale_x != scale_x || self.x_scale != *x_scale {
+            metric::metric_pending(&self.work_dir)?;
             self.scale_x = scale_x;
             self.x_scale = x_scale.to_owned();
             self.reset_index();
+            *self.small_n_x_cache.lock().expect("small_n_x_cache") = None;
         }
         self.ensure_sync()
     }
@@ -290,6 +301,7 @@ impl BpannBackend {
             *self.index_dirty.lock().expect("index_dirty") = false;
             return Ok(());
         }
+        metric::metric_pending(&self.work_dir)?;
         self.index.persist_backend(
             &self.train_x,
             self.num_dim,
@@ -298,6 +310,7 @@ impl BpannBackend {
             &self.work_dir,
             self.num_metrics,
         )?;
+        metric::persist_metric(&self.work_dir, self.scale_x, &self.x_scale)?;
         self.pending_unindexed.store(0, Ordering::Relaxed);
         *self.index_dirty.lock().expect("index_dirty") = false;
         Ok(())
@@ -378,85 +391,6 @@ impl BpannBackend {
             },
         )?;
         Ok((dist2s, indices))
-    }
-
-    pub fn index_snapshot(&self) -> Option<&BpannIndex> {
-        self.index.indices.first()
-    }
-
-    pub fn page_bytes(&self) -> Vec<u8> {
-        self.index
-            .indices
-            .first()
-            .map(|i| i.page_bytes())
-            .unwrap_or_default()
-    }
-
-    pub fn row_slice(&self, i: usize) -> Result<&[f64], BpannError> {
-        self.train_x.row_slice(i)
-    }
-
-    /// Y (and optional yvar) row slices without touching `train_x`.
-    pub fn y_yvar(&self, i: usize) -> Result<(&[f64], Option<&[f64]>), BpannError> {
-        let y = self.train_y.row_slice(i)?;
-        let yvar = match self.train_yvar.as_ref() {
-            None => None,
-            Some(store) => Some(store.row_slice(i)?),
-        };
-        Ok((y, yvar))
-    }
-
-    pub fn index_bytes(&self) -> usize {
-        self.index.index_bytes()
-    }
-
-    pub fn reopen(work_dir: PathBuf) -> Result<Self, BpannError> {
-        let meta_path = work_dir.join("metadata.json");
-        let text = fs::read_to_string(&meta_path)
-            .map_err(|e| BpannError::InvalidParameter(e.to_string()))?;
-        let num_dim = crate::observation::parse_number(&text, "num_dim")
-            .ok_or_else(|| BpannError::InvalidParameter("missing num_dim".to_string()))?;
-        let num_metrics = crate::observation::parse_number(&text, "num_metrics")
-            .ok_or_else(|| BpannError::InvalidParameter("missing num_metrics".to_string()))?;
-        let scale_x = text.contains("\"scale_x\":true");
-        Self::new(
-            work_dir,
-            Array2::zeros((0, num_dim)),
-            Array2::zeros((0, num_metrics)),
-            None,
-            scale_x,
-            Array1::ones(num_dim),
-        )
-    }
-}
-
-impl BpannBackend {
-    pub fn with_soft(mut self, threshold: usize) -> Self {
-        self.soft_threshold = threshold;
-        if self.hard_threshold < threshold {
-            self.hard_threshold = threshold;
-        }
-        self
-    }
-
-    pub fn with_hard(mut self, threshold: usize) -> Self {
-        self.hard_threshold = threshold.max(self.soft_threshold);
-        self
-    }
-
-    pub fn soft_threshold(&self) -> usize {
-        self.soft_threshold
-    }
-
-    pub fn hard_threshold(&self) -> usize {
-        self.hard_threshold
-    }
-
-    /// Update soft/hard pending flush thresholds (keeps `hard >= soft`).
-    pub fn set_thresholds(&mut self, soft: usize, hard: usize) {
-        let soft = soft.max(1);
-        self.soft_threshold = soft;
-        self.hard_threshold = hard.max(soft);
     }
 }
 
