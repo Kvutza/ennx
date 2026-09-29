@@ -359,6 +359,9 @@ impl ConfigOverrides {
         if !pretrain && (self.distance_scaling.is_some() || self.local_scale_neighbors.is_some()) {
             return Err("distance scaling is supported only by pretrain studies".into());
         }
+        if !pretrain && self.reps() > 1 {
+            return Err("reps greater than one are supported only by pretrain".into());
+        }
         if self.study == Some(TurboEnnStudy::MoeLayer) {
             if self.model.is_some() || self.corpus.is_some() {
                 return Err("model and corpus presets are supported only by pretrain".into());
@@ -372,18 +375,37 @@ impl ConfigOverrides {
     }
 
     fn validate_seeds(&self) -> Result<(), String> {
-        let seeds = [
-            self.model_seed(),
-            self.reference_seed(),
-            self.proposal_seed(),
-            self.acquisition_seed(),
-        ];
-        if seeds.iter().any(|&seed| seed > i64::MAX as u64) {
+        if self.reps() > 1
+            && [
+                self.model_seed,
+                self.reference_seed,
+                self.proposal_seed,
+                self.acquisition_seed,
+            ]
+            .iter()
+            .any(Option::is_some)
+        {
+            return Err("reps greater than one require internally derived seeds".into());
+        }
+        let fixed_seeds = [self.model_seed(), self.reference_seed()];
+        if fixed_seeds.iter().any(|&seed| seed > i64::MAX as u64) {
             return Err("seeds must fit TOML signed 64-bit integers".into());
         }
-        for seed in [self.proposal_seed(), self.acquisition_seed()] {
-            seed.checked_add(u64::from(self.rounds() - 1))
-                .ok_or("round seed overflow")?;
+        for rep in 0..self.reps() {
+            let seeds = [
+                self.proposal_seed_for_rep(rep),
+                self.acquisition_seed_for_rep(rep),
+            ];
+            if seeds.iter().any(|&seed| seed > i64::MAX as u64) {
+                return Err("seeds must fit TOML signed 64-bit integers".into());
+            }
+            for seed in [
+                self.proposal_seed_for_rep(rep),
+                self.acquisition_seed_for_rep(rep),
+            ] {
+                seed.checked_add(u64::from(self.rounds() - 1))
+                    .ok_or("round seed overflow")?;
+            }
         }
         Ok(())
     }
@@ -733,6 +755,48 @@ mod serde_tests {
         );
         assert_eq!(pretrain.proposal_seed(), legacy.proposal_seed());
         assert_eq!(pretrain.acquisition_seed(), legacy.acquisition_seed());
+        let repeated =
+            parse_turbo_enn_config(&pretrain_text.replace("reps = 1", "reps = 3")).unwrap();
+        assert_eq!(repeated.reps(), 3);
+        assert_ne!(
+            repeated.proposal_seed_for_rep(0),
+            repeated.proposal_seed_for_rep(1)
+        );
+        assert_ne!(
+            repeated.acquisition_seed_for_rep(1),
+            repeated.acquisition_seed_for_rep(2)
+        );
+        assert_eq!(
+            repeated.proposal_seed_for_rep(0),
+            pretrain.proposal_seed_for_rep(0)
+        );
+        let rademacher =
+            parse_turbo_enn_config(&pretrain_text.replace("gaussian", "rademacher")).unwrap();
+        assert_eq!(
+            rademacher.proposal_seed_for_rep(0),
+            pretrain.proposal_seed_for_rep(0)
+        );
+        assert_eq!(
+            rademacher.acquisition_seed_for_rep(0),
+            pretrain.acquisition_seed_for_rep(0)
+        );
+        assert_eq!(
+            repeated
+                .resident_enn(repeated.acquisition_seed_for_rep(2))
+                .unwrap()
+                .ask
+                .seed,
+            repeated.acquisition_seed_for_rep(2)
+        );
+        let explicit_repeated = ConfigOverrides {
+            reps: Some(2),
+            proposal_seed: Some(7),
+            ..Default::default()
+        };
+        assert_eq!(
+            explicit_repeated.validate_seeds().unwrap_err(),
+            "reps greater than one require internally derived seeds"
+        );
         let baseline =
             parse_turbo_enn_config(&pretrain_text.replace("distribution = \"gaussian\"\n", ""))
                 .unwrap();
@@ -825,6 +889,11 @@ mod serde_tests {
             ))
             .unwrap_err()
             .contains("shape is supported only by pretrain")
+        );
+        assert!(
+            parse_turbo_enn_config(&format!("{base}\nreps=2"))
+                .unwrap_err()
+                .contains("reps greater than one are supported only by pretrain")
         );
     }
 }
@@ -1021,38 +1090,52 @@ impl ConfigOverrides {
     }
 
     pub fn proposal_seed(&self) -> u64 {
+        self.proposal_seed_for_rep(0)
+    }
+
+    pub fn proposal_seed_for_rep(&self, rep: u32) -> u64 {
         self.proposal_seed
-            .unwrap_or_else(|| self.derived_seed(0, "proposal", 0))
+            .unwrap_or_else(|| self.derived_seed(rep, "proposal", 0))
     }
 
     pub fn acquisition_seed(&self) -> u64 {
+        self.acquisition_seed_for_rep(0)
+    }
+
+    pub fn acquisition_seed_for_rep(&self, rep: u32) -> u64 {
         self.acquisition_seed
-            .unwrap_or_else(|| self.derived_seed(0, "acquisition", 0))
+            .unwrap_or_else(|| self.derived_seed(rep, "acquisition", 0))
     }
 
     pub(crate) fn derived_seed(&self, rep: u32, domain: &str, index: u64) -> u64 {
         let mut state = 0xcbf2_9ce4_8422_2325u64;
-        let mut parts = vec![
-            b"ennx-tune-v1".to_vec(),
-            domain.as_bytes().to_vec(),
-            rep.to_le_bytes().to_vec(),
-            index.to_le_bytes().to_vec(),
-            format!("{:?}", self.study).into_bytes(),
-            format!("{:?}", self.model).into_bytes(),
-            format!("{:?}", self.corpus).into_bytes(),
-            format!("{:?}", self.perturbation()).into_bytes(),
-            format!("{:?}", self.acquisition).into_bytes(),
-            self.rounds().to_string().into_bytes(),
-            self.reps().to_string().into_bytes(),
-            self.target_round_ms().to_string().into_bytes(),
-        ];
-        parts.sort();
-        for bytes in parts {
+        let mut mix = |bytes: &[u8]| {
+            state ^= bytes.len() as u64;
+            state = crate::hash::splitmix64(state);
             for byte in bytes {
-                state ^= u64::from(byte);
+                state ^= u64::from(*byte);
                 state = state.wrapping_mul(0x0000_0100_0000_01b3);
             }
-        }
+        };
+        let study = match self.study {
+            None => 0,
+            Some(TurboEnnStudy::EndToEnd) => 1,
+            Some(TurboEnnStudy::MoeLayer) => 2,
+            Some(TurboEnnStudy::Pretrain) => 3,
+        };
+        let model = match self.model {
+            None => 0,
+            Some(PretrainModel::FbtPisa1MoeV1) => 1,
+        };
+        let corpus = match self.corpus {
+            None => 0,
+            Some(PretrainCorpus::StackV3PythonPilotV1) => 1,
+        };
+        mix(b"ennx-tune-seed-v2");
+        mix(&[study, model, corpus]);
+        mix(domain.as_bytes());
+        mix(&rep.to_le_bytes());
+        mix(&index.to_le_bytes());
         crate::hash::splitmix64(state) & 0x3fff_ffff_ffff_ffff
     }
 

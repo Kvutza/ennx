@@ -5,6 +5,171 @@ fn main() {
     }
 }
 
+#[cfg(target_os = "macos")]
+struct PretrainRep {
+    index: u32,
+    proposal_seed: u64,
+    acquisition_seed: u64,
+    median_wall_ms: f64,
+    median_gpu_ms: f64,
+    max_wall_ms: f64,
+    accepted: u32,
+    goal_met: bool,
+}
+
+#[cfg(target_os = "macos")]
+fn median(values: impl IntoIterator<Item = f64>) -> f64 {
+    let mut values = values.into_iter().collect::<Vec<_>>();
+    values.sort_by(f64::total_cmp);
+    let middle = values.len() / 2;
+    if values.len() % 2 == 0 {
+        (values[middle - 1] + values[middle]) / 2.0
+    } else {
+        values[middle]
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn write_pretrain_rep(
+    run: &ennx::config::ConfigOverrides,
+    artifact_dir: &std::path::Path,
+    rep: u32,
+    result: &ennx::experimental::ActualBoResult,
+) -> Result<PretrainRep, String> {
+    let enn = run.resident_enn(run.acquisition_seed_for_rep(rep))?;
+    let ask = enn.ask;
+    let length = run.length();
+    let shape = run
+        .trust_region_shape
+        .unwrap_or(ennx::config::TrustRegionShape::TensorFamilyStatic);
+    let proposal_seed = run.proposal_seed_for_rep(rep);
+    let acquisition_seed = run.acquisition_seed_for_rep(rep);
+    let goal_met = result.max_wall_seconds <= f64::from(run.target_round_ms()) / 1000.0;
+    let updates_path = artifact_dir.join("tensor-updates.jsonl");
+    result.write_updates(&updates_path)?;
+    eprintln!("[weights] per-tensor records: {}", updates_path.display());
+    let controller_path = artifact_dir.join("controller.jsonl");
+    result.write_controller(&controller_path)?;
+    eprintln!("[controller] round records: {}", controller_path.display());
+    std::fs::write(
+        artifact_dir.join("result.toml"),
+        format!(
+            "status = \"completed\"\nstage = \"candidate_applied_bo\"\nrep = {}\nreps = {}\nkernel = \"metal4_tensorops_m128_n64_plus_pisa1_simdgroup_matrix\"\nattention_shape = \"pisa1_q8_kv1_d64_c64_k8\"\nqkv_width = 640\nproposal = {:?}\ntrust_region_shape = {:?}\ncontroller = {:?}\nparameters = {}\nsearch_dimensions = {}\nlogical_history_capacity = 128\nresident_weight_rows = 2\nacquisition = {:?}\nk_neighbors = {}\nk_neighbors_role = \"configured_maximum\"\nfit_neighbors = {}\ndistance_scaling = {:?}\nlocal_scale_neighbors = {}\nepistemic_scale = {}\naleatoric_scale = {}\ny_scale = {}\nbeta = {}\nlength_init = {}\nlength_min = {}\nlength_max = {}\nproposal_seed = {}\nacquisition_seed = {}\ndistance = \"resident_exact_nonresident_approximate\"\ndata = \"causal_pretraining_paired_block128_ennxptn1\"\ndiagnostics = false\nloop_seconds = {:.9}\nactual_bo_gpu_median_ms = {:.6}\nactual_bo_wall_median_ms = {:.6}\nactual_bo_wall_min_ms = {:.6}\nactual_bo_wall_max_ms = {:.6}\nactual_bo_accepted = {}\ntarget_round_ms = {}\nfull_round_goal_met = {goal_met}\n",
+            rep + 1,
+            run.reps(),
+            format!("fp16_full_weight_{}", run.perturbation().name()),
+            shape.name(),
+            if run.reliability_controller().is_some() {
+                "reliability"
+            } else {
+                "turbo"
+            },
+            result.parameters,
+            result.parameters,
+            format!("{:?}", ask.acquisition).to_ascii_lowercase(),
+            ask.neighbors,
+            enn.fit_neighbors,
+            enn.distance_scaling.name(),
+            enn.local_scale_neighbors,
+            ask.epistemic_scale,
+            ask.aleatoric_scale,
+            ask.y_scale,
+            ask.beta,
+            length.length_init,
+            length.length_min,
+            length.length_max,
+            proposal_seed,
+            acquisition_seed,
+            result.loop_seconds,
+            result.median_gpu_seconds * 1000.0,
+            result.median_wall_seconds * 1000.0,
+            result.min_wall_seconds * 1000.0,
+            result.max_wall_seconds * 1000.0,
+            result.accepted,
+            run.target_round_ms(),
+        ),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(PretrainRep {
+        index: rep + 1,
+        proposal_seed,
+        acquisition_seed,
+        median_wall_ms: result.median_wall_seconds * 1000.0,
+        median_gpu_ms: result.median_gpu_seconds * 1000.0,
+        max_wall_ms: result.max_wall_seconds * 1000.0,
+        accepted: result.accepted,
+        goal_met,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn run_pretrain_reps(
+    run: &ennx::config::ConfigOverrides,
+    artifact_dir: &std::path::Path,
+) -> Result<(), String> {
+    let dataset = run
+        .dataset()
+        .ok_or("pretrain study was not resolved to an immutable dataset")?;
+    let mut repetitions = Vec::with_capacity(run.reps() as usize);
+    for rep in 0..run.reps() {
+        let output = if run.reps() == 1 {
+            artifact_dir.to_path_buf()
+        } else {
+            let output = artifact_dir.join(format!("rep-{:03}", rep + 1));
+            std::fs::create_dir(&output).map_err(|error| error.to_string())?;
+            output
+        };
+        let result = ennx::experimental::run_pretrain(run, dataset, rep)?;
+        let summary = write_pretrain_rep(run, &output, rep, &result)?;
+        eprintln!(
+            "TURBO_ENN_SUMMARY rep={} reps={} rounds={} median_seconds={:.9} max_seconds={:.9} accepted={} target_ms={} target_met={}",
+            summary.index,
+            run.reps(),
+            run.rounds(),
+            summary.median_wall_ms / 1000.0,
+            summary.max_wall_ms / 1000.0,
+            summary.accepted,
+            run.target_round_ms(),
+            summary.goal_met,
+        );
+        repetitions.push(summary);
+    }
+    if repetitions.len() == 1 {
+        return Ok(());
+    }
+    let median_wall_ms = median(repetitions.iter().map(|rep| rep.median_wall_ms));
+    let median_gpu_ms = median(repetitions.iter().map(|rep| rep.median_gpu_ms));
+    let max_wall_ms = repetitions
+        .iter()
+        .map(|rep| rep.max_wall_ms)
+        .max_by(f64::total_cmp)
+        .ok_or("pretraining produced no repetitions")?;
+    let goal_met = repetitions.iter().all(|rep| rep.goal_met);
+    let mut aggregate = format!(
+        "status = \"completed\"\nstage = \"repeated_candidate_applied_bo\"\nreps = {}\nrounds_per_rep = {}\nmedian_rep_wall_ms = {median_wall_ms:.6}\nmedian_rep_gpu_ms = {median_gpu_ms:.6}\nmax_round_wall_ms = {max_wall_ms:.6}\ntarget_round_ms = {}\nall_reps_goal_met = {goal_met}\n",
+        run.reps(),
+        run.rounds(),
+        run.target_round_ms(),
+    );
+    for rep in &repetitions {
+        aggregate.push_str(&format!(
+            "\n[[repetitions]]\nindex = {}\nproposal_seed = {}\nacquisition_seed = {}\nmedian_wall_ms = {:.6}\nmedian_gpu_ms = {:.6}\nmax_wall_ms = {:.6}\naccepted = {}\ngoal_met = {}\nartifact = {:?}\n",
+            rep.index,
+            rep.proposal_seed,
+            rep.acquisition_seed,
+            rep.median_wall_ms,
+            rep.median_gpu_ms,
+            rep.max_wall_ms,
+            rep.accepted,
+            rep.goal_met,
+            format!("rep-{:03}", rep.index),
+        ));
+    }
+    std::fs::write(artifact_dir.join("result.toml"), aggregate)
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let path = std::env::args_os()
         .nth(1)
@@ -17,63 +182,7 @@ fn run() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         if run.study == Some(ennx::TurboEnnStudy::Pretrain) {
-            let dataset = run.dataset()
-                .ok_or("pretrain study was not resolved to an immutable dataset")?;
-            let result = ennx::experimental::run_pretrain(&run, dataset)?;
-            let enn = run.resident_enn(run.acquisition_seed())?;
-            let ask = enn.ask;
-            let length = run.length();
-            let shape = run.trust_region_shape.unwrap_or(
-                ennx::config::TrustRegionShape::TensorFamilyStatic,
-            );
-            let updates_path = artifact_dir.join("tensor-updates.jsonl");
-            result.write_updates(&updates_path)?;
-            eprintln!("[weights] per-tensor records: {}", updates_path.display());
-            let controller_path = artifact_dir.join("controller.jsonl");
-            result.write_controller(&controller_path)?;
-            eprintln!("[controller] round records: {}", controller_path.display());
-            let goal_met = result.max_wall_seconds <= f64::from(run.target_round_ms()) / 1000.0;
-            std::fs::write(
-                artifact_dir.join("result.toml"),
-                format!(
-                    "status = \"completed\"\nstage = \"candidate_applied_bo\"\nkernel = \"metal4_tensorops_m128_n64_plus_pisa1_simdgroup_matrix\"\nattention_shape = \"pisa1_q8_kv1_d64_c64_k8\"\nqkv_width = 640\nproposal = {:?}\ntrust_region_shape = {:?}\ncontroller = {:?}\nparameters = {}\nsearch_dimensions = {}\nlogical_history_capacity = 128\nresident_weight_rows = 2\nacquisition = {:?}\nk_neighbors = {}\nk_neighbors_role = \"configured_maximum\"\nfit_neighbors = {}\ndistance_scaling = {:?}\nlocal_scale_neighbors = {}\nepistemic_scale = {}\naleatoric_scale = {}\ny_scale = {}\nbeta = {}\nlength_init = {}\nlength_min = {}\nlength_max = {}\nproposal_seed = {}\nacquisition_seed = {}\ndistance = \"resident_exact_nonresident_approximate\"\ndata = \"causal_pretraining_paired_block128_ennxptn1\"\ndiagnostics = false\nloop_seconds = {:.9}\nactual_bo_gpu_median_ms = {:.6}\nactual_bo_wall_median_ms = {:.6}\nactual_bo_wall_min_ms = {:.6}\nactual_bo_wall_max_ms = {:.6}\nactual_bo_accepted = {}\ntarget_round_ms = {}\nfull_round_goal_met = {goal_met}\n",
-                    format!("fp16_full_weight_{}", run.perturbation().name()),
-                    shape.name(),
-                    if run.reliability_controller().is_some() {
-                        "reliability"
-                    } else {
-                        "turbo"
-                    },
-                    result.parameters,
-                    result.parameters,
-                    format!("{:?}", ask.acquisition).to_ascii_lowercase(),
-                    ask.neighbors,
-                    enn.fit_neighbors,
-                    enn.distance_scaling.name(),
-                    enn.local_scale_neighbors,
-                    ask.epistemic_scale,
-                    ask.aleatoric_scale,
-                    ask.y_scale,
-                    ask.beta,
-                    length.length_init,
-                    length.length_min,
-                    length.length_max,
-                    run.proposal_seed(),
-                    run.acquisition_seed(),
-                    result.loop_seconds,
-                    result.median_gpu_seconds * 1000.0,
-                    result.median_wall_seconds * 1000.0,
-                    result.min_wall_seconds * 1000.0,
-                    result.max_wall_seconds * 1000.0,
-                    result.accepted,
-                    run.target_round_ms(),
-                ),
-            ).map_err(|error| error.to_string())?;
-            eprintln!(
-                "TURBO_ENN_SUMMARY rounds={} median_seconds={:.9} max_seconds={:.9} accepted={} target_ms={} target_met={goal_met}",
-                run.rounds(), result.median_wall_seconds, result.max_wall_seconds, result.accepted, run.target_round_ms(),
-            );
-            return Ok(());
+            return run_pretrain_reps(&run, &artifact_dir);
         }
         if run.study == Some(ennx::TurboEnnStudy::MoeLayer) {
             let probe = ennx::experimental::run_grouped_moe_probe_with_dataset(

@@ -85,6 +85,23 @@ Record complete wall time, scorer GPU time, ask time, tell time, changed-weight
 fraction, realized/requested RMS ratio, acceptance, and trust radius. Treat
 distribution-dependent rewards as research outcomes, not timing parity.
 
+## Workspace protocol
+
+Keep the runnable experiment platform at a named JJ revision. Create clean
+sibling workspaces for control and treatment from that exact revision; keep an
+additional workspace at any historical source revision used for comparison.
+Never run a control from an older harness than its treatment. Harness changes
+land on the platform first, then both experiment workspaces advance to the same
+platform revision before either arm changes.
+
+For an A/B comparison, interleave whole control and treatment CLI runs on one
+machine. Within one CLI run, repetitions execute sequentially. The repetition
+scheduler derives matched proposal and acquisition streams without checked-in
+seed literals and writes a separate artifact directory for every repetition.
+Record the source revision and resolved study with the results. A historical
+timing remains historical evidence unless it is rerun through the same harness,
+objective, model, and system state as the current arm.
+
 ## Design provenance
 
 The ENNX implementation is original Metal and Rust code. No source code,

@@ -2981,17 +2981,26 @@ fn complete_prematerialized_layer(
 pub fn run_pretrain(
     run: &crate::config::ConfigOverrides,
     dataset_path: &std::path::Path,
+    rep: u32,
 ) -> Result<ActualBoResult, String> {
     run.validate_round_study()?;
+    if rep >= run.reps() {
+        return Err(format!(
+            "pretraining repetition {rep} is outside configured reps {}",
+            run.reps()
+        ));
+    }
     let rounds = run.rounds();
     if rounds == 0 {
         return Err("pretraining requires positive rounds".into());
     }
+    let proposal_seed = run.proposal_seed_for_rep(rep);
+    let acquisition_seed = run.acquisition_seed_for_rep(rep);
     let control = BoControl {
         length: run.length(),
-        enn: run.resident_enn(run.acquisition_seed())?,
-        proposal_seed: run.proposal_seed(),
-        acquisition_seed: run.acquisition_seed(),
+        enn: run.resident_enn(acquisition_seed)?,
+        proposal_seed,
+        acquisition_seed,
         perturbation: run.perturbation(),
         shape: run
             .trust_region_shape
@@ -3000,6 +3009,11 @@ pub fn run_pretrain(
         reliability: run.reliability_controller(),
     };
     let started = Instant::now();
+    eprintln!(
+        "TURBO_ENN_REP rep={} reps={} proposal_seed={proposal_seed} acquisition_seed={acquisition_seed}",
+        rep + 1,
+        run.reps()
+    );
     eprintln!("[tune] load dataset and compile pipelines");
     let dataset = crate::pretrain_data::PretrainDataset::load(dataset_path)?;
     metal::objc::rc::autoreleasepool(|| {

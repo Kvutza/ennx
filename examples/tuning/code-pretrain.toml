@@ -7,7 +7,7 @@ corpus = "stack_v3_python_pilot_v1"
 
 [rounds]
 count = 1000
-# Repetition scheduling is not implemented yet; keep this at 1.
+# Increase for independently derived, matched proposal/acquisition streams.
 reps = 1
 # Wall-time target per complete BO round, in milliseconds.
 target_ms = 1000

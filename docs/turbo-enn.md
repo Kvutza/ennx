@@ -12,9 +12,9 @@ The higher-budget learned-family experiment is:
 ./ennx tune examples/tuning/code-pretrain-family-learned.toml
 ```
 
-It runs 256 rounds with 32 neighbors and 64-row/64-candidate ENN fitting,
-using explicit proposal and acquisition seeds. The pretraining resolver chooses
-its content-addressed output directory and prints the artifact path.
+It runs 256 rounds with 32 neighbors and 64-row/64-candidate ENN fitting. The
+pretraining resolver derives its random streams, chooses its content-addressed
+output directory, and prints the artifact path.
 
 The command accepts one TOML file. The active preset is FBT/PISA/MoE,
 not the legacy dense LocalV1 study. Apple silicon and sufficient unified memory
@@ -28,7 +28,7 @@ Use a completed run's resolved study.toml to reproduce its settings.
 | Section | Role |
 | --- | --- |
 | pretrain | Model and corpus presets |
-| rounds | Selected-candidate round count, target wall time; repetition scheduling is not implemented |
+| rounds | Selected-candidate round count, repetitions, and target wall time |
 | perturbation | Independent Gaussian or Rademacher coordinates |
 | acquisition | Selection rule; UCB beta controls its uncertainty bonus |
 | surrogate | Neighbor count, distance scaling, initial uncertainty/output scales, LOOCV fitting budget |
@@ -39,6 +39,16 @@ fit_candidates and fit_samples control surrogate fitting, not proposal count:
 the pool remains four. Fitting estimates epistemic/aleatoric scales; output
 scale comes from the fitter's outcome standard deviation. This is point fitting,
 not integration over a hyperparameter posterior.
+
+`reps > 1` runs complete pretraining studies sequentially. The model weights
+and immutable corpus stay fixed while proposal and acquisition streams are
+derived independently for each repetition. The derivation excludes treatment
+settings and the requested round/repetition budgets, so matching ablation cells
+use the same streams and extending a run preserves its existing prefix. Do not
+put seeds in a repeated study: explicit legacy seeds are rejected when
+`reps > 1`. Each repetition writes `rep-NNN/result.toml`, tensor updates, and
+controller records; the top-level `result.toml` reports aggregate latency and
+goal status.
 
 `fit_neighbors = true` treats the configured neighbor count as both the
 initialization count and the upper bound for the fitted ENN neighborhood. After
