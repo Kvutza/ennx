@@ -119,7 +119,18 @@ fn run_pretrain_reps(
             std::fs::create_dir(&output).map_err(|error| error.to_string())?;
             output
         };
-        let result = ennx::experimental::run_pretrain(run, dataset, rep)?;
+        let proposal_seed = run.proposal_seed_for_rep(rep);
+        let acquisition_seed = run.acquisition_seed_for_rep(rep);
+        eprintln!(
+            "TURBO_ENN_REP rep={} reps={} proposal_seed={proposal_seed} acquisition_seed={acquisition_seed}",
+            rep + 1,
+            run.reps()
+        );
+        let mut repetition = run.clone();
+        repetition.reps = Some(1);
+        repetition.proposal_seed = Some(proposal_seed);
+        repetition.acquisition_seed = Some(acquisition_seed);
+        let result = ennx::experimental::run_pretrain(&repetition, dataset)?;
         let summary = write_pretrain_rep(run, &output, rep, &result)?;
         eprintln!(
             "TURBO_ENN_SUMMARY rep={} reps={} rounds={} median_seconds={:.9} max_seconds={:.9} accepted={} target_ms={} target_met={}",
