@@ -37,7 +37,7 @@ pub(super) fn run(config: &ConfigOverrides, directory: &Path) -> Result<(), Stri
         ennx_wire::json::pretty_writer(
             File::create(directory.join("result.json")).map_err(|e| e.to_string())?,
             &json!({"schema":"ennx.generation_repetitions.v1","status":"completed",
-                "teacher_forcing":false,"generation_in_loop":true,"repetitions":results}),
+                "generation_in_loop":true,"repetitions":results}),
         )
         .map_err(|e| e.to_string())?;
     }

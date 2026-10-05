@@ -117,10 +117,15 @@ impl PtxKernelBuilder {
     }
 
     pub fn set_shared_memory_bytes(&mut self, bytes: usize) -> &mut Self {
-        // T4 maximum shared memory is 64 KB (65,536 bytes)
+        let max_smem = match self.arch {
+            TargetArch::Sm75 => 65536,
+            TargetArch::Sm80 => 167936,
+            TargetArch::Sm90 => 232448,
+        };
         assert!(
-            bytes <= 65536,
-            "Shared memory requested ({bytes} B) exceeds T4 64 KB limit!"
+            bytes <= max_smem,
+            "Shared memory requested ({bytes} B) exceeds {} limit ({max_smem} B)!",
+            self.arch.ptx_target_str()
         );
         self.smem_bytes = bytes;
         self
@@ -165,7 +170,7 @@ impl PtxKernelBuilder {
             self.arch.ptx_target_str()
         )
         .unwrap();
-        writeln!(ptx, ".version 6.4").unwrap();
+        writeln!(ptx, ".version {}", self.arch.ptx_version_str()).unwrap();
         writeln!(ptx, ".target {}", self.arch.ptx_target_str()).unwrap();
         writeln!(ptx, ".address_size 64\n").unwrap();
 

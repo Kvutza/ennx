@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import re
 import subprocess
 import sys
@@ -36,6 +37,7 @@ SKIP_PARTS = {
     ".cache",
     ".git",
     ".home",
+    ".jj",
     ".kiss",
     ".malvin",
     ".pixi",
@@ -45,7 +47,10 @@ SKIP_PARTS = {
     ".venv",
     "__pycache__",
     "buck-out",
+    "cuda",
     "dist",
+    "docs",
+    "examples",
     "ptx-synth",
     "target",
 }
@@ -134,6 +139,14 @@ def source_files(root: Path, paths: list[str]) -> Iterable[Path]:
         yield from path_sources(path)
 
 
+def walk_pruned(path: Path) -> Iterable[Path]:
+    for root_dir, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if d not in SKIP_PARTS]
+        root_path = Path(root_dir)
+        for f in files:
+            yield root_path / f
+
+
 def path_sources(path: Path) -> Iterable[Path]:
     if skipped(path):
         return
@@ -143,8 +156,8 @@ def path_sources(path: Path) -> Iterable[Path]:
         return
     if not path.is_dir():
         return
-    for child in path.rglob("*"):
-        if child.is_file() and child.suffix in {".rs", ".py"} and not skipped(child):
+    for child in walk_pruned(path):
+        if child.suffix in {".rs", ".py"} and not skipped(child):
             yield child
 
 
@@ -167,15 +180,12 @@ def path_files(path: Path) -> Iterable[Path]:
         return
     if not path.is_dir():
         return
-    for child in path.rglob("*"):
-        if child.is_file() and not skipped(child):
-            if child.suffix in FILE_SUFFIXES or child.name in {
-                "BUCK",
-                "Cargo.toml",
-                "MODULE.bazel",
-                "README.md",
-            }:
-                yield child
+    for child in walk_pruned(path):
+        if not skipped(child) and (
+            child.suffix in FILE_SUFFIXES
+            or child.name in {"BUCK", "Cargo.toml", "MODULE.bazel", "README.md"}
+        ):
+            yield child
 
 
 def overload_number(name: str) -> bool:
@@ -210,7 +220,7 @@ def file_findings(root: Path, paths: list[str], max_underscores: int) -> list[Fi
     findings: list[Finding] = []
     for path in sorted(set(file_targets(root, paths))):
         stem = path.stem
-        if stem == "__init__":
+        if stem == "__init__" or path.suffix == ".metal":
             continue
         if bad_name(stem, max_underscores):
             findings.append(

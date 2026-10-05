@@ -13,6 +13,7 @@ mod cache;
 mod certify;
 mod dirty;
 mod fallback;
+mod hierarchical;
 
 const CONTEXT: u32 = 4096;
 const BATCH: u32 = 2;
@@ -46,6 +47,8 @@ struct Pipelines {
     select_attention: ComputePipelineState,
     select_attention_q4: ComputePipelineState,
     exact_attention: ComputePipelineState,
+    leaf_kv: ComputePipelineState,
+    hierarchical: ComputePipelineState,
     query_tile: u32,
 }
 
@@ -122,6 +125,8 @@ impl Pipelines {
             attention: compile("fbt_pisa1_attention")?,
             select_attention: compile("fbt_pisa1_select_attention")?,
             exact_attention: compile("fbt_pisa1_exact_attention")?,
+            leaf_kv: compile("fbt_pisa1_leaf_kv_means")?,
+            hierarchical: compile("fbt_pisa1_hierarchical_attention")?,
             select_attention_q4: runtime.pipeline(
                 &production_source,
                 "PISA-1 attention",
@@ -656,6 +661,7 @@ fn check_parity(runtime: &Runtime, pisa: &Pisa1, qkv: &BufferRef) -> Result<f64,
         return Err("PISA-1 Q4 selection differs from Q1".into());
     }
     let fixed_error = validate_attention(pisa, qkv)?.max(validate_q4(pisa)?);
+    let fixed_error = fixed_error.max(hierarchical::validate(runtime, pisa, qkv)?);
     Ok(fixed_error.max(fallback::validate(runtime, pisa, qkv)?))
 }
 

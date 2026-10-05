@@ -93,7 +93,8 @@ impl SearchState {
         let params = self.select_params(root, config, forced_candidate);
         let fused_replay =
             self.realized_history() && self.history > self.resident_history && self.history <= 16;
-        if !fused_replay && !self.analytic_pool() {
+        let needs_replay = forced_candidate.is_none() || self.family.is_some();
+        if needs_replay && !fused_replay && !self.analytic_pool() {
             let reducer = command.new_compute_command_encoder();
             reducer.set_compute_pipeline_state(&self.reduction_pipeline);
             for (index, buffer) in [&self.partials, &self.pool_geometry, &self.pool_aggregates]
@@ -114,111 +115,8 @@ impl SearchState {
             reducer.end_encoding();
         }
 
-        if self.realized_history() && self.history > self.resident_history {
-            let blit = command.new_blit_command_encoder();
-            blit.copy_from_buffer(
-                self.replay_origin.as_ref().unwrap(),
-                0,
-                &self.history_rows[0],
-                0,
-                self.row_bytes(),
-            );
-            blit.end_encoding();
-            let params = Params {
-                history: self.history as u32,
-                blocks: self.blocks.len() as u32,
-                ..self.pool_params(root)
-            };
-            if self.history <= 16 {
-                let replay = command.new_compute_command_encoder();
-                replay.set_compute_pipeline_state(&self.replay_short_pipeline);
-                for (index, buffer) in [
-                    &self.history_rows[0],
-                    &self.base,
-                    &self.leaves_gpu,
-                    &self.tiles_gpu,
-                    &self.replay_steps,
-                    &self.replay_scales,
-                    &self.family_base_weights,
-                    &self.replay_partials,
-                    &self.replay_components,
-                    &self.partials,
-                    &self.pool_geometry,
-                ]
-                .iter()
-                .enumerate()
-                {
-                    replay.set_buffer(index as u64, Some(buffer), 0);
-                }
-                replay.set_bytes(
-                    11,
-                    size_of::<Params>() as u64,
-                    (&params as *const Params).cast(),
-                );
-                replay.dispatch_thread_groups(
-                    thread_group(self.tiles.len() as u64),
-                    thread_group(256),
-                );
-                replay.end_encoding();
-            } else {
-                for start in (0..self.history).step_by(32) {
-                    let stage = Params {
-                        initialize: start as u32,
-                        ..params
-                    };
-                    let replay = command.new_compute_command_encoder();
-                    replay.set_compute_pipeline_state(&self.replay_pipeline);
-                    for (index, buffer) in [
-                        &self.history_rows[0],
-                        &self.base,
-                        &self.leaves_gpu,
-                        &self.tiles_gpu,
-                        &self.replay_steps,
-                        &self.replay_scales,
-                        &self.family_base_weights,
-                        &self.replay_partials,
-                        &self.replay_components,
-                    ]
-                    .iter()
-                    .enumerate()
-                    {
-                        replay.set_buffer(index as u64, Some(buffer), 0);
-                    }
-                    replay.set_bytes(
-                        9,
-                        size_of::<Params>() as u64,
-                        (&stage as *const Params).cast(),
-                    );
-                    replay.dispatch_thread_groups(
-                        thread_group(self.tiles.len() as u64),
-                        thread_group(256),
-                    );
-                    replay.end_encoding();
-                }
-            }
-            let replay = command.new_compute_command_encoder();
-            replay.set_compute_pipeline_state(&self.replay_reduction_pipeline);
-            for (index, buffer) in [
-                &self.replay_partials,
-                &self.replay_components,
-                &self.family_groups,
-                &self.tiles_gpu,
-                &self.pool_distances,
-                &self.pool_family_distances,
-            ]
-            .iter()
-            .enumerate()
-            {
-                replay.set_buffer(index as u64, Some(buffer), 0);
-            }
-            replay.set_bytes(
-                6,
-                size_of::<Params>() as u64,
-                (&params as *const Params).cast(),
-            );
-            replay
-                .dispatch_thread_groups(thread_group((4 * self.history) as u64), thread_group(256));
-            replay.end_encoding();
+        if needs_replay && self.realized_history() && self.history > self.resident_history {
+            self.encode_replay(command, root);
         }
 
         let encoder = command.new_compute_command_encoder();
@@ -243,6 +141,108 @@ impl SearchState {
         );
         encoder.dispatch_thread_groups(thread_group(1), thread_group(1));
         encoder.end_encoding();
+    }
+    fn encode_replay(&self, command: &CommandBufferRef, root: u64) {
+        let blit = command.new_blit_command_encoder();
+        blit.copy_from_buffer(
+            self.replay_origin.as_ref().unwrap(),
+            0,
+            &self.history_rows[0],
+            0,
+            self.row_bytes(),
+        );
+        blit.end_encoding();
+        let params = Params {
+            history: self.history as u32,
+            blocks: self.blocks.len() as u32,
+            ..self.pool_params(root)
+        };
+        if self.history <= 16 {
+            let replay = command.new_compute_command_encoder();
+            replay.set_compute_pipeline_state(&self.replay_short_pipeline);
+            for (index, buffer) in [
+                &self.history_rows[0],
+                &self.base,
+                &self.leaves_gpu,
+                &self.tiles_gpu,
+                &self.replay_steps,
+                &self.replay_scales,
+                &self.family_base_weights,
+                &self.replay_partials,
+                &self.replay_components,
+                &self.partials,
+                &self.pool_geometry,
+            ]
+            .iter()
+            .enumerate()
+            {
+                replay.set_buffer(index as u64, Some(buffer), 0);
+            }
+            replay.set_bytes(
+                11,
+                size_of::<Params>() as u64,
+                (&params as *const Params).cast(),
+            );
+            replay.dispatch_thread_groups(thread_group(self.tiles.len() as u64), thread_group(256));
+            replay.end_encoding();
+        } else {
+            for start in (0..self.history).step_by(32) {
+                let stage = Params {
+                    initialize: start as u32,
+                    ..params
+                };
+                let replay = command.new_compute_command_encoder();
+                replay.set_compute_pipeline_state(&self.replay_pipeline);
+                for (index, buffer) in [
+                    &self.history_rows[0],
+                    &self.base,
+                    &self.leaves_gpu,
+                    &self.tiles_gpu,
+                    &self.replay_steps,
+                    &self.replay_scales,
+                    &self.family_base_weights,
+                    &self.replay_partials,
+                    &self.replay_components,
+                ]
+                .iter()
+                .enumerate()
+                {
+                    replay.set_buffer(index as u64, Some(buffer), 0);
+                }
+                replay.set_bytes(
+                    9,
+                    size_of::<Params>() as u64,
+                    (&stage as *const Params).cast(),
+                );
+                replay.dispatch_thread_groups(
+                    thread_group(self.tiles.len() as u64),
+                    thread_group(256),
+                );
+                replay.end_encoding();
+            }
+        }
+        let replay = command.new_compute_command_encoder();
+        replay.set_compute_pipeline_state(&self.replay_reduction_pipeline);
+        for (index, buffer) in [
+            &self.replay_partials,
+            &self.replay_components,
+            &self.family_groups,
+            &self.tiles_gpu,
+            &self.pool_distances,
+            &self.pool_family_distances,
+        ]
+        .iter()
+        .enumerate()
+        {
+            replay.set_buffer(index as u64, Some(buffer), 0);
+        }
+        replay.set_bytes(
+            6,
+            size_of::<Params>() as u64,
+            (&params as *const Params).cast(),
+        );
+        replay.dispatch_thread_groups(thread_group((4 * self.history) as u64), thread_group(256));
+        replay.end_encoding();
     }
     pub(super) fn encode_row(&self, command: &CommandBufferRef) {
         let encoder = command.new_compute_command_encoder();

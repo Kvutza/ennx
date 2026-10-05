@@ -65,7 +65,6 @@ pub(super) fn finish_run(
     let result = ennx_wire::json::json!({"status":"completed","stage":stage,"parameters":parameters,
         "rounds":run.rounds(),"accepted":state.accepted,"loop_seconds":state.loop_seconds,
         "elapsed_seconds":experiment_start.elapsed().as_secs_f64(),
-        "generation_teacher_forcing":false,
         "generation_in_loop":true,
         "median_wall_ms":median*1000.0,"max_wall_ms":maximum*1000.0,
         "target_round_ms":run.target_ms(),"latency_target_met":latency_target_met,

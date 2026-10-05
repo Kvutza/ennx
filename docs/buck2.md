@@ -36,7 +36,18 @@ Rust `nightly-2026-09-29` is pinned through `rust-toolchain.toml`. Run
 `./ennx toolchain check` to detect drift or `./ennx toolchain sync
 [nightly-YYYY-MM-DD]` to synchronize or upgrade every consumer. Development uses optimization
 level 1; wheels use level 3 and ThinLTO. Build tools use level 0.
-Set `BUCK_ISOLATION_DIR` to use a separate cache; the default is `dev`.
+Normal commands use the shared `dev` isolation directory. Set
+`BUCK_ISOLATION_DIR` only when a genuinely independent build is required (for
+example, the CUDA recursive build); every isolation directory has its own
+cache. Buck2's on-disk materializer state and adaptive stale cleanup are
+enabled in `.buckconfig`, so old artifacts can be reclaimed without manually
+editing `buck-out`.
+
+Use `./buck2w clean --stale --dry-run` to inspect candidates, or
+run `clean --stale` once per repo isolation directory when cleaning this
+repository. The newer `./buck2w cleanall --stale` command covers every Buck2
+project known to the machine, so use it only when that broader scope is
+intentional.
 
 Supported hosts are Apple Silicon macOS and x86_64/aarch64 Linux. Bootstrap needs
 standard shell utilities, `curl`, `tar`, and `shasum` or `sha256sum`.

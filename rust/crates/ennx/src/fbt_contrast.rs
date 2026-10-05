@@ -54,7 +54,7 @@ impl Scorer {
         let passed = rows.iter().all(|row| row["passed"] == true);
         Ok(
             json!({"schema":"ennx.code_contrast_controls.v1", "passed":passed,
-            "teacher_forcing":false,"functional_correctness_established":false,"tasks":rows}),
+            "functional_correctness_established":false,"tasks":rows}),
         )
     }
 
@@ -79,7 +79,7 @@ impl Scorer {
             components.push(json!({"target_overlap":target,"max_decoy_overlap":decoy,
                 "reward":target-decoy,"generated_bytes":output.len(),"generated_tokens":rollout.tokens.len()}));
         }
-        let profile = json!({"schema":"ennx.code_contrast_reward.v1", "teacher_forcing":false,
+        let profile = json!({"schema":"ennx.code_contrast_reward.v1",
             "objective":"mean_clipped_byte_ngram_dice_target_minus_max_decoy",
             "max_ngram":self.order,"whitespace_policy":"ignore_ascii_whitespace",
             "extra_model_forwards":0,"functional_correctness_established":false,

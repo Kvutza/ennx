@@ -35,6 +35,8 @@ mod fbt_attention;
 #[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "metal"))]
 mod fbt_metal;
 #[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "metal"))]
+mod fbt_micro;
+#[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "metal"))]
 mod fbt_model;
 #[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "metal"))]
 mod fbt_moe;

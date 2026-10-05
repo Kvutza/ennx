@@ -51,7 +51,7 @@ impl Journal {
         let mut record = json!({"schema":"ennx.generation_learning.v1", "round":round,"phase":phase,
             "elapsed_seconds":self.started.elapsed().as_secs_f64(),"optimizer_seconds":self.optimizer_seconds,
             "wall_ms":wall*1000.0,"candidate_reward":evaluation.mean,"incumbent_reward":self.incumbent,
-            "accepted":accepted,"candidate_evaluations":round,"teacher_forcing":false,
+            "accepted":accepted,"candidate_evaluations":round,
             "generation_in_loop":true,"diagnostics":evaluation.diagnostics,
             "generated_candidate_tokens":evaluation.rollouts.iter().map(|row|row.tokens.len()).sum::<usize>(),
             "evaluated_positions":evaluation.rollouts.iter().map(|row|row.evaluated_positions).sum::<usize>(),

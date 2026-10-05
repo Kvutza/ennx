@@ -62,6 +62,8 @@ fn manifest_roundtrip() {
             sequence_atol: 1e-5,
             token_atol: 2e-3,
         },
+        micro: false,
+        iterations: 1000,
         candidates: vec![candidate()],
     };
     let mut document = ennx_wire::toml::Table::new();

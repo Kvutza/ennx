@@ -72,7 +72,6 @@ fn write_pretrain(
                 "proposal_seed":proposal_seed,"acquisition_seed":acquisition_seed,
                 "selection":run.selection.unwrap_or_default(),"corpus":run.corpus,
                 "dataset":run.dataset,"validation_dataset":run.validation_dataset,
-                "teacher_forcing":true,"generation_in_loop":false,
                 "es_baseline_implemented":false,"gradient_baseline_implemented":false,
                 "random_is_selection_ablation":true,"learning_seconds":result.learning_seconds,
             }),

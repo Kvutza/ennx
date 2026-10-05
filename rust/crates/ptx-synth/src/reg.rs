@@ -13,7 +13,15 @@ impl TargetArch {
         match self {
             Self::Sm75 => "sm_75",
             Self::Sm80 => "sm_80",
-            Self::Sm90 => "sm_90",
+            Self::Sm90 => "sm_90a",
+        }
+    }
+
+    pub fn ptx_version_str(&self) -> &'static str {
+        match self {
+            Self::Sm75 => "6.5",
+            Self::Sm80 => "7.0",
+            Self::Sm90 => "8.5",
         }
     }
 }

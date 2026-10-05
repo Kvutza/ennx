@@ -1,0 +1,145 @@
+#!/bin/sh
+set -eu
+
+repo_dir=${PIXI_PROJECT_ROOT:-}
+if [ -z "$repo_dir" ]; then
+    repo_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+fi
+
+adapter_path="$repo_dir/tools/kiss"
+upstream=${KISS_UPSTREAM_BIN:-}
+if [ -z "$upstream" ]; then
+    upstream=$(command -v kiss || true)
+    if [ "$upstream" = "$adapter_path" ]; then
+        saved_path=$PATH
+        PATH=$(printf '%s\n' "$PATH" | tr ':' '\n' | awk -v skip="$repo_dir/tools" '$0 != skip' | paste -sd: -)
+        upstream=$(command -v kiss || true)
+        PATH=$saved_path
+    fi
+fi
+
+if [ -z "$upstream" ] || [ "$upstream" = "$adapter_path" ]; then
+    echo "ennx: upstream KISS executable not found; set KISS_UPSTREAM_BIN" >&2
+    exit 127
+fi
+
+command_name=
+lang=
+previous=
+for arg in "$@"; do
+    case "$arg" in
+        test) command_name=test ;;
+        --lang=*) lang=${arg#--lang=} ;;
+    esac
+    if [ "$previous" = "--lang" ]; then
+        lang=$arg
+    fi
+    previous=$arg
+done
+
+if [ "$command_name" != test ]; then
+    exec "$upstream" "$@"
+fi
+
+case "$lang" in
+    python|py)
+        exec "$upstream" "$@"
+        ;;
+    rust|rs|"")
+        ;;
+    *)
+        echo "ennx: unsupported KISS language: $lang" >&2
+        exit 2
+        ;;
+esac
+
+if [ "${1:-}" = test ]; then
+    shift
+fi
+
+dry_run=0
+jobs=
+target=
+has_passthrough=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --)
+            has_passthrough=1
+            shift
+            break
+            ;;
+        --help|-h)
+            cat <<'EOF'
+Usage: kiss test [--lang rust|python] [--dry-run] [-j JOBS] [-- ARGS...]
+
+Rust tests run through Buck2 at //buck2/tests:all. Python tests are delegated
+to the upstream KISS executable.
+EOF
+            exit 0
+            ;;
+        --lang)
+            shift 2
+            ;;
+        --lang=*)
+            shift
+            ;;
+        --config|--main-branch|--base-branch|--ignore)
+            shift 2
+            ;;
+        --dry-run)
+            dry_run=1
+            shift
+            ;;
+        -j|--jobs)
+            jobs=$2
+            shift 2
+            ;;
+        -j*)
+            jobs=${1#-j}
+            shift
+            ;;
+        --jobs=*)
+            jobs=${1#--jobs=}
+            shift
+            ;;
+        --metrics|--coverage-all|--retry-bad|--watch)
+            echo "ennx: KISS option $1 is not applicable to Buck2 Rust tests" >&2
+            exit 2
+            ;;
+        .)
+            shift
+            ;;
+        -*)
+            echo "ennx: unsupported KISS Rust-test option: $1" >&2
+            exit 2
+            ;;
+        *)
+            if [ -n "$target" ]; then
+                echo "ennx: Buck2 adapter accepts only the repository Rust test target" >&2
+                exit 2
+            fi
+            target=$1
+            shift
+            ;;
+    esac
+done
+
+if [ -n "$target" ] && [ "$target" != "." ]; then
+    echo "ennx: KISS target '$target' has no Buck2 mapping; use ./buck2w test directly" >&2
+    exit 2
+fi
+
+if [ "$dry_run" -eq 1 ]; then
+    exec "$repo_dir/buck2w" targets //buck2/tests:all
+fi
+
+if [ -n "$jobs" ] && [ "$has_passthrough" -eq 1 ]; then
+    exec "$repo_dir/buck2w" test //buck2/tests:all --local-only -j "$jobs" -- "$@"
+elif [ -n "$jobs" ]; then
+    exec "$repo_dir/buck2w" test //buck2/tests:all --local-only -j "$jobs"
+elif [ "$has_passthrough" -eq 1 ]; then
+    exec "$repo_dir/buck2w" test //buck2/tests:all --local-only -- "$@"
+else
+    exec "$repo_dir/buck2w" test //buck2/tests:all --local-only
+fi

@@ -4,6 +4,8 @@
 ./ennx dev
 ./ennx test
 ENNX_WHEEL_PATH=dist/ennx-...whl ./ennx test --python
+kiss test                    # inside: pixi shell -e ennx
+kiss test                    # inside: pixi shell -e ennx
 ```
 
 `./ennx dev` formats, builds, and runs Rust and Python tests. Python tests run
@@ -12,6 +14,15 @@ integrations.
 
 `./ennx test` runs Rust unit tests, integration tests, CLI tests, and kernel
 tests. GPU checks require the corresponding hardware and driver.
+
+Inside the `ennx` Pixi environment, `kiss test` is provided by the repository
+adapter: Rust tests run through Buck2, while `kiss test --lang python` delegates
+to upstream KISS. Pixi and uv continue to own the Python verification
+environments.
+
+Inside the `ennx` Pixi shell, `kiss test` is provided by the repository adapter:
+Rust tests run through Buck2, while `kiss test --lang python` delegates to
+upstream KISS. Pixi and uv continue to own the Python verification environments.
 
 `./ennx fmt` is the formatting and source-policy gate. In addition to Rust and
 Python formatting, it runs KISS for the repository and for every Rust crate. It

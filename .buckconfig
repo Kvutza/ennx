@@ -23,6 +23,19 @@ target_platform_detector_spec = target:root//...->prelude//platforms:default \
 [build]
 execution_platforms = prelude//platforms:default
 
+[buck2]
+# Keep one persistent materializer record so stale artifacts can be reclaimed
+# without discarding every reusable output on each cleanup.
+sqlite_materializer_state = true
+defer_write_actions = true
+clean_stale_enabled = true
+clean_stale_artifact_ttl_hours = 168
+clean_stale_period_hours = 24
+clean_stale_start_offset_hours = 12
+clean_stale_low_disk_threshold = 10.0
+clean_stale_low_disk_adaptive_enabled = true
+clean_stale_low_disk_adaptive_min_ttl_hours = 12
+
 [rust]
 default_edition = 2024
 remap_src_paths = yes

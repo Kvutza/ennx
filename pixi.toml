@@ -17,6 +17,9 @@ pytest = "*"
 click = "*"
 requests = "*"
 
+[feature.test.activation]
+scripts = ["tools/pixi-kiss-activation.sh"]
+
 [feature.test.target.linux-64.dependencies]
 auditwheel = "*"
 patchelf = "*"

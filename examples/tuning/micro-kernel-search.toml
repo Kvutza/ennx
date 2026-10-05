@@ -1,0 +1,45 @@
+# ENNX Micro-Kernel Optimization Testbed Manifest
+# Fast, noise-free microsecond kernel evaluations directly on GPU hardware.
+version = 1
+
+[kernel-search]
+baseline = "code-pretrain-kernel.toml"
+output = "../../.cache/ennx/micro-kernel-search"
+micro = true
+iterations = 500
+timeout-seconds = 60
+
+[kernel-search.gate]
+min-speedup = 1.001
+win-fraction = 0.8
+sequence-atol = 0.0001
+token-atol = 0.001
+
+[[kernel-search.candidates]]
+name = "decode-gemv-m4"
+operator = "decode"
+hypothesis = "Evaluate resident decode GEMV latency and memory bandwidth saturation on Apple M4."
+bottleneck = "DRAM bus line streaming bandwidth for 640-dim projection."
+evidence = "METAL_KERNEL_ENCYCLOPEDIA.txt Ch 4.1: GEMV is memory bandwidth bound."
+falsify = "Reject if latency is non-monotonic or output diverges from baseline."
+expected-saving-ms = 0.001
+
+[[kernel-search.candidates]]
+name = "pisa-attention-m4"
+operator = "pisa"
+defines = ["PISA_SKIP_IDENTITY_RESCALE"]
+hypothesis = "PISA-1 attention pyramid and selection with direct lane rescaling."
+bottleneck = "PISA online-softmax accumulator rescaling and threadgroup barrier overhead."
+evidence = "METAL_KERNEL_ENCYCLOPEDIA.txt Ch 7: PISA dual-resolution attention."
+falsify = "Reject if token error exceeds 1e-3 or execution is slower."
+expected-saving-ms = 0.005
+
+[[kernel-search.candidates]]
+name = "mhc-transport-m4"
+operator = "mhc"
+hypothesis = "Evaluate 4-stream manifold-constrained hyperconnection transport with Sinkhorn normalization."
+bottleneck = "Inter-stream communication and doubly-stochastic matrix transport across 4 streams."
+evidence = "docs/manifold-hyperconnections.md: Single-Pass mHC has residual traffic of (2n + 2)d."
+falsify = "Reject if parity error exceeds 1e-3 or execution is slower."
+expected-saving-ms = 0.05
+

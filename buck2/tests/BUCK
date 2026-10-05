@@ -11,9 +11,6 @@ rust_test(
     ],
     rpath = True,
     runtime_dependency_handling = "symlink",
-    rustc_flags = [
-        "-Clink-arg=-Wl,-rpath,@loader_path/../../native/__openmp-build__/openmp/lib",
-    ],
     target_compatible_with = ["prelude//os/constraints:macos"],
 )
 
@@ -29,17 +26,13 @@ rust_test(
     srcs = ["dense.rs"],
     crate_root = "dense.rs",
     deps = ["//rust/crates/ennx:ennx"] + select({
-        "//:macos-arm64": ["//buck2/native:openmp-macos"],
+        "//:macos-arm64": [
+            "//buck2/native:openmp-macos",
+        ],
         "DEFAULT": [],
     }),
     rpath = True,
     runtime_dependency_handling = "symlink",
-    rustc_flags = select({
-        "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../native/__openmp-build__/openmp/lib",
-        ],
-        "DEFAULT": [],
-    }),
 )
 
 rust_test(

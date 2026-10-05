@@ -59,6 +59,8 @@ pub use ennx_cuda::flame::{FlameConfig, FlameEvaluator};
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub use crate::context_metal::ContextCache;
 #[cfg(all(target_os = "macos", feature = "metal"))]
+pub use crate::fbt_micro::{MicroMetrics, benchmark_micro};
+#[cfg(all(target_os = "macos", feature = "metal"))]
 pub use crate::fbt_model::{
     GateUpProbe, RoundLatencyExperiment, RoundLatencyRecord, gateup_probe, round_experiment,
 };

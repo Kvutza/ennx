@@ -100,7 +100,7 @@ impl SearchState {
         if candidate >= 4 {
             return Err("Metal initialization candidate must be below four".into());
         }
-        if !self.profiling && self.resident_history <= 2 {
+        if !self.profiling {
             return self.initial_row(seed, candidate);
         }
         self.begin_mode(1, 4, seed, Ask::default(), Some(candidate))
@@ -200,9 +200,10 @@ impl SearchState {
         }
         let command = self.runtime.queue.new_command_buffer();
         if !analytic_pool
-            && !(self.realized_history()
-                && self.history > self.resident_history
-                && self.history <= 16)
+            && (forced_candidate.is_some()
+                || !(self.realized_history()
+                    && self.history > self.resident_history
+                    && self.history <= 16))
         {
             self.encode_pool(command, self.pool_params(seed));
         }

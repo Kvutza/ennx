@@ -469,15 +469,16 @@ impl BlockDecoder {
             let mut position = start;
             let mut seconds = 0.0;
             let mut evaluated = 0;
+            let mut in_flight = Vec::new();
             while position < total_rows {
                 let rows = (total_rows - position).min(4096);
                 // Later broad passes need 128-row tiles; the end can extend into
                 // initialized scratch padding but never beyond the cache.
                 let rows = rows.div_ceil(128) * 128;
                 let row_start = position.min(self.context - rows);
-                let command = runtime.queue.new_command_buffer();
+                let command = runtime.queue.new_command_buffer().to_owned();
                 scorer::context_chunk(
-                    command,
+                    &command,
                     &self.pipelines,
                     &self.tensorops,
                     &self.pisa,
@@ -495,9 +496,16 @@ impl BlockDecoder {
                     decoder.cache(),
                     row_start as usize + rows as usize <= prompt - 1,
                 )?;
-                seconds += complete(command)?;
+                command.commit();
+                in_flight.push(command);
+                if in_flight.len() >= 8 {
+                    seconds += complete_committed(&in_flight.remove(0))?;
+                }
                 evaluated += rows;
                 position += rows;
+            }
+            for command in &in_flight {
+                seconds += complete_committed(command)?;
             }
             return Ok((
                 seconds,
@@ -677,7 +685,7 @@ impl BlockDecoder {
                     &mut progress.target,
                 )?;
             }
-            if progress.broad_passes == 1 && progress.cursor < maximum / 2 {
+            if stats.committed == 0 {
                 break;
             }
         }

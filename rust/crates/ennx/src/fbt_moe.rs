@@ -2,9 +2,9 @@
 
 use crate::apple_gpu::Runtime;
 use crate::fbt_pisa1::Pisa1;
-use metal::{
-    Buffer, BufferRef, CommandBufferRef, ComputeCommandEncoderRef, ComputePipelineState,
-    MTLCommandBufferStatus,
+pub(super) use metal::{
+    Buffer, BufferRef, CommandBuffer, CommandBufferRef, ComputeCommandEncoderRef,
+    ComputePipelineState, MTLCommandBufferStatus,
 };
 use std::time::Instant;
 
@@ -81,7 +81,7 @@ mod code_contrast;
 #[path = "code_environment.rs"]
 mod code_environment;
 #[path = "fbt_decode.rs"]
-mod decode;
+pub(crate) mod decode;
 #[path = "fbt_diffusion.rs"]
 mod diffusion;
 #[path = "fbt_draft.rs"]
@@ -412,7 +412,7 @@ impl ActualBoResult {
             std::fs::File::create(path).map_err(|error| error.to_string())?,
             &ennx_wire::json::json!({
                 "schema":"ennx.pretrain_validation.v1", "learning_seconds":self.learning_seconds,
-                "generation_in_loop":false, "teacher_forcing":true, "used_for_acceptance":false,
+                "used_for_acceptance":false,
                 "measurements":self.validation,
             }),
         )
@@ -532,7 +532,7 @@ impl BoControl<'_> {
     }
 }
 
-fn complete_committed(command: &CommandBufferRef) -> Result<f64, String> {
+pub(super) fn complete_committed(command: &CommandBufferRef) -> Result<f64, String> {
     command.wait_until_completed();
     if command.status() != MTLCommandBufferStatus::Completed {
         return Err(format!(

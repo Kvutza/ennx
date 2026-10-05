@@ -33,9 +33,9 @@ format() {
             hooks trailing-whitespace end-of-file-fixer repair-rust repair-python-format || format_status=1
     fi
     python3 scripts/check_names.py || format_status=1
-    kiss --config "$PWD/.kissconfig" check . || format_status=1
+    tools/kiss --config "$PWD/.kissconfig" check . || format_status=1
     for crate_manifest in $(rg --files rust/crates --glob Cargo.toml); do
-        kiss --config "$PWD/rust/.kissconfig" --lang rust check "$(dirname "$crate_manifest")" || format_status=1
+        tools/kiss --config "$PWD/rust/.kissconfig" --lang rust check "$(dirname "$crate_manifest")" || format_status=1
     done
     return "$format_status"
 }

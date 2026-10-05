@@ -42,7 +42,7 @@ struct DecodeKernels {
     sample: ComputePipelineState,
 }
 
-pub(super) struct Decoder {
+pub(crate) struct Decoder {
     context: u32,
     kernels: DecodeKernels,
     cache: Vec<Cache>,
@@ -170,6 +170,74 @@ fn launch(
     encoder.memory_barrier_with_resources(&resources[..buffers.len()]);
 }
 
+fn decode_pipelines(
+    runtime: &Runtime,
+    context: u32,
+    trial: Option<&crate::config::KernelTrial>,
+) -> Result<DecodeKernels, String> {
+    let custom_decode = trial
+        .and_then(|t| t.decode.as_ref())
+        .map(std::fs::read_to_string)
+        .transpose()
+        .map_err(|error| format!("read candidate decode: {error}"))?;
+    let base_decode = custom_decode
+        .as_deref()
+        .unwrap_or(include_str!("fbt_decode.metal"));
+    let source_text = format!("#define PISA_CONTEXT {context}\n{base_decode}");
+    let source = source_text.as_str();
+    let kernel = |name| runtime.precise_metal4(source, "resident decode", name, &[]);
+    let utility = |name| runtime.pipeline(include_str!("fbt_moe.metal"), "decode utility", name);
+    let custom_pisa = trial
+        .and_then(|t| t.pisa.as_ref())
+        .map(std::fs::read_to_string)
+        .transpose()
+        .map_err(|error| format!("read candidate pisa for decode: {error}"))?;
+    let base_pisa = custom_pisa
+        .as_deref()
+        .unwrap_or(include_str!("fbt_pisa1.metal"));
+    let attention_source = format!(
+        "#define PISA_CONTEXT {context}\n#define PISA_DECODE\n#define PISA_QUERY_TILE 1\n#define PISA_SKIP_IDENTITY_RESCALE\n{base_pisa}"
+    );
+    let kernels = DecodeKernels {
+        gemv: kernel("decode_gemv")?,
+        gemv_vector: kernel("decode_gemv_vector")?,
+        pad_router: kernel("decode_pad_router")?,
+        embed: kernel("decode_embed")?,
+        leaf: kernel("decode_leaf")?,
+        combine_residual: kernel("decode_combine_residual_rms")?,
+        combine_branch: kernel("decode_combine_branch")?,
+        sample: kernel("decode_sample")?,
+        attention: runtime.pipeline_metal4(
+            &attention_source,
+            "cached PISA",
+            "fbt_pisa1_select_attention_q4",
+            &[],
+        )?,
+        rms: utility("fbt_moe_rms")?,
+        residual: utility("fbt_moe_residual_rms")?,
+        activation: utility("fbt_moe_swiglu")?,
+        feedback: utility("fbt_moe_feedback_fuse_rms")?,
+        mhc_replicate: utility("fbt_mhc_replicate")?,
+        mhc_predict: utility("fbt_mhc_predict")?,
+        mhc_mix_rms: utility("fbt_mhc_mix_rms")?,
+        mhc_update: utility("fbt_mhc_update")?,
+        mhc_mean_rms: utility("fbt_mhc_mean_rms")?,
+        rope: utility("fbt_moe_rope")?,
+        route: runtime.pipeline(
+            include_str!("fbt_routing.metal"),
+            "decode route",
+            "fbt_moe_select_top3",
+        )?,
+    };
+    if kernels.gemv.thread_execution_width() != 32
+        || kernels.gemv.max_total_threads_per_threadgroup() < 128
+        || kernels.sample.max_total_threads_per_threadgroup() < 256
+    {
+        return Err("decode requires 32-lane SIMD and 256-thread groups".into());
+    }
+    Ok(kernels)
+}
+
 impl Decoder {
     pub(super) fn cache(&self) -> &[Cache] {
         &self.cache
@@ -202,6 +270,16 @@ impl Decoder {
         compact: bool,
         visits: usize,
     ) -> Result<Self, String> {
+        Self::for_trial(runtime, context, compact, visits, None)
+    }
+
+    pub(crate) fn for_trial(
+        runtime: &Runtime,
+        context: u32,
+        compact: bool,
+        visits: usize,
+        trial: Option<&crate::config::KernelTrial>,
+    ) -> Result<Self, String> {
         if !(4096..=crate::context::MAX_CONTEXT).contains(&context)
             || !context.is_power_of_two()
             || visits == 0
@@ -212,55 +290,7 @@ impl Decoder {
             );
         }
         let work = if compact { 4096 } else { context };
-        let source_text = format!(
-            "#define PISA_CONTEXT {context}\n{}",
-            include_str!("fbt_decode.metal")
-        );
-        let source = source_text.as_str();
-        let kernel = |name| runtime.precise_metal4(source, "resident decode", name, &[]);
-        let utility =
-            |name| runtime.pipeline(include_str!("fbt_moe.metal"), "decode utility", name);
-        let attention_source = format!(
-            "#define PISA_CONTEXT {context}\n#define PISA_DECODE\n#define PISA_QUERY_TILE 1\n#define PISA_SKIP_IDENTITY_RESCALE\n{}",
-            include_str!("fbt_pisa1.metal")
-        );
-        let kernels = DecodeKernels {
-            gemv: kernel("decode_gemv")?,
-            gemv_vector: kernel("decode_gemv_vector")?,
-            pad_router: kernel("decode_pad_router")?,
-            embed: kernel("decode_embed")?,
-            leaf: kernel("decode_leaf")?,
-            combine_residual: kernel("decode_combine_residual_rms")?,
-            combine_branch: kernel("decode_combine_branch")?,
-            sample: kernel("decode_sample")?,
-            attention: runtime.pipeline_metal4(
-                &attention_source,
-                "cached PISA",
-                "fbt_pisa1_select_attention_q4",
-                &[],
-            )?,
-            rms: utility("fbt_moe_rms")?,
-            residual: utility("fbt_moe_residual_rms")?,
-            activation: utility("fbt_moe_swiglu")?,
-            feedback: utility("fbt_moe_feedback_fuse_rms")?,
-            mhc_replicate: utility("fbt_mhc_replicate")?,
-            mhc_predict: utility("fbt_mhc_predict")?,
-            mhc_mix_rms: utility("fbt_mhc_mix_rms")?,
-            mhc_update: utility("fbt_mhc_update")?,
-            mhc_mean_rms: utility("fbt_mhc_mean_rms")?,
-            rope: utility("fbt_moe_rope")?,
-            route: runtime.pipeline(
-                include_str!("fbt_routing.metal"),
-                "decode route",
-                "fbt_moe_select_top3",
-            )?,
-        };
-        if kernels.gemv.thread_execution_width() != 32
-            || kernels.gemv.max_total_threads_per_threadgroup() < 128
-            || kernels.sample.max_total_threads_per_threadgroup() < 256
-        {
-            return Err("decode requires 32-lane SIMD and 256-thread groups".into());
-        }
+        let kernels = decode_pipelines(runtime, context, trial)?;
         Ok(Self {
             context,
             kernels,
@@ -306,7 +336,7 @@ impl Decoder {
         })
     }
 
-    fn gemv(
+    pub(crate) fn gemv(
         &self,
         encoder: &ComputeCommandEncoderRef,
         input: (&BufferRef, u64),

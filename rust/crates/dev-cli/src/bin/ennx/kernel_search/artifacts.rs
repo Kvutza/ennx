@@ -66,7 +66,7 @@ impl Archive {
         parent: &Path,
         candidates: &[Candidate],
     ) -> Result<Vec<KernelTrial>, String> {
-        for operator in ["pisa", "moe"] {
+        for operator in ["pisa", "moe", "decode", "readout", "perturb", "mhc"] {
             fs::write(
                 self.path
                     .join(format!("inputs/production-{operator}.metal")),
@@ -97,6 +97,10 @@ impl Archive {
                 match candidate.operator.as_str() {
                     "pisa" => trial.pisa = Some(path),
                     "moe" => trial.moe = Some(path),
+                    "decode" => trial.decode = Some(path),
+                    "readout" => trial.readout = Some(path),
+                    "perturb" => trial.perturb = Some(path),
+                    "mhc" => trial.mhc = Some(path),
                     _ => return Err("unsupported operator".into()),
                 }
                 Ok(trial)
@@ -144,6 +148,10 @@ impl Archive {
         for (operator, file) in [
             ("pisa", "fbt_pisa1.metal"),
             ("moe", "fbt_moe_routing_tensorops.metal"),
+            ("decode", "fbt_decode.metal"),
+            ("readout", "fbt_moe.metal"),
+            ("perturb", "fbt_denoise.metal"),
+            ("mhc", "fbt_moe.metal"),
         ] {
             let path = root.join("rust/crates/ennx/src").join(file);
             if fs::read_to_string(path).map_err(|error| error.to_string())?

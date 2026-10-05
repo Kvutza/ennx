@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+export BUCK_ISOLATION_DIR=${BUCK_ISOLATION_DIR:-dev}
+
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 "$repo_dir/tools/bootstrap-dotslash" >/dev/null
 dotslash="$repo_dir/.buck2-tools/bin/dotslash"

@@ -53,12 +53,6 @@ rust_test(
     rpath = True,
     run_env = {"RUST_TEST_THREADS": "1"},
     runtime_dependency_handling = "symlink",
-    rustc_flags = select({
-        "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
-        ],
-        "DEFAULT": [],
-    }),
 )
 
 filegroup(
@@ -148,12 +142,6 @@ rust_test(
     rpath = True,
     run_env = {"RUST_TEST_THREADS": "1"},
     runtime_dependency_handling = "symlink",
-    rustc_flags = select({
-        "//:macos-arm64": [
-            "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
-        ],
-        "DEFAULT": [],
-    }),
 )
 
 app_rust_library(
@@ -202,19 +190,16 @@ ennx_program_targets(ENNX_PROGRAMS, RUST_EDITION, glob(["src/**/*.rs", "examples
             "//rust/crates/wire:wire",
             "//rust:tempfile",
         ] + select({
-            "//:macos-arm64": ["//buck2/native:openmp-macos", "//rust:metal"],
+            "//:macos-arm64": [
+                "//buck2/native:openmp-macos",
+                "//rust:metal",
+            ],
             "DEFAULT": [],
         }),
         visibility = ["PUBLIC"],
         rpath = True,
         runtime_dependency_handling = "symlink",
         run_env = {"RUST_TEST_THREADS": "1"},
-        rustc_flags = select({
-            "//:macos-arm64": [
-                "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
-            ],
-            "DEFAULT": [],
-        }),
         target_compatible_with = ["prelude//os/constraints:macos"] if source == "tests/knn_metal.rs" else [],
     )
     for source in glob(["tests/*.rs"])

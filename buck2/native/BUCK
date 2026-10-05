@@ -34,6 +34,7 @@ prebuilt_cxx_library(
     exported_linker_flags = [
         "-Wl,-needed_library,$(location :openmp-build[lib])",
     ],
+    preferred_linkage = "shared",
     shared_lib = ":openmp-build[lib]",
     soname = "libomp.dylib",
     target_compatible_with = ["prelude//os/constraints:macos"],

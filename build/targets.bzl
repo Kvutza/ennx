@@ -104,7 +104,7 @@ DEV_CLI_PROGRAMS = [
         "crate": "build_graph",
         "root": "src/bin/build-graph.rs",
         "crate_deps": ["clap", "deser", "ndarray", "rand", "sha2"],
-        "local_deps": ["ennx", "wire"],
+        "local_deps": ["ennx", "ptx-synth", "wire"],
         "required_features": [],
     },
     {
@@ -146,6 +146,22 @@ WIRE_CRATES = ["deser", "deser-json", "deser-toml", "deser-value"]
 WIRE_TEST_CRATES = ["deser", "deser-json", "deser-toml", "deser-value"]
 
 WIRE_PROGRAMS = [
+]
+
+PTX_SYNTH_CRATES = []
+
+PTX_SYNTH_TEST_CRATES = []
+
+PTX_SYNTH_PROGRAMS = [
+    {
+        "version": "0.2.0",
+        "name": "ptx-synth",
+        "crate": "ptx_synth",
+        "root": "src/main.rs",
+        "crate_deps": [],
+        "local_deps": ["ptx-synth"],
+        "required_features": [],
+    },
 ]
 
 RUST_EDITION = "2024"

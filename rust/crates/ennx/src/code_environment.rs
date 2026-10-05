@@ -79,7 +79,7 @@ impl Environment {
     pub(super) fn provenance(&self) -> Value {
         json!({"kind":"executable_code_training", "source":self.source,
             "task_id":self.task_id,"split":self.split,"checks":self.cases.len(),
-            "reference_supplied_to_model":false,"teacher_forcing":false,
+            "reference_supplied_to_model":false,
             "text_policy":"entire_unmodified_completion","benchmark_claim":false})
     }
 }

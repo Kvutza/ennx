@@ -3,20 +3,19 @@
 
 using namespace metal;
 
-// Literal fragment indices remove private-array addressing before AIR's
-// hardware-specific lowering. Keep the loop form as the measured control.
-#ifdef PISA_UNROLL_FRAGMENTS
-template <uint Step, typename F>
-METAL_FUNC void pisa_fragments(F visit) {
-    visit(0u); visit(Step); visit(2u * Step); visit(3u * Step);
-    visit(4u * Step); visit(5u * Step); visit(6u * Step); visit(7u * Step);
-}
-#define PISA_FRAGMENTS(index, step) pisa_fragments<step>([&](uint index) {
-#define PISA_END_FRAGMENTS });
-#else
-#define PISA_FRAGMENTS(index, step) for (uint index = 0; index < 8 * step; index += step) {
-#define PISA_END_FRAGMENTS }
+#ifndef PISA_NO_DIRECT_RESCALE
+#define PISA_DIRECT_RESCALE
 #endif
+
+#ifndef PISA_NO_REUSE_SCORES
+#define PISA_REUSE_SCORES
+#endif
+
+// Loop unrolling directive in macro avoiding MSL lambda compiler restrictions
+#define PISA_FRAGMENTS(index, step) \
+    _Pragma("unroll") \
+    for (uint index = 0; index < 8 * step; index += step) {
+#define PISA_END_FRAGMENTS }
 
 #ifndef PISA_CONTEXT
 #define PISA_CONTEXT 4096
@@ -67,6 +66,29 @@ kernel void fbt_pisa1_leaf_range(
     for (uint token = 0; token < kBlock; ++token)
         sum += float(qkv[ulong(first + token) * kQkvWidth + kQueryWidth + dim]);
     pyramid[(ulong(sequence) * kNodes + leaf) * kHeadDim + dim] = half(sum / float(kBlock));
+}
+
+// Per-leaf mean K and mean V for the hierarchical kernel.
+// Layout: coarse_kv[(sequence * kLeaves + leaf) * 2 * kHeadDim + {0 | kHeadDim} + dim].
+kernel void fbt_pisa1_leaf_kv_means(
+    device const half* qkv [[buffer(0)]],
+    device half* coarse_kv [[buffer(1)]],
+    uint2 group [[threadgroup_position_in_grid]],
+    uint dim [[thread_index_in_threadgroup]]) {
+    const uint leaf = group.x;
+    const uint sequence = group.y;
+    if (leaf >= kLeaves || sequence >= 2 || dim >= kHeadDim) return;
+    float key_sum = 0.0f;
+    float value_sum = 0.0f;
+    const uint first = sequence * kContext + leaf * kBlock;
+    for (uint token = 0; token < kBlock; ++token) {
+        const ulong base = ulong(first + token) * kQkvWidth + kQueryWidth;
+        key_sum += float(qkv[base + dim]);
+        value_sum += float(qkv[base + kHeadDim + dim]);
+    }
+    const ulong out = (ulong(sequence) * kLeaves + leaf) * 2 * kHeadDim;
+    coarse_kv[out + dim] = half(key_sum / float(kBlock));
+    coarse_kv[out + kHeadDim + dim] = half(value_sum / float(kBlock));
 }
 
 kernel void fbt_pisa1_upper_range(
@@ -723,11 +745,12 @@ kernel void fbt_pisa1_select_attention_q4(
                     score = 0.0f;
                     const ulong summary =
                         (ulong(sequence) * kNodes + offset + node) * kHeadDim;
-                    for (uint dim = 0; dim < kHeadDim; ++dim)
-                        score = fma(
-                            route_query[simdgroup][dim],
-                            float(pyramid[summary + dim]),
-                            score);
+                    for (uint dim = 0; dim < kHeadDim; dim += 4) {
+                        const float4 q = *reinterpret_cast<threadgroup const float4*>(&route_query[simdgroup][dim]);
+                        const half4 p_h = *reinterpret_cast<device const half4*>(&pyramid[summary + dim]);
+                        const float4 p = float4(p_h);
+                        score = fma(p.w, q.w, fma(p.z, q.z, fma(p.y, q.y, fma(p.x, q.x, score))));
+                    }
                 }
             }
         }
@@ -866,15 +889,15 @@ kernel void fbt_pisa1_select_attention_q4(
             const uint token1 = lane + 32;
             const bool valid0 = block * kBlock + token0 <= position;
             const bool valid1 = block * kBlock + token1 <= position;
-            const float value0 =
-                valid0 ? scores[simdgroup][head][token0] * 0.125f : -INFINITY;
-            const float value1 =
-                valid1 ? scores[simdgroup][head][token1] * 0.125f : -INFINITY;
+            const float score0 = scores[simdgroup][head][token0] * 0.125f;
+            const float score1 = scores[simdgroup][head][token1] * 0.125f;
+            const float value0 = select(-INFINITY, score0, valid0);
+            const float value1 = select(-INFINITY, score1, valid1);
             const float next_max =
                 max(maxima[simdgroup][head], simd_max(max(value0, value1)));
             const float alpha = exp(maxima[simdgroup][head] - next_max);
-            const float probability0 = valid0 ? exp(value0 - next_max) : 0.0f;
-            const float probability1 = valid1 ? exp(value1 - next_max) : 0.0f;
+            const float probability0 = select(0.0f, exp(value0 - next_max), valid0);
+            const float probability1 = select(0.0f, exp(value1 - next_max), valid1);
             const float total = totals[simdgroup][head] * alpha
                 + simd_sum(probability0 + probability1);
 #ifdef PISA_REUSE_SCORES
@@ -1125,6 +1148,13 @@ kernel void fbt_pisa1_hierarchical_attention(
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
 
+    // Flush fine-phase accumulators so phase 2 builds on the real partial output.
+    for (uint local = 0; local < 2; ++local) {
+        const uint tile = simdgroup + 4 * local;
+        simdgroup_store(result[local], &scratch[0][tile * 8], kHeadDim, ulong2(0, 0));
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
     // Phase 2: Mass-preserving coarse cluster accumulation
     // log(64) ≈ 4.15888308336f
     constexpr float kLogLeafMass = 4.15888308336f;
@@ -1162,7 +1192,7 @@ kernel void fbt_pisa1_hierarchical_attention(
             // Rescale scratch and accumulate coarse V
             for (uint d = lane; d < kHeadDim; d += 32) {
                 const float v_val = float(coarse_kv[(ulong(sequence) * kLeaves + leaf) * 2 * kHeadDim + kHeadDim + d]);
-                scratch[head][d] = fma(scratch[head][d], alphas[head], p_coarse * v_val);
+                scratch[head][d] = fma(scratch[head][d], alpha, p_coarse * v_val);
             }
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);

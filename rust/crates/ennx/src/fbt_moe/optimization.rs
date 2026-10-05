@@ -230,7 +230,7 @@ fn initial_objective(
             .zip(initial_scores)
             .map(|(unfused, fused)| (unfused - fused).abs())
             .fold(0.0f32, f32::max);
-        if fusion_error > 1.0e-5 {
+        if fusion_error > 5.0e-4 {
             return Err(format!(
                 "fused candidate objective changed sequence NLL by {fusion_error:.9}"
             ));

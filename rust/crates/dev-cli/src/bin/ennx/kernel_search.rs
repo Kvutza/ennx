@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 mod artifacts;
 mod measure;
+mod micro;
 #[cfg(test)]
 mod tests;
 use artifacts::{Archive, write_json};
@@ -28,11 +29,29 @@ struct Manifest {
 struct Search {
     baseline: PathBuf,
     output: PathBuf,
+    #[deser(default = default_pairs())]
     pairs: usize,
+    #[deser(default = default_validations())]
     validation_pairs: usize,
     timeout_seconds: u64,
     gate: Gate,
+    #[deser(default)]
+    micro: bool,
+    #[deser(default = default_iterations())]
+    iterations: usize,
     candidates: Vec<Candidate>,
+}
+
+fn default_pairs() -> usize {
+    3
+}
+
+fn default_validations() -> usize {
+    2
+}
+
+fn default_iterations() -> usize {
+    1000
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,11 +77,10 @@ impl Search {
             ennx_wire::toml::from_str(text).map_err(|error| error.to_string())?;
         let search = manifest.search;
         if manifest.version != 1
-            || search.pairs < 3
-            || search.validation_pairs < 2
+            || (!search.micro && (search.pairs < 3 || search.validation_pairs < 2))
             || search.timeout_seconds == 0
         {
-            return Err("kernel-search requires version 1, at least 3 search pairs, 2 validation pairs and a positive timeout-seconds".into());
+            return Err("kernel-search requires version 1, at least 3 search pairs (in macro mode), 2 validation pairs and a positive timeout-seconds".into());
         }
         if search.baseline.as_os_str().is_empty()
             || search.output.as_os_str().is_empty()
@@ -220,6 +238,9 @@ fn campaign(
     if prepare {
         println!("Prepared context, prior evidence and candidate sources; no GPU trials executed.");
         return Ok(());
+    }
+    if search.micro {
+        return micro::run(root, parent, search, archive, &trials);
     }
     let worker = archive.build_worker(root)?;
     let runner = measure::Runner {

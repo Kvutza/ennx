@@ -80,7 +80,6 @@ impl Reconstruction {
             "objective":"one_minus_exact_byte_edit_distance_over_max_length",
             "text_policy":"exact_decoded_bytes_without_utf8_replacement",
             "algorithm":"word_parallel_unit_cost_levenshtein",
-            "teacher_forcing":false,
             "extra_model_forwards":0,
             "functional_correctness_established":false,
             "scoring_ms":start.elapsed().as_secs_f64()*1000.0,

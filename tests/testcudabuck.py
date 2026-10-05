@@ -9,8 +9,8 @@ def test_atomic():
     lockfile = "cargo generate-lockfile --manifest-path $ROOT/Cargo.toml;"
     build = (
         "cargo oxide build --arch sm_75 --cargo-target-dir $OUT_DIR/target "
-        "--device-codegen-crate ennx_cuda_kernels -- -p ennx-py --features cuda "
-        "--release --locked --manifest-path $ROOT/Cargo.toml;"
+        "--device-codegen-crate ennx_cuda_kernels -- -p ennx-py -p ennx-cuda "
+        "--features cuda --release --locked --manifest-path $ROOT/Cargo.toml;"
     )
 
     assert lockfile in source

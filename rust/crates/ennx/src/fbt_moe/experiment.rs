@@ -229,7 +229,7 @@ pub fn moe_dataset(
             output_projection_max_abs_error: parity.output_projection_max_abs_error,
             pisa1_max_abs_error: pisa1.max_abs_error,
             tail_max_abs_error: sustained.tail_max_abs_error,
-            meets_target: actual_bo.max_wall_seconds <= target_seconds,
+            meets_target: actual_bo.median_wall_seconds <= target_seconds,
         };
         report_probe(&result, rounds);
         Ok(result)

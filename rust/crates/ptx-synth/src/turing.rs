@@ -142,7 +142,7 @@ pub fn synthesize_turing_probe(
         shape.name()
     )
     .unwrap();
-    writeln!(ptx, ".version 6.4").unwrap();
+    writeln!(ptx, ".version 6.5").unwrap();
     writeln!(ptx, ".target sm_75").unwrap();
     writeln!(ptx, ".address_size 64\n").unwrap();
     writeln!(ptx, ".visible .entry {name}(").unwrap();

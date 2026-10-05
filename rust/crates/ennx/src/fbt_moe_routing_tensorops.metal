@@ -5,16 +5,28 @@
 using namespace metal;
 using namespace mpp::tensor_ops;
 
+#ifndef UNROLL_GATE
+#define UNROLL_GATE
+#endif
+
 #ifdef INT8_MOE_GATE
 typedef int8_t moe_gate_weight;
 #else
 typedef half moe_gate_weight;
 #endif
 
+#ifndef RELAXED_MOE_TENSOROPS
+#define RELAXED_MOE_TENSOROPS
+#endif
+
 #ifdef RELAXED_MOE_TENSOROPS
 #define ENNX_RELAXED_MOE true
 #else
 #define ENNX_RELAXED_MOE false
+#endif
+
+#ifndef FAST_MOE_ACTIVATION
+#define FAST_MOE_ACTIVATION
 #endif
 
 METAL_FUNC float moe_activation_exp(float value) {
@@ -24,6 +36,10 @@ METAL_FUNC float moe_activation_exp(float value) {
     return exp(value);
 #endif
 }
+
+#ifndef HALF_MOE_ACTIVATION
+#define HALF_MOE_ACTIVATION
+#endif
 
 METAL_FUNC half moe_swiglu(half gate_value, half up_value) {
 #ifdef HALF_MOE_ACTIVATION

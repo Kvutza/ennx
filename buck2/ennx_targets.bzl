@@ -30,11 +30,5 @@ def ennx_program_targets(programs, edition, sources):
             visibility = ["PUBLIC"],
             rpath = True,
             runtime_dependency_handling = "symlink",
-            rustc_flags = select({
-                "//:macos-arm64": [
-                    "-Clink-arg=-Wl,-rpath,@loader_path/../../../../buck2/native/__openmp-build__/openmp/lib",
-                ],
-                "DEFAULT": [],
-            }),
             target_compatible_with = ["prelude//os/constraints:macos"] if "metal" in program["required_features"] else [],
         )

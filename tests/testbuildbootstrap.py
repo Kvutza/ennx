@@ -20,6 +20,7 @@ class BuildBootstrapTests(unittest.TestCase):
         for name in (
             "ennx",
             "tools/build-wheels",
+            "tools/dev-actions",
             "tools/pixiw",
             "tools/pixi",
         ):
@@ -49,12 +50,82 @@ mode=smoke
 echo "verify:$ENNX_PYTHON_VERSION:$mode" >> events
 """,
         )
+        # ./ennx always does `buck2w run //rust/crates/dev-cli:ennx -- …`.
+        # Bootstrap isolates that behind a stub CLI that matches clap enough for
+        # build/--help, then falls through to the wheel-build stub for `build`.
+        self.script(
+            "fake-ennx-cli",
+            """
+cmd=${1:-}
+[ -n "$cmd" ] || exit 2
+shift
+case "$cmd" in
+    build)
+        tests=0
+        out=dist
+        out_set=0
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                -h|--help) exit 0 ;;
+                --tests)
+                    [ "$tests" -eq 0 ] || exit 2
+                    tests=1
+                    shift
+                    ;;
+                --out)
+                    [ "$#" -ge 2 ] || exit 2
+                    [ -n "$2" ] || exit 2
+                    case "$2" in -*) exit 2 ;; esac
+                    [ "$out_set" -eq 0 ] || exit 2
+                    out=$2
+                    out_set=1
+                    shift 2
+                    ;;
+                *) exit 2 ;;
+            esac
+        done
+        if [ "$tests" -eq 1 ]; then
+            exec sh tools/dev-actions build full "$out"
+        fi
+        exec sh tools/dev-actions build smoke "$out"
+        ;;
+    tune)
+        case "${1:-}" in
+            -h|--help)
+                cat <<'EOF'
+Run a configured Bayesian optimization experiment [legacy alias: opt run]
+
+Usage: ./ennx tune [OPTIONS] <CONFIG>
+EOF
+                exit 0
+                ;;
+            *) exit 2 ;;
+        esac
+        ;;
+    *)
+        for arg in "$@"; do
+            case "$arg" in -h|--help) exit 0 ;; esac
+        done
+        exit 2
+        ;;
+esac
+""",
+        )
         self.script(
             "buck2w",
             """
+if [ "${1:-}" = run ]; then
+    while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+        shift
+    done
+    [ "${1:-}" = "--" ] || exit 2
+    shift
+    exec ./fake-ennx-cli "$@"
+fi
 echo build >> events
 printf '%s\n' "$*" >> buck-invocations
 version=3.13
+report=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --config) case "$2" in ennx.python_version=*) version=${2#*=};; esac; shift;;
@@ -62,6 +133,10 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
+[ -n "$report" ] || {
+    echo "buck2w stub: missing --build-report" >&2
+    exit 2
+}
 case "$version" in
     3.12) abi=cp312;;
     3.13) abi=cp313;;
@@ -338,9 +413,8 @@ esac
             timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("flat TuRBO-ENN study fields", result.stdout)
-        self.assertIn("[knn]", result.stdout)
-        self.assertIn("[proposal]", result.stdout)
+        self.assertIn("Bayesian optimization experiment", result.stdout)
+        self.assertIn("legacy alias: opt run", result.stdout)
 
 
 def assert_builds(test, invocations):
