@@ -9,6 +9,7 @@ pub(super) enum ResidualArchitecture {
     Mhc4,
     LoopedMhc4,
     DiffusionMhc4,
+    HnetMhc4,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,13 +84,14 @@ impl ResidualArchitecture {
             crate::config::PretrainModel::FbtPisa1Mhc4V1 => Self::Mhc4,
             crate::config::PretrainModel::FbtPisa1LoopedMhc4V1 => Self::LoopedMhc4,
             crate::config::PretrainModel::FbtPisa1DiffusionMhc4V1 => Self::DiffusionMhc4,
+            crate::config::PretrainModel::FbtPisa1HnetMhc4V1 => Self::HnetMhc4,
         }
     }
 
     pub(super) const fn is_multistream(self) -> bool {
         matches!(
             self,
-            Self::Hc4 | Self::Mhc4 | Self::LoopedMhc4 | Self::DiffusionMhc4
+            Self::Hc4 | Self::Mhc4 | Self::LoopedMhc4 | Self::DiffusionMhc4 | Self::HnetMhc4
         )
     }
 
@@ -107,7 +109,7 @@ impl ResidualArchitecture {
         match self {
             Self::Legacy | Self::Residual1 | Self::ProjectedBoundary => 0,
             Self::Hc4 => 1,
-            Self::Mhc4 | Self::LoopedMhc4 | Self::DiffusionMhc4 => 2,
+            Self::Mhc4 | Self::LoopedMhc4 | Self::DiffusionMhc4 | Self::HnetMhc4 => 2,
         }
     }
 
@@ -119,7 +121,7 @@ impl ResidualArchitecture {
             Self::Legacy => configured,
             Self::Residual1 => crate::config::FeedbackTransition::Identity,
             Self::ProjectedBoundary => crate::config::FeedbackTransition::ProjectedSigmoid,
-            Self::Hc4 | Self::Mhc4 | Self::LoopedMhc4 | Self::DiffusionMhc4 => {
+            Self::Hc4 | Self::Mhc4 | Self::LoopedMhc4 | Self::DiffusionMhc4 | Self::HnetMhc4 => {
                 crate::config::FeedbackTransition::Identity
             }
         }
@@ -127,7 +129,7 @@ impl ResidualArchitecture {
 
     pub(super) fn layer_steps(self) -> &'static [LayerStep] {
         match self {
-            Self::LoopedMhc4 | Self::DiffusionMhc4 => SELECTIVE_CORE.get_or_init(|| {
+            Self::LoopedMhc4 | Self::DiffusionMhc4 | Self::HnetMhc4 => SELECTIVE_CORE.get_or_init(|| {
                 crate::forward_program::RecurrentCore::selective_fbt()
                     .layer_visits(MODEL_LAYERS as usize, FEEDBACK_PASSES as usize)
                     .expect("built-in FBT recurrence must fit its physical layer stack")

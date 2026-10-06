@@ -92,6 +92,7 @@ pub(super) fn load_checkpoint(weights: &CandidateWeights, path: &Path) -> Result
         ResidualArchitecture::Mhc4 => "ennx.fbt-pisa1-mhc4-rope.v1",
         ResidualArchitecture::LoopedMhc4 => "ennx.fbt-pisa1-looped-mhc4-rope.v1",
         ResidualArchitecture::DiffusionMhc4 => "ennx.fbt-pisa1-diffusion-mhc4-rope.v1",
+        ResidualArchitecture::HnetMhc4 => "ennx.fbt-pisa1-hnet-mhc4-rope.v1",
     };
     if metadata.get("format").map(String::as_str) != Some(format)
         || metadata.get("position_encoding").map(String::as_str) != Some("rope")
@@ -171,6 +172,7 @@ pub(super) fn save_checkpoint(
         ResidualArchitecture::Mhc4 => "ennx.fbt-pisa1-mhc4-rope.v1",
         ResidualArchitecture::LoopedMhc4 => "ennx.fbt-pisa1-looped-mhc4-rope.v1",
         ResidualArchitecture::DiffusionMhc4 => "ennx.fbt-pisa1-diffusion-mhc4-rope.v1",
+        ResidualArchitecture::HnetMhc4 => "ennx.fbt-pisa1-hnet-mhc4-rope.v1",
     };
     crate::tensor_store::write_safetensors(
         path,

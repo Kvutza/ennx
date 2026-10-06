@@ -83,6 +83,7 @@ fn model_code(model: Option<PretrainModel>) -> u8 {
         Some(PretrainModel::FbtPisa1Mhc4V1) => 5,
         Some(PretrainModel::FbtPisa1LoopedMhc4V1) => 6,
         Some(PretrainModel::FbtPisa1DiffusionMhc4V1) => 7,
+        Some(PretrainModel::FbtPisa1HnetMhc4V1) => 8,
     }
 }
 

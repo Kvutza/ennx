@@ -157,6 +157,7 @@ fn models() {
             "fbt-pisa1-mhc4-v1",
             "fbt-pisa1-looped-mhc4-v1",
             "fbt-pisa1-diffusion-mhc4-v1",
+            "fbt-pisa1-hnet-mhc4-v1",
         ]
     );
 }

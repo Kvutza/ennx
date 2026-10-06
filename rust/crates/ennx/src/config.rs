@@ -275,10 +275,11 @@ pub enum PretrainModel {
     FbtPisa1Mhc4V1,
     FbtPisa1LoopedMhc4V1,
     FbtPisa1DiffusionMhc4V1,
+    FbtPisa1HnetMhc4V1,
 }
 
 impl PretrainModel {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::FbtPisa1MoeV1,
         Self::FbtPisa1Residual1V1,
         Self::FbtPisa1ProjectedBoundaryV1,
@@ -286,6 +287,7 @@ impl PretrainModel {
         Self::FbtPisa1Mhc4V1,
         Self::FbtPisa1LoopedMhc4V1,
         Self::FbtPisa1DiffusionMhc4V1,
+        Self::FbtPisa1HnetMhc4V1,
     ];
 
     pub const fn id(self) -> &'static str {
@@ -297,6 +299,7 @@ impl PretrainModel {
             Self::FbtPisa1Mhc4V1 => "fbt-pisa1-mhc4-v1",
             Self::FbtPisa1LoopedMhc4V1 => "fbt-pisa1-looped-mhc4-v1",
             Self::FbtPisa1DiffusionMhc4V1 => "fbt-pisa1-diffusion-mhc4-v1",
+            Self::FbtPisa1HnetMhc4V1 => "fbt-pisa1-hnet-mhc4-v1",
         }
     }
 }
