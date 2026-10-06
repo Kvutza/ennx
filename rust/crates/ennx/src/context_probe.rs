@@ -239,6 +239,11 @@ impl Fixture {
                         .sum();
                 }
             }
+            let max_finite = scores
+                .iter()
+                .copied()
+                .filter(|&s| s.is_finite())
+                .fold(f32::NEG_INFINITY, f32::max);
             for output in &mut chosen {
                 let best = (0..16)
                     .filter(|&slot| scores[slot] > f32::NEG_INFINITY)
@@ -248,8 +253,13 @@ impl Fixture {
                             .then_with(|| candidates[right].cmp(&candidates[left]))
                     });
                 *output = best.map_or(u32::MAX, |slot| {
+                    let score = scores[slot];
                     scores[slot] = f32::NEG_INFINITY;
-                    candidates[slot]
+                    if level == 0 && max_finite > f32::NEG_INFINITY && score < max_finite - 12.0 {
+                        u32::MAX
+                    } else {
+                        candidates[slot]
+                    }
                 });
             }
             if level > 0 {
