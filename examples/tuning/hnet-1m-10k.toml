@@ -1,0 +1,67 @@
+# Continuous full-space Bayesian Optimization (TuRBO / latent ENN) across 1.047B parameters
+# with H-Net 64x macro-patch compression, 1,048,576 prefill tokens and 1,048,576 generated tokens.
+# Token generation and GPU cross-entropy scoring execute directly inside the Bayesian Optimization loop.
+version = 2
+
+experiment = "pretrain"
+model = "fbt-pisa1-hnet-mhc4-v1"
+corpus = "stack-v3-python-800k-v1"
+
+[run]
+rounds = 10000
+reps = 1
+target-ms = 200
+
+[proposal]
+distribution = "rademacher"
+
+[enn]
+geometry = "latent"
+scaling = "self-tuning"
+local-neighbors = 8
+neighbors = 32
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[enn.fit]
+neighbors = true
+candidates = 4
+samples = 4
+
+[acquisition]
+method = "ucb"
+beta = 0.5
+
+[trust-region]
+method = "turbo"
+shape = "tensor-family-learned"
+initial = 0.001
+min = 0.0001
+max = 0.1
+
+[seeds]
+model = 240105308887621659
+reference = 150813718214252701
+proposal = 91614869253048103
+acquisition = 314159265358979323
+
+[generation]
+purpose = "pretrain"
+initialization = "megatron"
+max-tokens = 1048576
+temperature = 0.8
+corpus-prompt-tokens = 1048576
+
+[generation.verify]
+mode = "accepted-prefix"
+window = 4096
+max-window = 4096
+passes = 1
+unroll = 1
+
+[generation.reward]
+kind = "free-running-cross-entropy"
+
+[diagnostics]
+trace = false
+stage-samples = 3
