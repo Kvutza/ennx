@@ -106,9 +106,9 @@ fn adapt_window(
     if !mismatch || (span > 0 && accepted * 2 >= span) {
         (window * 2).min(config.verify.max_window)
     } else if span > 0 && accepted * 4 < span {
-        (window / 2).max(config.verify.window)
+        128
     } else {
-        window
+        (window / 2).max(128)
     }
 }
 
