@@ -361,7 +361,11 @@ impl BlockDecoder {
                 task.prompt.len(),
                 tokens.len(),
             );
-            let waves = if stalled { config.verify.unroll } else { 1 };
+            let waves = if stalled || config.verify.unroll > 1 {
+                config.verify.unroll
+            } else {
+                1
+            };
             stats.gpu_seconds += self.repair_waves(
                 runtime,
                 decoder,
