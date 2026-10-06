@@ -95,6 +95,14 @@ fi
 
 wheel_path=${ENNX_WHEEL_PATH:-}
 if [ -z "$wheel_path" ]; then
+    for candidate in "$repo_dir"/dist/*-"$python_abi"-"$python_abi"-*.whl; do
+        if [ -f "$candidate" ]; then
+            wheel_path="$candidate"
+            break
+        fi
+    done
+fi
+if [ -z "$wheel_path" ]; then
     echo "set ENNX_WHEEL_PATH to an existing wheel; run ./ennx build first" >&2
     exit 1
 fi
