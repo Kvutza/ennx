@@ -33,7 +33,7 @@ samples = 4
 
 [acquisition]
 method = "ucb"
-beta = 0.5
+beta = 1.0
 
 [trust-region]
 method = "turbo"
@@ -68,3 +68,4 @@ kind = "free-running-cross-entropy"
 [diagnostics]
 trace = false
 stage-samples = 3
+
