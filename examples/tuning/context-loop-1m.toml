@@ -51,7 +51,7 @@ corpus-prompt-tokens = 128
 
 [generation.verify]
 mode = "accepted-prefix"
-window = 4096
+window = 1024
 max-window = 4096
 passes = 4
 unroll = 4
