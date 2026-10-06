@@ -57,13 +57,57 @@ test_rust() {
     esac
 }
 
+test_affected() {
+    formal
+    gate_out=$(tools/ripwirew . --test-gate 2>&1 || true)
+    gate_files=$(printf '%s\n' "$gate_out" | grep -o 'p="[^"]*test[^"]*"' | cut -d'"' -f2 | sort -u || true)
+    dirty_files=$(jj diff --name-only 2>/dev/null || git status --porcelain | awk '{print $2}' || true)
+    candidates=$(printf '%s\n%s\n' "$gate_files" "$dirty_files" | grep -E '\.rs$' | sort -u || true)
+    if [ -z "$candidates" ]; then
+        echo "ennx: no changed Rust files or test obligations found"
+        return 0
+    fi
+    targets=""
+    for item in $candidates; do
+        if [ -f "$item" ]; then
+            found=$(./buck2w uquery "kind(test, owner('$item'))" 2>/dev/null || true)
+            if [ -n "$found" ]; then
+                targets="$targets $found"
+            fi
+        fi
+    done
+    targets=$(printf '%s\n' $targets | sort -u || true)
+    if [ -z "$targets" ]; then
+        echo "ennx: no Buck2 test targets mapped to affected files"
+        return 0
+    fi
+    echo "ennx: running affected test targets:"
+    printf '  %s\n' $targets
+    case "${ENNX_BUILD_SYSTEM:-buck2}" in
+        buck2) ./buck2w test $targets --local-only -j 1 ;;
+        bazel) bazel test $targets --config=release --config=constrained ;;
+    esac
+}
+
 action=$1
 shift
 case "$action" in
     fmt) format "$@" ;;
     build) verification=$1; shift; bash tools/build-wheels "$1" "$verification" ;;
     test)
-        if [ "$1" = python ]; then tools/buck2-wheel-verify --tests; else test_rust; fi
+        if [ "$1" = python ]; then
+            tools/buck2-wheel-verify --tests
+        elif [ "$1" = affected ]; then
+            test_affected
+        else
+            test_rust
+        fi
+        ;;
+    radar) exec tools/ripwirew "$@" ;;
+    gate)
+        format check
+        tools/ripwirew . --quality-delta
+        tools/ripwirew . --test-gate
         ;;
     toolchain) exec python3 tools/rust-toolchain "$@" ;;
     dev)

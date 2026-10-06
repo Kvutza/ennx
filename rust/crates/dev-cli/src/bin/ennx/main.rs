@@ -19,6 +19,7 @@ mod model_program;
 mod protocol;
 mod protocol_analysis;
 mod ptx;
+mod radar;
 #[path = "eval/reports.rs"]
 mod reports;
 mod tune;
@@ -61,6 +62,9 @@ enum Action {
         /// Run installed-wheel Python tests; requires ENNX_WHEEL_PATH.
         #[arg(long, help_heading = "Test Options")]
         python: bool,
+        /// Only run test targets reaching working copy changes.
+        #[arg(long, help_heading = "Test Options")]
+        affected: bool,
     },
     /// Format the repository or check formatting without edits.
     ///
@@ -108,6 +112,14 @@ enum Action {
     /// Convenience target executing format checks, artifact compilation,
     /// and comprehensive unit test suites in a single pass.
     Dev,
+    /// Codebase radar, semantic call graphs, blast radius, and quality gates.
+    ///
+    /// Surfaces AST-scoped symbol search, transitive impact sets,
+    /// quality deltas against HEAD, and token-compressed agent contexts.
+    Radar {
+        #[command(subcommand)]
+        command: radar::RadarAction,
+    },
     /// Open the interactive command navigator.
     ///
     /// Launches an interactive terminal user interface enabling immediate exploration
@@ -373,8 +385,9 @@ fn run() -> Result<(), String> {
 fn dispatch(root: &Path, action: Action) -> Result<(), String> {
     match action {
         Action::Build { tests, out } => build(root, tests, out),
-        Action::Test { python } => test(root, python),
+        Action::Test { python, affected } => test(root, python, affected),
         Action::Fmt { check } => format(root, check),
+        Action::Radar { command } => radar::run(root, command),
         Action::Toolchain { command } => toolchain(root, command),
         Action::Dev => execute(developer_command(root, "dev")),
         action => workflow(root, action),
@@ -481,22 +494,32 @@ fn dispatch_legacy(root: &Path, action: Action) -> Result<(), String> {
     }
 }
 
-fn build(root: &Path, tests: bool, out: PathBuf) -> Result<(), String> {
-    let mut command = developer_command(root, "build");
-    command.arg(if tests { "full" } else { "smoke" }).arg(out);
+pub(crate) fn dev_exec(root: &Path, action: &str, args: &[&str]) -> Result<(), String> {
+    let mut command = developer_command(root, action);
+    command.args(args);
     execute(command)
 }
 
-fn test(root: &Path, python: bool) -> Result<(), String> {
-    let mut command = developer_command(root, "test");
-    command.arg(if python { "python" } else { "rust" });
-    execute(command)
+fn build(root: &Path, tests: bool, out: PathBuf) -> Result<(), String> {
+    let mode = if tests { "full" } else { "smoke" };
+    let out_str = out.to_string_lossy();
+    dev_exec(root, "build", &[mode, &out_str])
+}
+
+fn test(root: &Path, python: bool, affected: bool) -> Result<(), String> {
+    let target = if python {
+        "python"
+    } else if affected {
+        "affected"
+    } else {
+        "rust"
+    };
+    dev_exec(root, "test", &[target])
 }
 
 fn format(root: &Path, check: bool) -> Result<(), String> {
-    let mut command = developer_command(root, "fmt");
-    command.arg(if check { "check" } else { "write" });
-    execute(command)
+    let mode = if check { "check" } else { "write" };
+    dev_exec(root, "fmt", &[mode])
 }
 
 fn toolchain(root: &Path, action: ToolchainAction) -> Result<(), String> {
@@ -519,7 +542,7 @@ fn developer_command(root: &Path, action: &str) -> Command {
     command
 }
 
-fn execute(mut command: Command) -> Result<(), String> {
+pub(crate) fn execute(mut command: Command) -> Result<(), String> {
     let status = command.status().map_err(|error| error.to_string())?;
     if status.success() {
         Ok(())

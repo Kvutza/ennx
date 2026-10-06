@@ -1,0 +1,43 @@
+#!/usr/bin/env dotslash
+
+{
+  "name": "ripwire",
+  "platforms": {
+    "macos-aarch64": {
+      "size": 8400356,
+      "hash": "blake3",
+      "digest": "bab4d1f9f134dcdda59b4329d5d2ee2fa281cda39163b20e3911ba46aa4eef72",
+      "format": "tar.gz",
+      "path": "ripwire-0.6.5-macos-arm64/ripwire",
+      "providers": [
+        {
+          "url": "https://github.com/redhat-et/ripwire/releases/download/v0.6.5/ripwire-0.6.5-macos-arm64.tar.gz"
+        }
+      ]
+    },
+    "linux-aarch64": {
+      "size": 7615991,
+      "hash": "blake3",
+      "digest": "d090ac02a5a82051fc676ceb9213d56e5a8dd6469846850246d0c3d2781642c1",
+      "format": "tar.gz",
+      "path": "ripwire-0.6.5-linux-arm64/ripwire",
+      "providers": [
+        {
+          "url": "https://github.com/redhat-et/ripwire/releases/download/v0.6.5/ripwire-0.6.5-linux-arm64.tar.gz"
+        }
+      ]
+    },
+    "linux-x86_64": {
+      "size": 8179525,
+      "hash": "blake3",
+      "digest": "81f2aaf7e1568b8e6400b0a82ebbb5252ece75ab613bdce83ef969f4d93c819f",
+      "format": "tar.gz",
+      "path": "ripwire-0.6.5-linux-x64/ripwire",
+      "providers": [
+        {
+          "url": "https://github.com/redhat-et/ripwire/releases/download/v0.6.5/ripwire-0.6.5-linux-x64.tar.gz"
+        }
+      ]
+    }
+  }
+}
