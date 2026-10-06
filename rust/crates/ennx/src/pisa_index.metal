@@ -108,9 +108,15 @@ kernel void pisa_index(
                 simdgroup_barrier(mem_flags::mem_threadgroup);
                 break;
             }
+            float max_finite_score = -INFINITY;
             for (uint slot = 0; slot < 8; ++slot) {
                 const float maximum = simd_max(score);
-                const uint best = simd_min(score == maximum && score > -INFINITY ? node : UINT_MAX);
+                if (maximum < INFINITY && max_finite_score == -INFINITY) {
+                    max_finite_score = maximum;
+                }
+                const bool drop = (level == 0) && (max_finite_score > -INFINITY)
+                    && (maximum < max_finite_score - 12.0f);
+                const uint best = simd_min(score == maximum && score > -INFINITY && !drop ? node : UINT_MAX);
                 if (lane == slot) selected[search][slot] = best;
                 if (node == best) score = -INFINITY;
             }
@@ -136,9 +142,15 @@ kernel void pisa_index(
                         score = fma(q[query][dim], float(tree[ulong(node) * 64 + dim]), score);
                 }
             }
+            float max_finite_score = -INFINITY;
             for (uint slot = 0; slot < 8; ++slot) {
                 const float maximum = simd_max(score);
-                const uint best = simd_min(score == maximum && score > -INFINITY ? node : UINT_MAX);
+                if (maximum < INFINITY && max_finite_score == -INFINITY) {
+                    max_finite_score = maximum;
+                }
+                const bool drop = (max_finite_score > -INFINITY)
+                    && (maximum < max_finite_score - 12.0f);
+                const uint best = simd_min(score == maximum && score > -INFINITY && !drop ? node : UINT_MAX);
                 if (lane == slot) selected[query][slot] = best;
                 if (node == best) score = -INFINITY;
             }

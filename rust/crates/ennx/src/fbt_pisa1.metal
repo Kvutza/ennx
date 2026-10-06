@@ -758,10 +758,19 @@ kernel void fbt_pisa1_select_attention_q4(
                 }
             }
         }
+        float max_finite_score = -INFINITY;
         for (uint slot = 0; slot < kSelected; ++slot) {
             const float best_score = simd_max(score);
+            if (best_score < INFINITY && max_finite_score == -INFINITY) {
+                max_finite_score = best_score;
+            }
+            // Barnes-Hut Slip Clutch: If leaf score is > 12.0 below max finite score,
+            // its attention weight exp(score - max) <= exp(-12) < 6.2e-6 is negligible.
+            // Drop it to UINT_MAX to bypass QK/PV memory traffic.
+            const bool drop = (level == 0) && (max_finite_score > -INFINITY)
+                && (best_score < max_finite_score - 12.0f);
             const uint best = simd_min(
-                score == best_score && score > -INFINITY ? node : UINT_MAX);
+                score == best_score && score > -INFINITY && !drop ? node : UINT_MAX);
             if (lane == slot) {
                 selected_blocks[simdgroup][slot] = best;
                 if (level == 0) blocks[ulong(query_row) * kSelected + slot] = best;
