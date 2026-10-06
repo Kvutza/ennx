@@ -1,0 +1,57 @@
+version = 2
+experiment = "pretrain"
+model = "fbt-pisa1-diffusion-mhc4-v1"
+corpus = "stack-v3-python-800k-v1"
+
+[run]
+rounds = 2
+reps = 1
+target-ms = 1000
+
+[proposal]
+distribution = "rademacher"
+
+[enn]
+geometry = "latent"
+neighbors = 32
+epistemic-scale = 0.05
+aleatoric-scale = 0.05
+
+[acquisition]
+method = "pareto"
+scales = [1.0, 1.0, 1.0]
+
+[trust-region]
+method = "turbo"
+shape = "tensor-family-learned"
+initial = 0.001
+min = 0.0001
+max = 0.1
+
+[seeds]
+model = 240105308887621659
+reference = 150813718214252701
+proposal = 91614869253048103
+acquisition = 314159265358979323
+
+[generation]
+purpose = "pretrain"
+initialization = "megatron"
+max-tokens = 4096
+temperature = 0.8
+corpus-prompt-tokens = 128
+save-final-checkpoint = false
+record-tensor-updates = true
+
+[generation.draft]
+block = 128
+steps = 2
+visits = [1, 2]
+soft = true
+index = "refined"
+reuse = 0.02
+
+[generation.reward]
+kind = "drafted-code"
+max-ngram = 4
+decoys = 1

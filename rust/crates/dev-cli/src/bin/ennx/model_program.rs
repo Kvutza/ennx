@@ -232,13 +232,15 @@ fn scale(
 
     if hierarchical {
         const SUBSURFACE_FLOPS: u64 = 1_500;
-        const POOLING_FACTOR: u64 = 32;
-        let super_tokens = prompt.div_ceil(POOLING_FACTOR);
+        const POOLING_FACTOR: u64 = 64;
+        let prompt_super_tokens = prompt.div_ceil(POOLING_FACTOR);
+        let generated_super_tokens = generated.div_ceil(POOLING_FACTOR);
         let subsurface_flops = prompt
+            .saturating_add(generated)
             .checked_mul(SUBSURFACE_FLOPS)
             .ok_or("work count overflow")?;
-        let core_positions = super_tokens
-            .checked_add(generated)
+        let core_positions = prompt_super_tokens
+            .checked_add(generated_super_tokens)
             .ok_or("position overflow")?;
         let core_flops = FLOPS
             .checked_mul(core_positions)
@@ -254,7 +256,7 @@ fn scale(
         println!(
             "{}",
             pretty_string(&json!({
-                "model": "fbt-pisa1-hierarchical-v1",
+                "model": "fbt-pisa1-hnet-mhc4-v1",
                 "parameters": PARAMETERS,
                 "physical-layers": 5,
                 "executed-layer-visits": VISITS,
@@ -262,7 +264,7 @@ fn scale(
                 "generated-tokens": generated,
                 "logical-context-positions": positions,
                 "subsurface-compression-ratio": POOLING_FACTOR,
-                "compressed-super-tokens": super_tokens,
+                "compressed-super-tokens": prompt_super_tokens + generated_super_tokens,
                 "subsurface-flops-per-token": SUBSURFACE_FLOPS,
                 "subsurface-prefill-flops": subsurface_flops,
                 "core-evaluated-positions": core_positions,
@@ -278,7 +280,7 @@ fn scale(
                 "realistic-projected-t4-ms": realistic_t4_seconds * 1000.0,
                 "realistic-projected-metal-ms": realistic_metal_seconds * 1000.0,
                 "architecture-verdict": if hierarchical_target_tflops <= 20.0 { "subsecond-achievable" } else { "exceeds-sustained-tflops" },
-                "counting": "hierarchical: 1-pass sub-surface context encoding + 32x pooled super-tokens + suffix evaluated through 7 recurrent MoE visits"
+                "counting": "H-Net: 1-pass sub-surface context encoding + 64x macro-chunks across both prefill and generation evaluated through 7 recurrent MoE visits"
             }))
             .map_err(|error| error.to_string())?
         );
