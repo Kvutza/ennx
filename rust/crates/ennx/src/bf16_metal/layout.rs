@@ -96,7 +96,8 @@ pub(super) fn check_memory(
     let total = current
         .checked_add(additional)
         .ok_or("Metal BF16 memory estimate overflow")?;
-    if total > recommended {
+    let ceiling = (recommended * 115) / 100;
+    if total > ceiling {
         return Err(format!(
             "Metal BF16 requires {additional} additional bytes; currentAllocatedSize={current}, recommendedMaxWorkingSetSize={recommended}"
         ));
