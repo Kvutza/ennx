@@ -92,6 +92,13 @@ pub(super) fn decoded_completion(
     let text = String::from_utf8_lossy(&bytes).into_owned();
     std::fs::write(path.join("completion.bin"), &bytes).map_err(|error| error.to_string())?;
     std::fs::write(path.join("completion.txt"), &text).map_err(|error| error.to_string())?;
+    let learnability = crate::text::gemma4::evaluate_learnability(&text);
+    eprintln!(
+        "ENNX_GEMMA4_LEARNABILITY learnable={} 4gram_entropy={:.3} turns={}",
+        learnability.learnable,
+        learnability.repetition_ratio_4gram,
+        learnability.turns_count,
+    );
     Ok(Some(text))
 }
 

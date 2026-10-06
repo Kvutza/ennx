@@ -118,6 +118,36 @@ fn drafted(
     )
 }
 
+fn free_running_cross_entropy_reward(
+    rollouts: &[decode::Rollout],
+    tokenizer: Option<&ByteDecoder>,
+) -> Result<Vec<f32>, String> {
+    rollouts
+        .iter()
+        .map(|rollout| {
+            let nll = rollout
+                .free_running_target_nll
+                .map(|loss| -loss)
+                .ok_or("block decoder did not produce free-running target NLL")?;
+            let bonus = match tokenizer {
+                Some(tok) => {
+                    let sample_len = rollout.tokens.len().min(4096);
+                    let bytes = tok.decode_bytes(&rollout.tokens[..sample_len]).unwrap_or_default();
+                    let text = String::from_utf8_lossy(&bytes);
+                    let report = crate::text::gemma4::evaluate_learnability(&text);
+                    if report.learnable {
+                        (report.repetition_ratio_4gram - 0.5) * 0.05
+                    } else {
+                        -0.1
+                    }
+                }
+                None => 0.0,
+            };
+            Ok(nll + bonus)
+        })
+        .collect()
+}
+
 fn scalar_reward(
     config: &GenerationConfig,
     rollouts: &[decode::Rollout],
@@ -153,15 +183,9 @@ fn scalar_reward(
                 matches as f32 / task.expected.len().max(rollout.tokens.len()) as f32
             })
             .collect(),
-        GenerationReward::FreeRunningCrossEntropy => rollouts
-            .iter()
-            .map(|rollout| {
-                rollout
-                    .free_running_target_nll
-                    .map(|loss| -loss)
-                    .ok_or("block decoder did not produce free-running target NLL")
-            })
-            .collect::<Result<Vec<_>, _>>()?,
+        GenerationReward::FreeRunningCrossEntropy => {
+            free_running_cross_entropy_reward(rollouts, tokenizer)?
+        }
         GenerationReward::FrozenQwen { .. }
         | GenerationReward::CodeReconstruction
         | GenerationReward::CodeContrastive { .. } => evaluator
