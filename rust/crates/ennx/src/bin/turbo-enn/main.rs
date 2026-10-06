@@ -3,6 +3,9 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
+mod tui_canvas;
+mod tui_dashboard;
+mod tui_diagram;
 mod tune_output;
 use tune_output::Terminal;
 

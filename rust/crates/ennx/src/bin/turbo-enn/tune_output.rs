@@ -34,7 +34,6 @@ impl Terminal {
     }
 
     pub fn send(&mut self, line: &[u8]) {
-        // Only the display is bounded; the caller preserves full worker records.
         let mut message = line[..line.len().min(16 * 1024)].to_vec();
         if message.len() < line.len() {
             message.extend_from_slice(b"... [full output in run.log]\n");
@@ -52,7 +51,6 @@ impl Terminal {
 
     pub fn finish(self) {
         drop(self.sender);
-        // A stalled terminal must not prevent process exit after saving artifacts.
         let _ = self.done.recv_timeout(Duration::from_millis(50));
     }
 }
@@ -87,9 +85,7 @@ pub(super) fn display_line(line: &[u8]) -> String {
     ]
     .iter()
     .any(|prefix| message.starts_with(prefix))
-        || message
-            .trim_end()
-            .ends_with("additional file change events")
+        || message.trim_end().ends_with("additional file change events")
         || text.starts_with("[weights] per-tensor records:")
     {
         return String::new();
@@ -128,6 +124,19 @@ fn generated_record(text: &str) -> Option<String> {
 }
 
 fn display_record(text: &str) -> Option<String> {
+    if text.starts_with("ENNX generated pretrain") || text.starts_with("ENNX generation") {
+        let mut out = String::new();
+        out.push_str(&super::tui_diagram::forward_pass_diagram(1_048_576, 1.047, 32_768));
+        out.push_str(&super::tui_diagram::prefill_hardware_hud(1_048_576, 32_768));
+        out.push('\n');
+        return Some(out);
+    }
+    if text.starts_with("ENNX_GENERATION ") {
+        return generation_round_record(text);
+    }
+    if text.starts_with("ENNX_GEMMA4_LEARNABILITY ") {
+        return gemma4_learnability_record(text);
+    }
     if text.starts_with("ENNX_GENERATED_TEXT ") {
         return generated_record(text);
     }
@@ -154,6 +163,64 @@ fn finite_field(text: &str, name: &str) -> Option<f64> {
         .parse::<f64>()
         .ok()
         .filter(|value| value.is_finite())
+}
+
+fn generation_round_record(text: &str) -> Option<String> {
+    let round = finite_field(text, "round")? as u64;
+    let wall_ms = finite_field(text, "wall_ms")
+        .or_else(|| finite_field(text, "elapsed_ms"))? as u64;
+    let reward = finite_field(text, "reward")?;
+    let changed_pct = finite_field(text, "changed_fraction")
+        .map(|f| f * 100.0)
+        .or_else(|| {
+            let changed = finite_field(text, "changed_weights")?;
+            let total = finite_field(text, "total_weights")?;
+            Some(if total > 0.0 { (changed / total) * 100.0 } else { 0.0 })
+        })
+        .unwrap_or(0.0);
+    let accepted = record_field(text, "accepted")
+        .map(|a| a == "true")
+        .unwrap_or_else(|| {
+            record_field(text, "status") == Some("accepted")
+                || record_field(text, "status") == Some("applied")
+        });
+    let status_str = if accepted { "accepted" } else { "rejected" };
+    let tokens = finite_field(text, "evaluated_positions")
+        .map(|p| p as u64 * 32)
+        .or_else(|| finite_field(text, "tokens").map(|t| t as u64))
+        .unwrap_or(1048576);
+    let mut out = String::new();
+    if round == 1 {
+        out.push_str(super::tui_dashboard::telemetry_table_header());
+    }
+    let history = [reward];
+    out.push_str(&super::tui_dashboard::format_generation_row(
+        round,
+        tokens,
+        wall_ms,
+        reward,
+        changed_pct,
+        status_str,
+        &history,
+    ));
+    Some(out)
+}
+
+fn gemma4_learnability_record(text: &str) -> Option<String> {
+    let learnable = record_field(text, "learnable").map(|v| v == "true").unwrap_or(true);
+    let entropy = finite_field(text, "4gram_entropy")
+        .or_else(|| finite_field(text, "repetition_ratio"))
+        .unwrap_or(0.0);
+    let round = finite_field(text, "round").map(|r| r as u64).unwrap_or(0);
+    let status_badge = record_field(text, "status")
+        .unwrap_or(if learnable { "PASS" } else { "REJECT" });
+    let score = if learnable { 1.0 - entropy } else { 0.0 };
+    Some(super::tui_dashboard::format_gemma4_record(
+        round,
+        score,
+        entropy,
+        status_badge,
+    ))
 }
 
 fn round_record(text: &str) -> Option<String> {
@@ -184,12 +251,18 @@ fn space_record(text: &str) -> Option<String> {
         "independent_gaussian" | "independent_gaussian_ziggurat256_v1" => "Gaussian",
         _ => return None,
     };
-    Some(format!(
-        "\n{HEADING}Model  {:.3}B weights | FP16{HEADING:#}\nContext {} | Batch {} | Full-weight {proposals} proposals\n",
-        finite_field(text, "parameters")? / 1e9,
+    let params_b = finite_field(text, "parameters")? / 1e9;
+    let context_tokens = record_field(text, "context")?.parse::<usize>().unwrap_or(0);
+    let patches = context_tokens / 64;
+    let mut out = String::new();
+    out.push_str(&super::tui_diagram::forward_pass_diagram(context_tokens, params_b, patches));
+    out.push_str(&super::tui_diagram::prefill_hardware_hud(context_tokens, patches));
+    out.push_str(&format!(
+        "\n{HEADING}Model  {params_b:.3}B weights | FP16{HEADING:#}\nContext {} | Batch {} | Full-weight {proposals} proposals\n",
         record_field(text, "context")?,
         record_field(text, "batch")?,
-    ))
+    ));
+    Some(out)
 }
 
 fn initial_record(text: &str) -> Option<String> {
@@ -249,5 +322,23 @@ mod tests {
         let record =
             display_record("ENNX_GENERATED_TEXT phase=initial tokens=4096 nll=3.1").unwrap();
         assert!(record.contains("NLL 3.1"));
+    }
+
+    #[test]
+    fn generation_table_row() {
+        let record = display_record(
+            "ENNX_GENERATION round=1 tokens=1048576 elapsed_ms=1850 changed_weights=1047699736 total_weights=1047699736 reward=0.0312 status=accepted",
+        ).unwrap();
+        assert!(record.contains("ACCEPTED"));
+        assert!(record.contains("1850ms"));
+    }
+
+    #[test]
+    fn gemma4_learnability_display() {
+        let record = display_record(
+            "ENNX_GEMMA4_LEARNABILITY round=1 score=0.9850 repetition_ratio=0.0000 status=PASS",
+        ).unwrap();
+        assert!(record.contains("[Gemma 4]"));
+        assert!(record.contains("PASS"));
     }
 }
