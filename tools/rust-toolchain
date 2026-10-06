@@ -88,8 +88,6 @@ def update_text(path: str, text: str, channel: str, date: str, edition: str) -> 
             f'        env = {{"RUSTUP_TOOLCHAIN": "{channel}"}},',
             path,
         )
-    if path == "docs/flame.md":
-        return replace_one(text, r"cargo \+nightly-\d{4}-\d{2}-\d{2} oxide", f"cargo +{channel} oxide", path)
     if path == "docs/buck2.md":
         return replace_one(
             text,
@@ -116,7 +114,6 @@ def synchronized_files(channel: str, date: str, edition: str) -> dict[str, str]:
         "ops/cuoxtool.py",
         "rust/crates/modal-runner/src/main.rs",
         "buck2/cuda/defs.bzl",
-        "docs/flame.md",
         "docs/buck2.md",
         "examples/colabcuoxdev.ipynb",
         "buck2/wheel/BUCK",

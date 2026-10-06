@@ -58,7 +58,7 @@ Metal runs on macOS; OpenCL requires an installed driver. Linux wheels are audit
 for manylinux 2.28, so release builds need a compatible build host.
 
 [CUDA](../cuda/README.md) uses a separate toolchain and build.
-[Bazel](bazel.md) provides an independent correctness check. Shared crate
+Bazel provides an independent correctness check. Shared crate
 sets and executable targets are generated from Cargo metadata into
 `build/targets.bzl` by `tools/build-parity --sync`. `tools/build-parity` rejects
 stale generated data and targets missing from either graph. Set

@@ -46,6 +46,7 @@ SKIP_PARTS = {
     ".ruff_cache",
     ".venv",
     "__pycache__",
+    "archive",
     "buck-out",
     "cuda",
     "dist",
