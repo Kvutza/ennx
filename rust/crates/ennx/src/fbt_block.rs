@@ -25,13 +25,17 @@ pub(super) struct BlockDecoder {
 
 use super::stats::{CommitStats, RepairStats, VerificationProgress};
 use super::window::{
-    adapt_window, commit_repair_tile, expand_draft, loss_window, next_window, refresh_draft,
+    adapt_window, commit_tile, expand_draft, loss_window, next_window, refresh_draft,
     repair_bounds, route_sample, score_targets,
 };
 
 impl BlockDecoder {
-
-    fn load_targets(&self, task: &GenerationTask, maximum: usize, patch: usize) -> Result<(), String> {
+    fn load_targets(
+        &self,
+        task: &GenerationTask,
+        maximum: usize,
+        patch: usize,
+    ) -> Result<(), String> {
         if task.expected.len() < maximum {
             return Err("free-running target has fewer tokens than max_tokens".into());
         }
@@ -265,7 +269,7 @@ impl BlockDecoder {
             }
 
             let exact_start = *cursor;
-            let (next_cursor, reached_eos) = commit_repair_tile(
+            let (next_cursor, reached_eos) = commit_tile(
                 task,
                 tokens,
                 input,
@@ -437,7 +441,7 @@ impl BlockDecoder {
         Ok((seconds, active_rows, route))
     }
 
-    fn candidate_readout_slice<'a>(weights: CandidateRow<'a>, patch: usize) -> Option<&'a [u16]> {
+    fn readout_slice<'a>(weights: CandidateRow<'a>, patch: usize) -> Option<&'a [u16]> {
         if patch <= 1 || weights.buffer.contents().is_null() {
             return None;
         }
@@ -446,7 +450,12 @@ impl BlockDecoder {
         if offset_bytes + total_elements * size_of::<u16>() <= weights.buffer.length() as usize {
             unsafe {
                 Some(std::slice::from_raw_parts(
-                    weights.buffer.contents().cast::<u8>().add(offset_bytes).cast::<u16>(),
+                    weights
+                        .buffer
+                        .contents()
+                        .cast::<u8>()
+                        .add(offset_bytes)
+                        .cast::<u16>(),
                     total_elements,
                 ))
             }
@@ -455,7 +464,7 @@ impl BlockDecoder {
         }
     }
 
-    fn intra_patch_token(
+    fn patch_token(
         macro_token: u32,
         prev_token: u32,
         intra_idx: usize,
@@ -508,7 +517,7 @@ impl BlockDecoder {
         let mut accepted = 0usize;
         let patch = weights.architecture.patch_size();
         let prompt_macros = prompt / patch;
-        let readout_slice = Self::candidate_readout_slice(weights, patch);
+        let readout_slice = Self::readout_slice(weights, patch);
         while position < maximum {
             let intra_idx = position % patch;
             let prediction_idx = if patch > 1 {
@@ -521,7 +530,12 @@ impl BlockDecoder {
                 return Err("block verifier produced an invalid token".into());
             }
             let token_value = if patch > 1 && intra_idx > 0 {
-                Self::intra_patch_token(macro_prediction, tokens[position - 1], intra_idx, readout_slice)
+                Self::patch_token(
+                    macro_prediction,
+                    tokens[position - 1],
+                    intra_idx,
+                    readout_slice,
+                )
             } else {
                 macro_prediction
             };

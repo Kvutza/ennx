@@ -95,9 +95,7 @@ pub(super) fn decoded_completion(
     let learnability = crate::text::gemma4::evaluate_learnability(&text);
     eprintln!(
         "ENNX_GEMMA4_LEARNABILITY learnable={} 4gram_entropy={:.3} turns={}",
-        learnability.learnable,
-        learnability.repetition_ratio_4gram,
-        learnability.turns_count,
+        learnability.learnable, learnability.repetition_ratio_4gram, learnability.turns_count,
     );
     Ok(Some(text))
 }
@@ -318,7 +316,7 @@ pub fn run_generated(
         decoys = task.decoys;
         (task.prompt, task.expected, index as u32, Some(episode))
     } else {
-        let (p, e, idx) = corpus_continuation_task(&mut config, dataset_path, task_seed, coding)?;
+        let (p, e, idx) = corpus_task(&mut config, dataset_path, task_seed, coding)?;
         (p, e, idx, None)
     };
     if expected.len() != config.max_tokens as usize {
@@ -357,7 +355,7 @@ pub fn run_generated(
     )
 }
 
-fn corpus_continuation_task(
+fn corpus_task(
     config: &mut GenerationConfig,
     dataset_path: &Path,
     task_seed: u64,
@@ -384,7 +382,10 @@ fn corpus_continuation_task(
         } else {
             source[..prompt_len].iter().map(|&t| u32::from(t)).collect()
         };
-        let e = source[prompt_len..total].iter().map(|&t| u32::from(t)).collect();
+        let e = source[prompt_len..total]
+            .iter()
+            .map(|&t| u32::from(t))
+            .collect();
         Ok((p, e, 0))
     } else {
         let index = (task_seed % u64::from(dataset.sequences())) as u32;

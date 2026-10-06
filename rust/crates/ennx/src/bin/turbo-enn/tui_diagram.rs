@@ -5,10 +5,12 @@ use super::tui_canvas::progress_gauge;
 
 const CYAN: anstyle::Style =
     anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
-const BOLD_CYAN: anstyle::Style =
-    anstyle::Style::new().bold().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
-const GREEN: anstyle::Style =
-    anstyle::Style::new().bold().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green)));
+const BOLD_CYAN: anstyle::Style = anstyle::Style::new()
+    .bold()
+    .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
+const GREEN: anstyle::Style = anstyle::Style::new()
+    .bold()
+    .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green)));
 const MUTED: anstyle::Style = anstyle::Style::new().dimmed();
 
 pub(super) fn rounded_panel(title: &str, content: &[&str], inner_width: usize) -> String {
@@ -33,7 +35,7 @@ pub(super) fn rounded_panel(title: &str, content: &[&str], inner_width: usize) -
     out
 }
 
-pub(super) fn forward_pass_diagram(tokens: usize, params_b: f64, patches: usize) -> String {
+pub(super) fn pass_diagram(tokens: usize, params_b: f64, patches: usize) -> String {
     let w = 76;
     let p_str = format!("{params_b:.3}B parameters");
     let c_str = format!("{tokens} tokens ({patches} patches, P=64)");
@@ -80,17 +82,21 @@ pub(super) fn forward_pass_diagram(tokens: usize, params_b: f64, patches: usize)
     s
 }
 
-pub(super) fn prefill_hardware_hud(tokens: usize, patches: usize) -> String {
+pub(super) fn hardware_hud(tokens: usize, patches: usize) -> String {
     let gauge_prefill = progress_gauge(1.0, 36);
     let gauge_vram = progress_gauge(0.72, 36);
     let gauge_mtp = progress_gauge(1.0, 36);
     let good = GREEN;
     let muted = MUTED;
     let lines = [
-        format!("Forward Prefill: [{good}{gauge_prefill}{good:#}] 100% ({tokens} tok, {patches} slots)"),
+        format!(
+            "Forward Prefill: [{good}{gauge_prefill}{good:#}] 100% ({tokens} tok, {patches} slots)"
+        ),
         format!("Unified VRAM:    [{good}{gauge_vram}{good:#}]  72% (Resident FP16 weights)"),
         format!("Intra-Patch MTP: [{good}{gauge_mtp}{good:#}] Ready (64 tok/patch parallel)"),
-        format!("{muted}Hardware Device: Apple Silicon Unified GPU • OpenCL/Metal Shared Memory{muted:#}"),
+        format!(
+            "{muted}Hardware Device: Apple Silicon Unified GPU • OpenCL/Metal Shared Memory{muted:#}"
+        ),
     ];
     let slice: Vec<&str> = lines.iter().map(String::as_str).collect();
     rounded_panel("PREFILL & HARDWARE ACCELERATION HUD", &slice, 76)
@@ -107,7 +113,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_rounded_panel_invariant() {
+    fn test_panel() {
         let panel = rounded_panel("TEST", &["first line", "second line"], 40);
         assert!(panel.contains("╭─ "));
         assert!(panel.contains("TEST"));
@@ -115,8 +121,8 @@ mod tests {
     }
 
     #[test]
-    fn test_diagram_stages() {
-        let diag = forward_pass_diagram(1048576, 1.047, 32768);
+    fn test_diagram() {
+        let diag = pass_diagram(1048576, 1.047, 32768);
         assert!(diag.contains("STAGE 1"));
         assert!(diag.contains("STAGE 2"));
         assert!(diag.contains("STAGE 3"));
@@ -124,8 +130,8 @@ mod tests {
     }
 
     #[test]
-    fn test_hud_rendering() {
-        let hud = prefill_hardware_hud(1048576, 32768);
+    fn test_hud() {
+        let hud = hardware_hud(1048576, 32768);
         assert!(hud.contains("Forward Prefill"));
         assert!(hud.contains("Unified VRAM"));
     }

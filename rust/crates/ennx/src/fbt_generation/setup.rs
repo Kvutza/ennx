@@ -27,9 +27,7 @@ pub(super) fn prepare_resources(
         .max()
         .ok_or("generation requires tasks")?;
     let core_positions = raw_positions.div_ceil(patch);
-    let context = core_positions
-        .next_power_of_two()
-        .max(CONTEXT as usize) as u32;
+    let context = core_positions.next_power_of_two().max(CONTEXT as usize) as u32;
     let visits = config
         .draft
         .map(|diffusion| {

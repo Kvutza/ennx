@@ -85,7 +85,9 @@ pub(super) fn display_line(line: &[u8]) -> String {
     ]
     .iter()
     .any(|prefix| message.starts_with(prefix))
-        || message.trim_end().ends_with("additional file change events")
+        || message
+            .trim_end()
+            .ends_with("additional file change events")
         || text.starts_with("[weights] per-tensor records:")
     {
         return String::new();
@@ -126,16 +128,16 @@ fn generated_record(text: &str) -> Option<String> {
 fn display_record(text: &str) -> Option<String> {
     if text.starts_with("ENNX generated pretrain") || text.starts_with("ENNX generation") {
         let mut out = String::new();
-        out.push_str(&super::tui_diagram::forward_pass_diagram(1_048_576, 1.047, 32_768));
-        out.push_str(&super::tui_diagram::prefill_hardware_hud(1_048_576, 32_768));
+        out.push_str(&super::tui_diagram::pass_diagram(1_048_576, 1.047, 32_768));
+        out.push_str(&super::tui_diagram::hardware_hud(1_048_576, 32_768));
         out.push('\n');
         return Some(out);
     }
     if text.starts_with("ENNX_GENERATION ") {
-        return generation_round_record(text);
+        return generation_record(text);
     }
     if text.starts_with("ENNX_GEMMA4_LEARNABILITY ") {
-        return gemma4_learnability_record(text);
+        return gemma_record(text);
     }
     if text.starts_with("ENNX_GENERATED_TEXT ") {
         return generated_record(text);
@@ -165,17 +167,21 @@ fn finite_field(text: &str, name: &str) -> Option<f64> {
         .filter(|value| value.is_finite())
 }
 
-fn generation_round_record(text: &str) -> Option<String> {
+fn generation_record(text: &str) -> Option<String> {
     let round = finite_field(text, "round")? as u64;
-    let wall_ms = finite_field(text, "wall_ms")
-        .or_else(|| finite_field(text, "elapsed_ms"))? as u64;
+    let wall_ms =
+        finite_field(text, "wall_ms").or_else(|| finite_field(text, "elapsed_ms"))? as u64;
     let reward = finite_field(text, "reward")?;
     let changed_pct = finite_field(text, "changed_fraction")
         .map(|f| f * 100.0)
         .or_else(|| {
             let changed = finite_field(text, "changed_weights")?;
             let total = finite_field(text, "total_weights")?;
-            Some(if total > 0.0 { (changed / total) * 100.0 } else { 0.0 })
+            Some(if total > 0.0 {
+                (changed / total) * 100.0
+            } else {
+                0.0
+            })
         })
         .unwrap_or(0.0);
     let accepted = record_field(text, "accepted")
@@ -191,10 +197,10 @@ fn generation_round_record(text: &str) -> Option<String> {
         .unwrap_or(1048576);
     let mut out = String::new();
     if round == 1 {
-        out.push_str(super::tui_dashboard::telemetry_table_header());
+        out.push_str(super::tui_dashboard::table_header());
     }
     let history = [reward];
-    out.push_str(&super::tui_dashboard::format_generation_row(
+    out.push_str(&super::tui_dashboard::generation_row(
         round,
         tokens,
         wall_ms,
@@ -206,16 +212,18 @@ fn generation_round_record(text: &str) -> Option<String> {
     Some(out)
 }
 
-fn gemma4_learnability_record(text: &str) -> Option<String> {
-    let learnable = record_field(text, "learnable").map(|v| v == "true").unwrap_or(true);
+fn gemma_record(text: &str) -> Option<String> {
+    let learnable = record_field(text, "learnable")
+        .map(|v| v == "true")
+        .unwrap_or(true);
     let entropy = finite_field(text, "4gram_entropy")
         .or_else(|| finite_field(text, "repetition_ratio"))
         .unwrap_or(0.0);
     let round = finite_field(text, "round").map(|r| r as u64).unwrap_or(0);
-    let status_badge = record_field(text, "status")
-        .unwrap_or(if learnable { "PASS" } else { "REJECT" });
+    let status_badge =
+        record_field(text, "status").unwrap_or(if learnable { "PASS" } else { "REJECT" });
     let score = if learnable { 1.0 - entropy } else { 0.0 };
-    Some(super::tui_dashboard::format_gemma4_record(
+    Some(super::tui_dashboard::gemma_record(
         round,
         score,
         entropy,
@@ -255,8 +263,12 @@ fn space_record(text: &str) -> Option<String> {
     let context_tokens = record_field(text, "context")?.parse::<usize>().unwrap_or(0);
     let patches = context_tokens / 64;
     let mut out = String::new();
-    out.push_str(&super::tui_diagram::forward_pass_diagram(context_tokens, params_b, patches));
-    out.push_str(&super::tui_diagram::prefill_hardware_hud(context_tokens, patches));
+    out.push_str(&super::tui_diagram::pass_diagram(
+        context_tokens,
+        params_b,
+        patches,
+    ));
+    out.push_str(&super::tui_diagram::hardware_hud(context_tokens, patches));
     out.push_str(&format!(
         "\n{HEADING}Model  {params_b:.3}B weights | FP16{HEADING:#}\nContext {} | Batch {} | Full-weight {proposals} proposals\n",
         record_field(text, "context")?,
@@ -325,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn generation_table_row() {
+    fn test_generation() {
         let record = display_record(
             "ENNX_GENERATION round=1 tokens=1048576 elapsed_ms=1850 changed_weights=1047699736 total_weights=1047699736 reward=0.0312 status=accepted",
         ).unwrap();
@@ -334,10 +346,11 @@ mod tests {
     }
 
     #[test]
-    fn gemma4_learnability_display() {
+    fn test_gemma() {
         let record = display_record(
             "ENNX_GEMMA4_LEARNABILITY round=1 score=0.9850 repetition_ratio=0.0000 status=PASS",
-        ).unwrap();
+        )
+        .unwrap();
         assert!(record.contains("[Gemma 4]"));
         assert!(record.contains("PASS"));
     }

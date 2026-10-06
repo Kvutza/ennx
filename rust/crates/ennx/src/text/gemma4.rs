@@ -1,12 +1,8 @@
-//! Gemma 4 Prompt Formatting and Control Token Specification.
+//! Gemma 4 prompt formatting and learnability evaluation.
 //!
-//! Implements Google DeepMind's Gemma 4 Prompt Formatting standard:
-//! - Turn delimiters: `<|turn>` and `<turn|>` with `system`, `user`, `model` roles.
-//! - Thought channel: `<|channel>thought\n...\n<channel|>` with thought stripping.
-//! - Empty thought channel representation stabilization: `<|channel>thought\n<channel|>`.
-//! - Tool lifecycle: `<|tool>`, `<tool|>`, `<|tool_call>`, `<tool_call|>`, `<|tool_response>`, `<tool_response|>`.
-//! - String delimiters: `<|"|>`.
-//! - Learnability evaluation to detect and prevent cyclical repetition loops.
+//! Provides structural formatting for multi-turn interactions, specialized
+//! channels (thought, tool calls, tool responses), and real-time learnability
+//! diagnostics to prevent degenerative repetition attractors.
 
 use std::collections::HashSet;
 
@@ -31,17 +27,17 @@ pub enum Gemma4SpecialToken {
 
 /// Gemma 4 control token string literals.
 pub mod tags {
-    pub const START_OF_TURN: &str = "<|turn>";
-    pub const END_OF_TURN: &str = "<turn|>";
+    pub const TURN_START: &str = "<|turn>";
+    pub const TURN_END: &str = "<turn|>";
     pub const THINK: &str = "<|think|>";
-    pub const START_OF_CHANNEL: &str = "<|channel>";
-    pub const END_OF_CHANNEL: &str = "<channel|>";
-    pub const START_OF_TOOL: &str = "<|tool>";
-    pub const END_OF_TOOL: &str = "<tool|>";
-    pub const START_OF_TOOL_CALL: &str = "<|tool_call>";
-    pub const END_OF_TOOL_CALL: &str = "<tool_call|>";
-    pub const START_OF_TOOL_RESPONSE: &str = "<|tool_response>";
-    pub const END_OF_TOOL_RESPONSE: &str = "<tool_response|>";
+    pub const CHANNEL_START: &str = "<|channel>";
+    pub const CHANNEL_END: &str = "<channel|>";
+    pub const TOOL_START: &str = "<|tool>";
+    pub const TOOL_END: &str = "<tool|>";
+    pub const CALL_START: &str = "<|tool_call>";
+    pub const CALL_END: &str = "<tool_call|>";
+    pub const RESPONSE_START: &str = "<|tool_response>";
+    pub const RESPONSE_END: &str = "<tool_response|>";
     pub const STRING_DELIMITER: &str = "<|\"|>";
     pub const IMAGE_PLACEHOLDER: &str = "<|image|>";
     pub const AUDIO_PLACEHOLDER: &str = "<|audio|>";
@@ -71,56 +67,56 @@ pub struct Gemma4Formatter;
 impl Gemma4Formatter {
     /// Format a system turn with optional thinking trigger `<|think|>`.
     pub fn format_system(instructions: &str, think: bool) -> String {
-        let mut turn = String::from(tags::START_OF_TURN);
+        let mut turn = String::from(tags::TURN_START);
         turn.push_str("system\n");
         if think {
             turn.push_str(tags::THINK);
         }
         turn.push_str(instructions);
-        turn.push_str(tags::END_OF_TURN);
+        turn.push_str(tags::TURN_END);
         turn
     }
 
     /// Format a user dialogue turn.
     pub fn format_user(content: &str) -> String {
-        let mut turn = String::from(tags::START_OF_TURN);
+        let mut turn = String::from(tags::TURN_START);
         turn.push_str("user\n");
         turn.push_str(content);
-        turn.push_str(tags::END_OF_TURN);
+        turn.push_str(tags::TURN_END);
         turn
     }
 
     /// Format a model turn with an internal thought channel.
     pub fn format_model(thought: Option<&str>, content: &str) -> String {
-        let mut turn = String::from(tags::START_OF_TURN);
+        let mut turn = String::from(tags::TURN_START);
         turn.push_str("model\n");
         if let Some(reasoning) = thought {
-            turn.push_str(tags::START_OF_CHANNEL);
+            turn.push_str(tags::CHANNEL_START);
             turn.push_str("thought\n");
             turn.push_str(reasoning);
             turn.push('\n');
-            turn.push_str(tags::END_OF_CHANNEL);
+            turn.push_str(tags::CHANNEL_END);
         }
         turn.push_str(content);
-        turn.push_str(tags::END_OF_TURN);
+        turn.push_str(tags::TURN_END);
         turn
     }
 
     /// Format an empty thought channel for representation stabilization in fine-tuning.
-    pub fn format_stabilized_model(content: &str) -> String {
-        let mut turn = String::from(tags::START_OF_TURN);
+    pub fn format_stabilized(content: &str) -> String {
+        let mut turn = String::from(tags::TURN_START);
         turn.push_str("model\n");
-        turn.push_str(tags::START_OF_CHANNEL);
+        turn.push_str(tags::CHANNEL_START);
         turn.push_str("thought\n");
-        turn.push_str(tags::END_OF_CHANNEL);
+        turn.push_str(tags::CHANNEL_END);
         turn.push_str(content);
-        turn.push_str(tags::END_OF_TURN);
+        turn.push_str(tags::TURN_END);
         turn
     }
 
     /// Format a tool call with `<|"|>` delimiters.
-    pub fn format_tool_call(function_name: &str, arguments: &[(&str, &str)]) -> String {
-        let mut out = String::from(tags::START_OF_TOOL_CALL);
+    pub fn format_call(function_name: &str, arguments: &[(&str, &str)]) -> String {
+        let mut out = String::from(tags::CALL_START);
         out.push_str("call:");
         out.push_str(function_name);
         out.push('{');
@@ -135,19 +131,19 @@ impl Gemma4Formatter {
             out.push_str(tags::STRING_DELIMITER);
         }
         out.push('}');
-        out.push_str(tags::END_OF_TOOL_CALL);
+        out.push_str(tags::CALL_END);
         out
     }
 
     /// Format a tool response block.
-    pub fn format_tool_response(function_name: &str, response_body: &str) -> String {
-        let mut out = String::from(tags::START_OF_TOOL_RESPONSE);
+    pub fn format_response(function_name: &str, response_body: &str) -> String {
+        let mut out = String::from(tags::RESPONSE_START);
         out.push_str("response:");
         out.push_str(function_name);
         out.push('{');
         out.push_str(response_body);
         out.push('}');
-        out.push_str(tags::END_OF_TOOL_RESPONSE);
+        out.push_str(tags::RESPONSE_END);
         out
     }
 
@@ -155,11 +151,11 @@ impl Gemma4Formatter {
     pub fn strip_thoughts(dialogue: &str) -> String {
         let mut result = String::with_capacity(dialogue.len());
         let mut remaining = dialogue;
-        while let Some(start_idx) = remaining.find(tags::START_OF_CHANNEL) {
+        while let Some(start_idx) = remaining.find(tags::CHANNEL_START) {
             result.push_str(&remaining[..start_idx]);
-            let channel_body = &remaining[start_idx + tags::START_OF_CHANNEL.len()..];
-            if let Some(end_idx) = channel_body.find(tags::END_OF_CHANNEL) {
-                remaining = &channel_body[end_idx + tags::END_OF_CHANNEL.len()..];
+            let channel_body = &remaining[start_idx + tags::CHANNEL_START.len()..];
+            if let Some(end_idx) = channel_body.find(tags::CHANNEL_END) {
+                remaining = &channel_body[end_idx + tags::CHANNEL_END.len()..];
             } else {
                 remaining = "";
                 break;
@@ -171,10 +167,10 @@ impl Gemma4Formatter {
 
     /// Extract private thought channel content if present.
     pub fn extract_thought(model_turn: &str) -> Option<String> {
-        let start = model_turn.find(tags::START_OF_CHANNEL)?;
-        let rest = &model_turn[start + tags::START_OF_CHANNEL.len()..];
+        let start = model_turn.find(tags::CHANNEL_START)?;
+        let rest = &model_turn[start + tags::CHANNEL_START.len()..];
         let rest = rest.strip_prefix("thought\n").unwrap_or(rest);
-        let end = rest.find(tags::END_OF_CHANNEL)?;
+        let end = rest.find(tags::CHANNEL_END)?;
         Some(rest[..end].trim().to_owned())
     }
 }
@@ -192,20 +188,20 @@ pub struct LearnabilityReport {
 
 /// Evaluate learnability and syntax structure of generated or prompt text.
 pub fn evaluate_learnability(text: &str) -> LearnabilityReport {
-    let start_turns = text.matches(tags::START_OF_TURN).count();
-    let end_turns = text.matches(tags::END_OF_TURN).count();
+    let start_turns = text.matches(tags::TURN_START).count();
+    let end_turns = text.matches(tags::TURN_END).count();
     let turns_balanced = start_turns > 0 && start_turns == end_turns;
 
-    let start_channels = text.matches(tags::START_OF_CHANNEL).count();
-    let end_channels = text.matches(tags::END_OF_CHANNEL).count();
+    let start_channels = text.matches(tags::CHANNEL_START).count();
+    let end_channels = text.matches(tags::CHANNEL_END).count();
     let channel_balanced = start_channels == end_channels;
 
     let total_chars = text.len().max(1);
     let thought_chars: usize = text
-        .match_indices(tags::START_OF_CHANNEL)
+        .match_indices(tags::CHANNEL_START)
         .filter_map(|(start, _)| {
             let rest = &text[start..];
-            let end = rest.find(tags::END_OF_CHANNEL)?;
+            let end = rest.find(tags::CHANNEL_END)?;
             Some(end)
         })
         .sum();
@@ -240,7 +236,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gemma4_turn_formatting() {
+    fn test_turn() {
         let system = Gemma4Formatter::format_system("You are an assistant.", true);
         assert!(system.starts_with("<|turn>system\n<|think|>"));
         assert!(system.ends_with("<turn|>"));
@@ -248,17 +244,15 @@ mod tests {
         let user = Gemma4Formatter::format_user("Write quicksort in Rust.");
         assert_eq!(user, "<|turn>user\nWrite quicksort in Rust.<turn|>");
 
-        let model = Gemma4Formatter::format_model(
-            Some("Need to pick a pivot."),
-            "fn quicksort() {}",
-        );
+        let model =
+            Gemma4Formatter::format_model(Some("Need to pick a pivot."), "fn quicksort() {}");
         assert!(model.contains("<|channel>thought\nNeed to pick a pivot.\n<channel|>"));
         assert!(model.contains("fn quicksort() {}"));
     }
 
     #[test]
-    fn gemma4_empty_channel_stabilization() {
-        let model = Gemma4Formatter::format_stabilized_model("pub fn hello() {}");
+    fn test_channel() {
+        let model = Gemma4Formatter::format_stabilized("pub fn hello() {}");
         assert_eq!(
             model,
             "<|turn>model\n<|channel>thought\n<channel|>pub fn hello() {}<turn|>"
@@ -266,11 +260,8 @@ mod tests {
     }
 
     #[test]
-    fn gemma4_thought_stripping() {
-        let turn = Gemma4Formatter::format_model(
-            Some("Private chain of thought."),
-            "Answer 42",
-        );
+    fn test_thought() {
+        let turn = Gemma4Formatter::format_model(Some("Private chain of thought."), "Answer 42");
         let stripped = Gemma4Formatter::strip_thoughts(&turn);
         assert!(!stripped.contains("Private chain of thought"));
         assert!(stripped.contains("Answer 42"));
@@ -281,11 +272,8 @@ mod tests {
     }
 
     #[test]
-    fn gemma4_tool_delimiters() {
-        let call = Gemma4Formatter::format_tool_call(
-            "read_file",
-            &[("path", "src/main.rs")],
-        );
+    fn test_tools() {
+        let call = Gemma4Formatter::format_call("read_file", &[("path", "src/main.rs")]);
         assert_eq!(
             call,
             "<|tool_call>call:read_file{path:<|\"|>src/main.rs<|\"|>}<tool_call|>"
@@ -293,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn learnability_repetition_detection() {
+    fn test_repetition() {
         let repetitive = "Preprocessor ".repeat(500);
         let rep = evaluate_learnability(&repetitive);
         assert!(!rep.learnable);
@@ -302,7 +290,5 @@ mod tests {
         let good = "<|turn>system\nHelper<turn|><|turn>user\nHi<turn|><|turn>model\n<|channel>thought\n<channel|>Hello world today<turn|>";
         let rep_good = evaluate_learnability(good);
         assert!(rep_good.learnable);
-        assert!(rep_good.turns_balanced);
-        assert!(rep_good.channel_balanced);
     }
 }

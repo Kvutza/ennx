@@ -1,5 +1,5 @@
-use super::target::TargetStats;
 use super::decode::RouteSample;
+use super::target::TargetStats;
 
 #[derive(Default)]
 pub(super) struct VerificationProgress {

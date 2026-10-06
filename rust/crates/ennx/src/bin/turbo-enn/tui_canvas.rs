@@ -102,7 +102,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn braille_canvas_clipping_invariant() {
+    fn test_clip() {
         let mut canvas = BrailleCanvas::new(10, 5);
         canvas.set(usize::MAX, usize::MAX);
         canvas.set(1000, 1000);
@@ -112,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    fn braille_unicode_invariant() {
+    fn test_unicode() {
         let mut canvas = BrailleCanvas::new(8, 2);
         canvas.sparkline(&[0.1, 0.5, 0.2, 0.9, 0.4]);
         for line in canvas.render() {
@@ -124,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    fn canvas_monotonic_invariant() {
+    fn test_monotonic() {
         let mut canvas = BrailleCanvas::new(4, 2);
         canvas.set(1, 1);
         let before = canvas.dots.iter().copied().sum::<u8>();
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn inline_sparkline_invariant() {
+    fn test_sparkline() {
         let spark = inline_sparkline(&[1.0, 2.0, 3.0, 4.0], 4);
         assert_eq!(spark.chars().count(), 4);
         for ch in spark.chars() {
@@ -144,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn gauge_bounds_invariant() {
+    fn test_bounds() {
         assert_eq!(progress_gauge(-0.5, 10).chars().count(), 10);
         assert_eq!(progress_gauge(1.5, 10).chars().count(), 10);
         assert_eq!(progress_gauge(0.5, 10), "█████░░░░░");

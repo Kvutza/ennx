@@ -1,6 +1,6 @@
-use super::*;
 use super::generation::GenerationTask;
 use super::stats::RepairStats;
+use super::*;
 use crate::config::GenerationConfig;
 
 pub(super) fn score_targets(config: &GenerationConfig) -> bool {
@@ -103,7 +103,7 @@ pub(super) fn refresh_draft(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn commit_repair_tile(
+pub(super) fn commit_tile(
     task: &GenerationTask,
     tokens: &mut [u32],
     input: &mut [u32],

@@ -118,7 +118,7 @@ fn drafted(
     )
 }
 
-fn free_running_cross_entropy_reward(
+fn entropy_reward(
     rollouts: &[decode::Rollout],
     tokenizer: Option<&ByteDecoder>,
 ) -> Result<Vec<f32>, String> {
@@ -132,7 +132,9 @@ fn free_running_cross_entropy_reward(
             let bonus = match tokenizer {
                 Some(tok) => {
                     let sample_len = rollout.tokens.len().min(4096);
-                    let bytes = tok.decode_bytes(&rollout.tokens[..sample_len]).unwrap_or_default();
+                    let bytes = tok
+                        .decode_bytes(&rollout.tokens[..sample_len])
+                        .unwrap_or_default();
                     let text = String::from_utf8_lossy(&bytes);
                     let report = crate::text::gemma4::evaluate_learnability(&text);
                     if report.learnable {
@@ -183,9 +185,7 @@ fn scalar_reward(
                 matches as f32 / task.expected.len().max(rollout.tokens.len()) as f32
             })
             .collect(),
-        GenerationReward::FreeRunningCrossEntropy => {
-            free_running_cross_entropy_reward(rollouts, tokenizer)?
-        }
+        GenerationReward::FreeRunningCrossEntropy => entropy_reward(rollouts, tokenizer)?,
         GenerationReward::FrozenQwen { .. }
         | GenerationReward::CodeReconstruction
         | GenerationReward::CodeContrastive { .. } => evaluator

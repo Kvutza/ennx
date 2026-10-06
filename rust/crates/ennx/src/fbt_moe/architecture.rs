@@ -136,18 +136,20 @@ impl ResidualArchitecture {
 
     pub(super) fn layer_steps(self) -> &'static [LayerStep] {
         match self {
-            Self::LoopedMhc4 | Self::DiffusionMhc4 | Self::HnetMhc4 => SELECTIVE_CORE.get_or_init(|| {
-                crate::forward_program::RecurrentCore::selective_fbt()
-                    .layer_visits(MODEL_LAYERS as usize, FEEDBACK_PASSES as usize)
-                    .expect("built-in FBT recurrence must fit its physical layer stack")
-                    .into_iter()
-                    .map(|step| LayerStep {
-                        layer: step.layer as u32,
-                        pass: step.visit as u32,
-                        execution: step.execution as u32,
-                    })
-                    .collect()
-            }),
+            Self::LoopedMhc4 | Self::DiffusionMhc4 | Self::HnetMhc4 => {
+                SELECTIVE_CORE.get_or_init(|| {
+                    crate::forward_program::RecurrentCore::selective_fbt()
+                        .layer_visits(MODEL_LAYERS as usize, FEEDBACK_PASSES as usize)
+                        .expect("built-in FBT recurrence must fit its physical layer stack")
+                        .into_iter()
+                        .map(|step| LayerStep {
+                            layer: step.layer as u32,
+                            pass: step.visit as u32,
+                            execution: step.execution as u32,
+                        })
+                        .collect()
+                })
+            }
             _ => &FULL_STACK,
         }
     }
