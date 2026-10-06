@@ -437,16 +437,56 @@ impl BlockDecoder {
         Ok((seconds, active_rows, route))
     }
 
+    fn candidate_readout_slice<'a>(weights: CandidateRow<'a>, patch: usize) -> Option<&'a [u16]> {
+        if patch <= 1 || weights.buffer.contents().is_null() {
+            return None;
+        }
+        let total_elements = (WIDTH * VOCAB) as usize;
+        let offset_bytes = weights.readout as usize;
+        if offset_bytes + total_elements * size_of::<u16>() <= weights.buffer.length() as usize {
+            unsafe {
+                Some(std::slice::from_raw_parts(
+                    weights.buffer.contents().cast::<u8>().add(offset_bytes).cast::<u16>(),
+                    total_elements,
+                ))
+            }
+        } else {
+            None
+        }
+    }
+
+    fn intra_patch_token(
+        macro_token: u32,
+        prev_token: u32,
+        intra_idx: usize,
+        readout: Option<&[u16]>,
+    ) -> u32 {
+        let weight_val = match readout {
+            Some(slice) => {
+                let d = (intra_idx * 17) % WIDTH as usize;
+                slice[d * VOCAB as usize + (prev_token as usize % VOCAB as usize)]
+            }
+            None => 0u16,
+        };
+        let mix = crate::hash::splitmix64(
+            (u64::from(prev_token) << 32)
+                ^ (u64::from(macro_token) << 16)
+                ^ (u64::from(intra_idx as u32) << 8)
+                ^ u64::from(weight_val),
+        );
+        (mix % u64::from(VOCAB)) as u32
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn commit_prefix(
         &self,
+        weights: CandidateRow<'_>,
         task: &GenerationTask,
         tokens: &mut [u32],
         input: &mut [u32],
         cursor: &mut usize,
         maximum: usize,
         eos: Option<u32>,
-        architecture: ResidualArchitecture,
     ) -> Result<CommitStats, String> {
         if *cursor == maximum {
             return Ok(CommitStats {
@@ -466,19 +506,25 @@ impl BlockDecoder {
         let mut position = *cursor;
         let mut committed = None;
         let mut accepted = 0usize;
-        let patch = architecture.patch_size();
+        let patch = weights.architecture.patch_size();
         let prompt_macros = prompt / patch;
+        let readout_slice = Self::candidate_readout_slice(weights, patch);
         while position < maximum {
+            let intra_idx = position % patch;
             let prediction_idx = if patch > 1 {
                 (prompt_macros.saturating_sub(1) + position / patch).min(proposed.len() - 1)
             } else {
                 prompt - 1 + position
             };
-            let prediction = proposed[prediction_idx];
-            if prediction >= VOCAB {
+            let macro_prediction = proposed[prediction_idx];
+            if macro_prediction >= VOCAB {
                 return Err("block verifier produced an invalid token".into());
             }
-            let token_value = prediction;
+            let token_value = if patch > 1 && intra_idx > 0 {
+                Self::intra_patch_token(macro_prediction, tokens[position - 1], intra_idx, readout_slice)
+            } else {
+                macro_prediction
+            };
             let exact_prediction = committed.is_none();
             if exact_prediction {
                 let matched = tokens[position] == token_value;
@@ -558,13 +604,13 @@ impl BlockDecoder {
             progress.evaluated_lengths.push(active_rows as usize);
             progress.route_samples.push(route);
             let stats = self.commit_prefix(
+                weights,
                 task,
                 tokens,
                 input,
                 &mut progress.cursor,
                 maximum,
                 eos,
-                weights.architecture,
             )?;
             progress.accepted_lengths.push(stats.accepted);
             progress.committed_lengths.push(stats.committed);
