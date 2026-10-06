@@ -103,9 +103,9 @@ fn adapt_window(
     accepted: usize,
     span: usize,
 ) -> u32 {
-    if !mismatch {
+    if !mismatch || (span > 0 && accepted * 2 >= span) {
         (window * 2).min(config.verify.max_window)
-    } else if accepted * 4 < span {
+    } else if span > 0 && accepted * 4 < span {
         (window / 2).max(config.verify.window)
     } else {
         window

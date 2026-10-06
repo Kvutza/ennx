@@ -421,9 +421,11 @@ kernel void fbt_moe_combine_residual_rms(
     const ulong base = ulong(token) * p.width;
     float state[4];
     float squared = 0.0f;
+    #pragma unroll
     for (uint item = 0; item < 4; ++item) {
         const uint column = tid + item * 128;
         float branch = float(shared_output[base + column]);
+        #pragma unroll
         for (uint route = 0; route < p.top_k; ++route) {
             const ulong source = ulong(rows[route]) * p.width + column;
             branch = fma(weights[route], float(routed_output[source]), branch);
@@ -442,6 +444,7 @@ kernel void fbt_moe_combine_residual_rms(
         if (lane == 0) scale = rsqrt(total / float(p.width) + 1.0e-5f);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
+    #pragma unroll
     for (uint item = 0; item < 4; ++item) {
         const uint column = tid + item * 128;
         output[base + column] = half(state[item]);
