@@ -368,16 +368,32 @@ fn counts(root: &Path) -> Result<Counts, String> {
 pub(crate) fn resolve_corpus(root: &Path, spec: &mut TuneSpec) -> Result<(), String> {
     let corpus = spec.corpus.ok_or("path-free pretraining requires corpus")?;
     let generation = spec.generation.as_ref();
+    let is_episodes = generation.is_some_and(|g| {
+        !matches!(
+            g.reward,
+            ennx::config::GenerationReward::FreeRunningCrossEntropy
+        )
+    });
     let recipe = corpus_recipe(
         corpus,
-        generation.and_then(|generation| generation.corpus_prompt_tokens),
-        generation.map(|generation| generation.max_tokens),
+        if is_episodes {
+            generation.and_then(|generation| generation.corpus_prompt_tokens)
+        } else {
+            None
+        },
+        if is_episodes {
+            generation.map(|generation| generation.max_tokens)
+        } else {
+            None
+        },
     )?;
     let id = corpus_id(&recipe)?;
     let directory = root.join(".cache/ennx/corpora").join(&id);
     let manifest = corpus_manifest(&directory, &id, &recipe)?;
     let paths = corpus_splits(&directory, &id, &recipe, &manifest)?;
-    corpus_episodes(&directory, &id, &recipe, &manifest, spec)?;
+    if is_episodes {
+        corpus_episodes(&directory, &id, &recipe, &manifest, spec)?;
+    }
     spec.data.train = Some(paths[0].clone());
     if spec.generation.is_none() {
         spec.data.validation = Some(paths[1].clone());

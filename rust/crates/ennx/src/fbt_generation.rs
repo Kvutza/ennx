@@ -359,22 +359,23 @@ fn corpus_continuation_task(
     if coding {
         return Err("code_reconstruction requires document-aligned corpus_prompt_tokens; packed cross-file targets are not coding tasks".into());
     }
-    if config.corpus_prompt_tokens.is_some() {
-        return Err("document-aligned generation requires a resolved episode_dataset".into());
-    }
     let dataset = crate::pretrain_data::PretrainDataset::load(dataset_path)?;
-    let prompt_len = if config.corpus_prompt.is_empty() {
+    let prompt_len = if let Some(tokens) = config.corpus_prompt_tokens {
+        tokens as usize
+    } else if config.corpus_prompt.is_empty() {
         config.max_tokens as usize
     } else {
         config.corpus_prompt.len()
     };
-    if config.max_tokens > crate::pretrain_data::CONTEXT {
+    if config.max_tokens > crate::pretrain_data::CONTEXT
+        || prompt_len > crate::pretrain_data::CONTEXT as usize
+    {
         let total = prompt_len + config.max_tokens as usize;
         let source = dataset.prefix(total)?;
-        let p = if config.corpus_prompt.is_empty() {
-            source[..prompt_len].iter().map(|&t| u32::from(t)).collect()
-        } else {
+        let p = if !config.corpus_prompt.is_empty() {
             std::mem::take(&mut config.corpus_prompt)
+        } else {
+            source[..prompt_len].iter().map(|&t| u32::from(t)).collect()
         };
         let e = source[prompt_len..total].iter().map(|&t| u32::from(t)).collect();
         Ok((p, e, 0))
@@ -385,7 +386,12 @@ fn corpus_continuation_task(
             .iter()
             .map(|&token| u32::from(token))
             .collect::<Vec<_>>();
-        Ok((std::mem::take(&mut config.corpus_prompt), expected, index))
+        let prompt = if let Some(tokens) = config.corpus_prompt_tokens {
+            expected[..tokens as usize].to_vec()
+        } else {
+            std::mem::take(&mut config.corpus_prompt)
+        };
+        Ok((prompt, expected, index))
     }
 }
 
