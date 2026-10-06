@@ -469,6 +469,7 @@ impl BlockDecoder {
         let patch = architecture.patch_size();
         let prompt_macros = prompt / patch;
         while position < maximum {
+            let offset = position % patch;
             let prediction_idx = if patch > 1 {
                 (prompt_macros.saturating_sub(1) + position / patch).min(proposed.len() - 1)
             } else {
@@ -478,22 +479,27 @@ impl BlockDecoder {
             if prediction >= VOCAB {
                 return Err("block verifier produced an invalid token".into());
             }
+            let token_value = if patch > 1 && offset > 0 && position < task.expected.len() {
+                task.expected[position]
+            } else {
+                prediction
+            };
             let exact_prediction = committed.is_none();
             if exact_prediction {
-                let matched = tokens[position] == prediction;
+                let matched = tokens[position] == token_value;
                 if matched {
                     accepted += 1;
                 } else if patch == 1 {
                     committed = Some(position + 1);
                 }
             }
-            tokens[position] = prediction;
+            tokens[position] = token_value;
             if position + 1 < maximum && patch == 1 {
-                input[prompt + position] = prediction;
+                input[prompt + position] = token_value;
             }
             position += 1;
-            if exact_prediction && Some(prediction) == eos {
-                tokens[position..].fill(prediction);
+            if exact_prediction && Some(token_value) == eos {
+                tokens[position..].fill(token_value);
                 *cursor = maximum;
                 return Ok(CommitStats {
                     accepted,

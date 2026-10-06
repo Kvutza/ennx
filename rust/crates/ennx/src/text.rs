@@ -4,6 +4,12 @@ use ennx_wire::json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
+pub mod gemma4;
+pub use gemma4::{
+    Gemma4Formatter, Gemma4Role, Gemma4SpecialToken, LearnabilityReport, evaluate_learnability,
+    tags as gemma4_tags,
+};
+
 pub struct ByteDecoder {
     vocabulary: Vec<Option<String>>,
     special: HashMap<u32, String>,

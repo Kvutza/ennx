@@ -7,6 +7,9 @@ experiment = "pretrain"
 model = "fbt-pisa1-hnet-mhc4-v1"
 corpus = "stack-v3-python-800k-v1"
 
+[data]
+train = "../../.cache/ennx/corpora/202b69a6d707ceb1290d/train.ennxptn"
+
 [run]
 rounds = 10000
 reps = 1

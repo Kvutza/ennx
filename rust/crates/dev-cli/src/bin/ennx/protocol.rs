@@ -546,7 +546,7 @@ fn corpus_recipe(
             "stack_v3_python_800k_v1",
             "HuggingFaceCode/stack-v3-train",
             "repository_sha256_v2",
-            json!({"train":200,"validation":16,"test":16}),
+            json!({"train":2000,"validation":16,"test":16}),
         ),
         PretrainCorpus::Fineweb10btPilotV1 => (
             "fineweb_10bt_pilot_v1",
