@@ -74,56 +74,7 @@ impl RepairStats {
     }
 }
 
-fn route_sample(stats: routing::RouteStats) -> decode::RouteSample {
-    decode::RouteSample {
-        active_experts: stats.active_experts,
-        routed_rows: stats.routed_rows,
-        routed_tiles: stats.routed_tiles,
-    }
-}
-
-fn repair_bounds(
-    row: usize,
-    context: u32,
-    window: u32,
-    prompt: usize,
-    limit: usize,
-) -> (u32, usize) {
-    let start = ((row as u32 / 4) * 4).min(context - window);
-    let end = (start as usize + window as usize)
-        .saturating_sub(prompt - 1)
-        .min(limit);
-    (start, end)
-}
-
-fn adapt_window(
-    window: u32,
-    config: &GenerationConfig,
-    mismatch: bool,
-    accepted: usize,
-    span: usize,
-) -> u32 {
-    if !mismatch || (span > 0 && accepted * 2 >= span) {
-        (window * 2).min(config.verify.max_window)
-    } else if span > 0 && accepted * 4 < span {
-        128
-    } else {
-        (window / 2).max(128)
-    }
-}
-
-fn next_window(
-    window: u32,
-    config: &GenerationConfig,
-    mismatch: bool,
-    accepted: usize,
-    span: usize,
-) -> (bool, u32) {
-    (
-        mismatch && accepted * 4 < span,
-        adapt_window(window, config, mismatch, accepted, span),
-    )
-}
+use super::window::{adapt_window, expand_draft, next_window, repair_bounds, route_sample};
 
 impl BlockDecoder {
     fn score_targets(config: &GenerationConfig) -> bool {
@@ -385,54 +336,87 @@ impl BlockDecoder {
                 self.refresh_draft(tokens, input, *cursor, tile_end, task.prompt.len());
             }
 
-            // Every row through the first mismatch is causally exact. Commit
-            // that mismatch as well, and retain the rest of this tile as the
-            // next fixed-point draft instead of throwing away 127 results.
             let exact_start = *cursor;
-            let mut position = exact_start;
-            let mut committed = None;
-            let mut accepted = 0usize;
-            while position < tile_end {
-                let prediction = proposed[task.prompt.len() - 1 + position];
-                if prediction >= VOCAB {
-                    return Err("block repair produced an invalid token".into());
-                }
-                let exact_prediction = committed.is_none();
-                if exact_prediction {
-                    if tokens[position] == prediction {
-                        accepted += 1;
-                    } else {
-                        stats.first_mismatch.get_or_insert(position);
-                        committed = Some(position + 1);
-                    }
-                }
-                tokens[position] = prediction;
-                if task.prompt.len() + position < self.context as usize {
-                    input[task.prompt.len() + position] = prediction;
-                }
-                position += 1;
-                if exact_prediction && Some(prediction) == config.eos_token {
-                    tokens[position..].fill(prediction);
-                    *cursor = tokens.len();
-                    stats.accepted_lengths.push(accepted);
-                    stats.committed_lengths.push(position - exact_start);
-                    return Ok(stats);
-                }
+            let (next_cursor, reached_eos) = self.commit_repair_tile(
+                task,
+                tokens,
+                input,
+                proposed,
+                exact_start,
+                tile_end,
+                weights.architecture.patch_size(),
+                config.eos_token,
+                &mut stats,
+            )?;
+            let accepted = stats.accepted_lengths.last().copied().unwrap_or(0);
+            *cursor = next_cursor;
+            if reached_eos {
+                return Ok(stats);
             }
-            *cursor = committed.unwrap_or(tile_end);
             stats.report(*cursor, tokens.len(), &mut report_at);
-            stats.accepted_lengths.push(accepted);
-            stats.committed_lengths.push(*cursor - exact_start);
             self.repair_target(score_targets, task, tokens, exact_start, *cursor, target)?;
             (stalled, window) = next_window(
                 window,
                 config,
-                committed.is_some(),
+                *cursor < tile_end,
                 accepted,
                 tile_end - exact_start,
             );
         }
         Ok(stats)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn commit_repair_tile(
+        &self,
+        task: &GenerationTask,
+        tokens: &mut [u32],
+        input: &mut [u32],
+        proposed: &[u32],
+        exact_start: usize,
+        tile_end: usize,
+        patch: usize,
+        eos: Option<u32>,
+        stats: &mut RepairStats,
+    ) -> Result<(usize, bool), String> {
+        let mut position = exact_start;
+        let mut committed = None;
+        let mut accepted = 0usize;
+        while position < tile_end {
+            let prediction = proposed[task.prompt.len() - 1 + position];
+            if prediction >= VOCAB {
+                return Err("block repair produced an invalid token".into());
+            }
+            let exact_prediction = committed.is_none();
+            if exact_prediction {
+                if tokens[position] == prediction {
+                    accepted += 1;
+                } else {
+                    stats.first_mismatch.get_or_insert(position);
+                    let patch_end = if patch > 1 {
+                        ((position / patch) + 1) * patch
+                    } else {
+                        position + 1
+                    };
+                    committed = Some(patch_end.min(tile_end));
+                }
+            }
+            tokens[position] = prediction;
+            if task.prompt.len() + position < self.context as usize {
+                input[task.prompt.len() + position] = prediction;
+            }
+            position += 1;
+            if exact_prediction && Some(prediction) == eos {
+                tokens[position..].fill(prediction);
+                stats.accepted_lengths.push(accepted);
+                stats.committed_lengths.push(position - exact_start);
+                return Ok((tokens.len(), true));
+            }
+        }
+        let cursor = committed.unwrap_or(tile_end);
+        stats.accepted_lengths.push(accepted);
+        stats.committed_lengths.push(cursor - exact_start);
+        Ok((cursor, false))
     }
 
     pub fn new(runtime: &Runtime) -> Result<Self, String> {
@@ -576,6 +560,7 @@ impl BlockDecoder {
         cursor: &mut usize,
         maximum: usize,
         eos: Option<u32>,
+        architecture: ResidualArchitecture,
     ) -> Result<CommitStats, String> {
         if *cursor == maximum {
             return Ok(CommitStats {
@@ -609,7 +594,13 @@ impl BlockDecoder {
                     // This token is exact because every preceding token was
                     // already committed. Later predictions are only the next
                     // parallel fixed-point draft.
-                    committed = Some(position + 1);
+                    let patch = architecture.patch_size();
+                    let patch_end = if patch > 1 {
+                        ((position / patch) + 1) * patch
+                    } else {
+                        position + 1
+                    };
+                    committed = Some(patch_end.min(maximum));
                 }
             }
             tokens[position] = prediction;
@@ -673,8 +664,15 @@ impl BlockDecoder {
             progress.parallel_positions += active_rows as usize;
             progress.evaluated_lengths.push(active_rows as usize);
             progress.route_samples.push(route);
-            let stats =
-                self.commit_prefix(task, tokens, input, &mut progress.cursor, maximum, eos)?;
+            let stats = self.commit_prefix(
+                task,
+                tokens,
+                input,
+                &mut progress.cursor,
+                maximum,
+                eos,
+                weights.architecture,
+            )?;
             progress.accepted_lengths.push(stats.accepted);
             progress.committed_lengths.push(stats.committed);
             if progress.first_mismatch.is_none() {
@@ -873,23 +871,4 @@ impl BlockDecoder {
             &[draft],
         )
     }
-}
-
-fn expand_draft(
-    draft: &decode::Rollout,
-    maximum: usize,
-    eos: Option<u32>,
-) -> Result<Vec<u32>, String> {
-    if draft.tokens.len() == maximum {
-        return Ok(draft.tokens.clone());
-    }
-    let Some(eos) = eos else {
-        return Err("short incumbent rollout without EOS cannot seed block verification".into());
-    };
-    if draft.tokens.last() != Some(&eos) || draft.tokens.len() > maximum {
-        return Err("incumbent rollout has an invalid generated length".into());
-    }
-    let mut tokens = draft.tokens.clone();
-    tokens.resize(maximum, eos);
-    Ok(tokens)
 }

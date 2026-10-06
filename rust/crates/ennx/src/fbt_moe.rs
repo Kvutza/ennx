@@ -120,6 +120,8 @@ mod scorer;
 mod scorer_trace;
 #[path = "fbt_block/target.rs"]
 mod target;
+#[path = "fbt_block/window.rs"]
+mod window;
 pub use generation::{context_loop, run_generated, run_generation};
 use scorer::{ScorerStageTrace, objective_fused, objective_trace};
 

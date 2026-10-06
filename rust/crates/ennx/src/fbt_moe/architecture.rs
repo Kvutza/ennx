@@ -127,6 +127,13 @@ impl ResidualArchitecture {
         }
     }
 
+    pub(super) const fn patch_size(self) -> usize {
+        match self {
+            Self::HnetMhc4 => 64,
+            _ => 1,
+        }
+    }
+
     pub(super) fn layer_steps(self) -> &'static [LayerStep] {
         match self {
             Self::LoopedMhc4 | Self::DiffusionMhc4 | Self::HnetMhc4 => SELECTIVE_CORE.get_or_init(|| {
