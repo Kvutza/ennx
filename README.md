@@ -1,29 +1,47 @@
 # ENNX
 
-Bayesian optimization with epistemic nearest-neighbor models, in Rust and Python.
+Bayesian optimization for neural architectures at scale, in Rust and Python.
 Works with BoTorch, Optuna, and Ax.
 
-The Rust library and Python bindings share a build managed through `./ennx`.
+## Quickstart
+
+Hermetic builds via Buck2. Downloads and caches pinned Rust, Clang/LLD, and toolchains automatically:
 
 ```sh
-./ennx build   # Build the library, CLI, tests, and Python wheels
-./ennx test    # Run Rust and kernel tests
-./ennx dev     # Format, build, and run Rust and Python tests
-./ennx --help
+./ennx build             # Build library, CLI, and Python 3.12–3.14 wheels
+./ennx test              # Run unit tests and accelerator kernels
+./ennx test --affected   # Run only tests affected by working changes
+./ennx test --python     # Run Python test suite
+./ennx dev               # Format, build, and test verification cycle
 ```
 
-`./ennx build` prepares dependencies and builds in one command. Buck2 downloads
-and caches pinned toolchains, including Rust, Clang/LLD, and the Linux sysroot.
-Pixi manages only Python wheel verification environments. No system Rust, Python,
-or Clang is required; macOS still needs Apple's SDK. Unchanged build results and
-existing verification environments are reused.
+## Bayesian Optimization & Tuning
 
-Cargo manifests declare Rust dependencies; Reindeer generates their Buck2 targets.
+Run full-space zeroth-order optimization with the live terminal dashboard:
 
-`build` checks each Python 3.12–3.14 wheel and writes it to `dist/`.
-With `--tests`, the Python suite runs against every wheel using its matching
-interpreter.
+```sh
+./ennx tune examples/tuning/code-pretrain.toml
+```
 
-[API](docs/api.md) · [Integrations](docs/interop.md) ·
-[Changelog](CHANGELOG.md) · [Build](docs/buck2.md) · [Tests](docs/testing.md) ·
-[Dense Qwen control](docs/qwen.md) · [Notice](NOTICE)
+## Codebase Radar
+
+Tree-sitter AST queries, reachability analysis, and quality gates:
+
+```sh
+./ennx radar find <pattern>   # AST symbol search
+./ennx radar impact <target>  # Blast-radius analysis
+./ennx radar gate             # Structural quality checks
+```
+
+## Hardware Backends
+
+- **Apple Silicon (Metal)**: Zero-copy unified memory buffers and SIMDgroup matrix primitives.
+- **NVIDIA CUDA**: PTX synthesis for Turing (SM_75) and Hopper (SM_90a) architectures.
+
+## Documentation
+
+- [API Reference](docs/api.md)
+- [Python Integrations](docs/interop.md)
+- [Build System](docs/buck2.md)
+- [Testing & Quality Gates](docs/testing.md)
+- [Architecture & Research](docs/README.md)
