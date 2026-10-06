@@ -1,7 +1,7 @@
 version = 2
 
 experiment = "pretrain"
-model = "fbt-pisa1-mhc4-v1"
+model = "fbt-pisa1-hnet-mhc4-v1"
 corpus = "stack-v3-python-pilot-v1"
 
 [run]
@@ -57,8 +57,7 @@ passes = 1
 unroll = 1
 
 [generation.reward]
-kind = "code-objectives"
-critical-window = 128
+kind = "free-running-cross-entropy"
 
 [diagnostics]
 trace = false

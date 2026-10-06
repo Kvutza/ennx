@@ -97,8 +97,14 @@ pub(super) fn decoded_completion(
 
 pub(super) fn display_completion(header: &str, text: &str) {
     eprintln!("\n{header}");
+    let max_preview = 4_000;
+    let preview = if text.len() > max_preview {
+        &text[..text.floor_char_boundary(max_preview)]
+    } else {
+        text
+    };
     let mut chunk = String::with_capacity(4_000);
-    for character in text.chars() {
+    for character in preview.chars() {
         chunk.push(character);
         if character == '\n' || chunk.len() >= 4_000 {
             eprint!("ENNX_GENERATED_TEXT_CHUNK {chunk}");
@@ -110,6 +116,12 @@ pub(super) fn display_completion(header: &str, text: &str) {
     }
     if !chunk.is_empty() {
         eprintln!("ENNX_GENERATED_TEXT_CHUNK {chunk}");
+    }
+    if text.len() > max_preview {
+        eprintln!(
+            "ENNX_GENERATED_TEXT_CHUNK \n... [preview capped at {} chars; full completion preserved on disk] ...\n",
+            max_preview
+        );
     }
     eprintln!("ENNX_GENERATED_TEXT_END");
 }
