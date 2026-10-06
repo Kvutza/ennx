@@ -67,8 +67,8 @@ per-round counters. With one evaluated arm, the current failure tolerance equals
 the modeled parameter count, so contraction is not realistic at Qwen scale;
 that behavior is retained only as the explicit comparison baseline.
 
-The full-space BO sprint contract is recorded in
-[`full-space-bo-sprint.md`](full-space-bo-sprint.md). Qwen BO reports include
+The full-space BO sprint contract is preserved in
+[`archive/research/full-space-bo-sprint.md`](../archive/research/full-space-bo-sprint.md). Qwen BO reports include
 the fixed LOOCV fitting objective, dense full-tensor BF16 perturbation semantics,
 4096/16384/32768 context targets, the actual objective context, whether one of
 those targets was reached, and the EGGROLL/hyperscale-ES comparison role in

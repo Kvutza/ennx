@@ -16,8 +16,7 @@ Start here, in order:
    architecture decision.
 8. [Manifold-constrained residual streams](manifold-hyperconnections.md):
    four-stream model, Metal contract, and matched experiment.
-9. [Research contract](full-space-bo-sprint.md) and
-   [GPU execution and measurements](kernel-architecture-plan.md).
+9. [GPU execution and measurements](kernel-architecture-plan.md).
 10. [Perturbation lab](perturbation-lab.md): noise laws and extension boundaries.
 
 The active experiment uses `fbt-pisa1-diffusion-mhc4-v1` with

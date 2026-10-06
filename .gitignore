@@ -32,3 +32,6 @@ results/
 /docs/references/**/*.pdf
 /.home/
 /formal/
+/archive/
+/*.tex
+/*.pdf
