@@ -53,8 +53,8 @@ corpus-prompt-tokens = 128
 mode = "accepted-prefix"
 window = 4096
 max-window = 4096
-passes = 4
-unroll = 4
+passes = 1
+unroll = 1
 
 [generation.reward]
 kind = "code-objectives"
