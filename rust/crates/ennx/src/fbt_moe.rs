@@ -118,6 +118,8 @@ mod reconstruction;
 mod scorer;
 #[path = "fbt_scorer/trace.rs"]
 mod scorer_trace;
+#[path = "fbt_block/stats.rs"]
+mod stats;
 #[path = "fbt_block/target.rs"]
 mod target;
 #[path = "fbt_block/window.rs"]

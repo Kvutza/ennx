@@ -311,25 +311,8 @@ pub fn run_generated(
         decoys = task.decoys;
         (task.prompt, task.expected, index as u32, Some(episode))
     } else {
-        if coding {
-            return Err("code_reconstruction requires document-aligned corpus_prompt_tokens; packed cross-file targets are not coding tasks".into());
-        }
-        if config.corpus_prompt_tokens.is_some() {
-            return Err("document-aligned generation requires a resolved episode_dataset".into());
-        }
-        let dataset = crate::pretrain_data::PretrainDataset::load(dataset_path)?;
-        let index = (task_seed % u64::from(dataset.sequences())) as u32;
-        let expected = dataset
-            .sequence(index)?
-            .iter()
-            .map(|&token| u32::from(token))
-            .collect::<Vec<_>>();
-        (
-            std::mem::take(&mut config.corpus_prompt),
-            expected,
-            index,
-            None,
-        )
+        let (p, e, idx) = corpus_continuation_task(&mut config, dataset_path, task_seed, coding)?;
+        (p, e, idx, None)
     };
     if expected.len() != config.max_tokens as usize {
         return Err(format!(
@@ -365,6 +348,45 @@ pub fn run_generated(
         Some(&tokenizer),
         Some(dataset_path),
     )
+}
+
+fn corpus_continuation_task(
+    config: &mut GenerationConfig,
+    dataset_path: &Path,
+    task_seed: u64,
+    coding: bool,
+) -> Result<(Vec<u32>, Vec<u32>, u32), String> {
+    if coding {
+        return Err("code_reconstruction requires document-aligned corpus_prompt_tokens; packed cross-file targets are not coding tasks".into());
+    }
+    if config.corpus_prompt_tokens.is_some() {
+        return Err("document-aligned generation requires a resolved episode_dataset".into());
+    }
+    let dataset = crate::pretrain_data::PretrainDataset::load(dataset_path)?;
+    let prompt_len = if config.corpus_prompt.is_empty() {
+        config.max_tokens as usize
+    } else {
+        config.corpus_prompt.len()
+    };
+    if config.max_tokens > crate::pretrain_data::CONTEXT {
+        let total = prompt_len + config.max_tokens as usize;
+        let source = dataset.prefix(total)?;
+        let p = if config.corpus_prompt.is_empty() {
+            source[..prompt_len].iter().map(|&t| u32::from(t)).collect()
+        } else {
+            std::mem::take(&mut config.corpus_prompt)
+        };
+        let e = source[prompt_len..total].iter().map(|&t| u32::from(t)).collect();
+        Ok((p, e, 0))
+    } else {
+        let index = (task_seed % u64::from(dataset.sequences())) as u32;
+        let expected = dataset
+            .sequence(index)?
+            .iter()
+            .map(|&token| u32::from(token))
+            .collect::<Vec<_>>();
+        Ok((std::mem::take(&mut config.corpus_prompt), expected, index))
+    }
 }
 
 pub(super) fn episode_task(

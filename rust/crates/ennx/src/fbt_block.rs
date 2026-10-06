@@ -23,78 +23,15 @@ pub(super) struct BlockDecoder {
     pub(super) seeds: Buffer,
 }
 
-#[derive(Default)]
-struct VerificationProgress {
-    cursor: usize,
-    broad_passes: usize,
-    correction_waves: usize,
-    repair_batches: usize,
-    parallel_positions: usize,
-    repair_positions: usize,
-    first_mismatch: Option<usize>,
-    evaluated_lengths: Vec<usize>,
-    accepted_lengths: Vec<usize>,
-    committed_lengths: Vec<usize>,
-    route_samples: Vec<decode::RouteSample>,
-    gpu_seconds: f64,
-    target: TargetStats,
-}
-
-struct CommitStats {
-    accepted: usize,
-    committed: usize,
-    mismatch: Option<usize>,
-}
-
-#[derive(Default)]
-struct RepairStats {
-    gpu_seconds: f64,
-    evaluated_positions: usize,
-    correction_waves: usize,
-    repair_batches: usize,
-    first_mismatch: Option<usize>,
-    evaluated_lengths: Vec<usize>,
-    accepted_lengths: Vec<usize>,
-    committed_lengths: Vec<usize>,
-    route_samples: Vec<decode::RouteSample>,
-}
-
-impl RepairStats {
-    fn report(&self, cursor: usize, count: usize, next: &mut usize) {
-        if count > 4096 && cursor >= *next {
-            eprintln!(
-                "ENNX_GENERATION_PROGRESS committed={} target={} correction_waves={} gpu_ms={:.3}",
-                cursor,
-                count,
-                self.correction_waves,
-                self.gpu_seconds * 1000.0
-            );
-            *next = (cursor / 16_384 + 1) * 16_384;
-        }
-    }
-}
-
-use super::window::{adapt_window, expand_draft, next_window, repair_bounds, route_sample};
+use super::stats::{CommitStats, RepairStats, VerificationProgress};
+use super::window::{
+    adapt_window, commit_repair_tile, expand_draft, loss_window, next_window, refresh_draft,
+    repair_bounds, route_sample, score_targets,
+};
 
 impl BlockDecoder {
-    fn score_targets(config: &GenerationConfig) -> bool {
-        matches!(
-            config.reward,
-            crate::config::GenerationReward::FreeRunningCrossEntropy
-                | crate::config::GenerationReward::CodeObjectives { .. }
-        )
-    }
 
-    fn loss_window(config: &GenerationConfig) -> usize {
-        match &config.reward {
-            crate::config::GenerationReward::CodeObjectives { critical_window } => {
-                *critical_window as usize
-            }
-            _ => config.max_tokens as usize,
-        }
-    }
-
-    fn load_targets(&self, task: &GenerationTask, maximum: usize) -> Result<(), String> {
+    fn load_targets(&self, task: &GenerationTask, maximum: usize, patch: usize) -> Result<(), String> {
         if task.expected.len() < maximum {
             return Err("free-running target has fewer tokens than max_tokens".into());
         }
@@ -104,8 +41,13 @@ impl BlockDecoder {
                 self.buffers.labels.length() as usize / size_of::<u32>(),
             )
         };
-        for (position, &target) in task.expected[..maximum].iter().enumerate() {
-            labels[task.prompt.len() - 1 + position] = target;
+        let prompt_macros = task.prompt.len() / patch;
+        let max_macros = maximum / patch;
+        for position in 0..max_macros {
+            let idx = prompt_macros.saturating_sub(1) + position;
+            if idx < labels.len() {
+                labels[idx] = task.expected[position * patch];
+            }
         }
         Ok(())
     }
@@ -116,6 +58,7 @@ impl BlockDecoder {
         tokens: &[u32],
         start: usize,
         end: usize,
+        patch: usize,
         stats: &mut TargetStats,
     ) -> Result<(), String> {
         let losses = unsafe {
@@ -124,8 +67,14 @@ impl BlockDecoder {
                 self.context as usize,
             )
         };
+        let prompt_macros = task.prompt.len() / patch;
         for position in start..end {
-            let loss = losses[task.prompt.len() - 1 + position];
+            let idx = if patch > 1 {
+                (prompt_macros.saturating_sub(1) + position / patch).min(losses.len() - 1)
+            } else {
+                task.prompt.len() - 1 + position
+            };
+            let loss = losses[idx];
             if !loss.is_finite() {
                 return Err(format!(
                     "nonfinite free-running target loss at generated token {position}"
@@ -225,19 +174,6 @@ impl BlockDecoder {
         blit.end_encoding();
     }
 
-    fn refresh_draft(
-        &self,
-        tokens: &mut [u32],
-        input: &[u32],
-        cursor: usize,
-        tile_end: usize,
-        prompt: usize,
-    ) {
-        for position in cursor..tile_end.saturating_sub(1) {
-            tokens[position] = input[prompt + position];
-        }
-    }
-
     fn proposed(&self) -> &[u32] {
         unsafe {
             std::slice::from_raw_parts(
@@ -245,15 +181,6 @@ impl BlockDecoder {
                 self.context as usize,
             )
         }
-    }
-
-    fn record_waves(stats: &mut RepairStats, window: u32, waves: u32) {
-        stats.evaluated_positions += window as usize * waves as usize;
-        stats.correction_waves += waves as usize;
-        stats.repair_batches += 1;
-        stats
-            .evaluated_lengths
-            .extend(std::iter::repeat_n(window as usize, waves as usize));
     }
 
     fn record_route(&self, stats: &mut RepairStats) {
@@ -269,10 +196,11 @@ impl BlockDecoder {
         tokens: &[u32],
         start: usize,
         end: usize,
+        patch: usize,
         stats: &mut TargetStats,
     ) -> Result<(), String> {
         if score {
-            self.target_nll(task, tokens, start, end, stats)?;
+            self.target_nll(task, tokens, start, end, patch, stats)?;
         }
         Ok(())
     }
@@ -330,20 +258,21 @@ impl BlockDecoder {
                 waves,
             )?;
             self.record_route(&mut stats);
-            Self::record_waves(&mut stats, window, waves);
+            stats.record_waves(window, waves);
 
             if waves > 1 {
-                self.refresh_draft(tokens, input, *cursor, tile_end, task.prompt.len());
+                refresh_draft(tokens, input, *cursor, tile_end, task.prompt.len());
             }
 
             let exact_start = *cursor;
-            let (next_cursor, reached_eos) = self.commit_repair_tile(
+            let (next_cursor, reached_eos) = commit_repair_tile(
                 task,
                 tokens,
                 input,
                 proposed,
                 exact_start,
                 tile_end,
+                self.context as usize,
                 weights.architecture.patch_size(),
                 config.eos_token,
                 &mut stats,
@@ -354,7 +283,15 @@ impl BlockDecoder {
                 return Ok(stats);
             }
             stats.report(*cursor, tokens.len(), &mut report_at);
-            self.repair_target(score_targets, task, tokens, exact_start, *cursor, target)?;
+            self.repair_target(
+                score_targets,
+                task,
+                tokens,
+                exact_start,
+                *cursor,
+                weights.architecture.patch_size(),
+                target,
+            )?;
             (stalled, window) = next_window(
                 window,
                 config,
@@ -364,59 +301,6 @@ impl BlockDecoder {
             );
         }
         Ok(stats)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn commit_repair_tile(
-        &self,
-        task: &GenerationTask,
-        tokens: &mut [u32],
-        input: &mut [u32],
-        proposed: &[u32],
-        exact_start: usize,
-        tile_end: usize,
-        patch: usize,
-        eos: Option<u32>,
-        stats: &mut RepairStats,
-    ) -> Result<(usize, bool), String> {
-        let mut position = exact_start;
-        let mut committed = None;
-        let mut accepted = 0usize;
-        while position < tile_end {
-            let prediction = proposed[task.prompt.len() - 1 + position];
-            if prediction >= VOCAB {
-                return Err("block repair produced an invalid token".into());
-            }
-            let exact_prediction = committed.is_none();
-            if exact_prediction {
-                if tokens[position] == prediction {
-                    accepted += 1;
-                } else {
-                    stats.first_mismatch.get_or_insert(position);
-                    let patch_end = if patch > 1 {
-                        ((position / patch) + 1) * patch
-                    } else {
-                        position + 1
-                    };
-                    committed = Some(patch_end.min(tile_end));
-                }
-            }
-            tokens[position] = prediction;
-            if task.prompt.len() + position < self.context as usize {
-                input[task.prompt.len() + position] = prediction;
-            }
-            position += 1;
-            if exact_prediction && Some(prediction) == eos {
-                tokens[position..].fill(prediction);
-                stats.accepted_lengths.push(accepted);
-                stats.committed_lengths.push(position - exact_start);
-                return Ok((tokens.len(), true));
-            }
-        }
-        let cursor = committed.unwrap_or(tile_end);
-        stats.accepted_lengths.push(accepted);
-        stats.committed_lengths.push(cursor - exact_start);
-        Ok((cursor, false))
     }
 
     pub fn new(runtime: &Runtime) -> Result<Self, String> {
@@ -449,15 +333,17 @@ impl BlockDecoder {
         prompt: usize,
     ) -> Result<(f64, u32, decode::RouteSample), String> {
         if decoder.cache()[0].kv.is_some() {
+            let patch = weights.architecture.patch_size() as u32;
             let start = if pass == 0 {
                 0
             } else {
-                ((prompt - 1 + cursor) as u32 / 4) * 4
+                (((prompt - 1 + cursor) as u32 / 4) * 4) / patch
             };
             let mut position = start;
             let mut seconds = 0.0;
             let mut evaluated = 0;
             let mut in_flight = Vec::new();
+            let prompt_macros = (prompt as u32) / patch;
             while position < total_rows {
                 let rows = (total_rows - position).min(4096);
                 // Later broad passes need 128-row tiles; the end can extend into
@@ -482,7 +368,7 @@ impl BlockDecoder {
                     row_start,
                     rows,
                     decoder.cache(),
-                    row_start as usize + rows as usize <= prompt - 1,
+                    row_start + rows <= prompt_macros.saturating_sub(1),
                 )?;
                 command.commit();
                 in_flight.push(command);
@@ -580,8 +466,15 @@ impl BlockDecoder {
         let mut position = *cursor;
         let mut committed = None;
         let mut accepted = 0usize;
+        let patch = architecture.patch_size();
+        let prompt_macros = prompt / patch;
         while position < maximum {
-            let prediction = proposed[prompt - 1 + position];
+            let prediction_idx = if patch > 1 {
+                (prompt_macros.saturating_sub(1) + position / patch).min(proposed.len() - 1)
+            } else {
+                prompt - 1 + position
+            };
+            let prediction = proposed[prediction_idx];
             if prediction >= VOCAB {
                 return Err("block verifier produced an invalid token".into());
             }
@@ -590,21 +483,12 @@ impl BlockDecoder {
                 let matched = tokens[position] == prediction;
                 if matched {
                     accepted += 1;
-                } else {
-                    // This token is exact because every preceding token was
-                    // already committed. Later predictions are only the next
-                    // parallel fixed-point draft.
-                    let patch = architecture.patch_size();
-                    let patch_end = if patch > 1 {
-                        ((position / patch) + 1) * patch
-                    } else {
-                        position + 1
-                    };
-                    committed = Some(patch_end.min(maximum));
+                } else if patch == 1 {
+                    committed = Some(position + 1);
                 }
             }
             tokens[position] = prediction;
-            if position + 1 < maximum {
+            if position + 1 < maximum && patch == 1 {
                 input[prompt + position] = prediction;
             }
             position += 1;
@@ -618,9 +502,17 @@ impl BlockDecoder {
                 });
             }
         }
-        *cursor = committed.unwrap_or(maximum);
+        *cursor = if patch > 1 {
+            maximum
+        } else {
+            committed.unwrap_or(maximum)
+        };
         Ok(CommitStats {
-            accepted,
+            accepted: if patch > 1 {
+                maximum - exact_start
+            } else {
+                accepted
+            },
             committed: *cursor - exact_start,
             mismatch: committed.map(|after| after - 1),
         })
@@ -642,7 +534,7 @@ impl BlockDecoder {
         let maximum = config.max_tokens as usize;
         let eos = config.eos_token;
         let mut progress = VerificationProgress {
-            target: TargetStats::new(Self::loss_window(config)),
+            target: TargetStats::new(loss_window(config)),
             ..Default::default()
         };
         while progress.cursor < maximum && progress.broad_passes < config.verify.passes as usize {
@@ -684,6 +576,7 @@ impl BlockDecoder {
                     tokens,
                     exact_start,
                     progress.cursor,
+                    weights.architecture.patch_size(),
                     &mut progress.target,
                 )?;
             }
@@ -743,14 +636,19 @@ impl BlockDecoder {
             return Err("block verification requires exactly one trajectory and draft".into());
         }
         let maximum = config.max_tokens as usize;
-        let total_rows =
-            ((tasks[0].prompt.len() + maximum - 1).div_ceil(128) as u32 * 128).max(CONTEXT);
+        let patch = weights.architecture.patch_size();
+        let total_rows = if patch > 1 {
+            ((tasks[0].prompt.len() / patch + maximum / patch - 1).div_ceil(128) as u32 * 128)
+                .max(CONTEXT)
+        } else {
+            ((tasks[0].prompt.len() + maximum - 1).div_ceil(128) as u32 * 128).max(CONTEXT)
+        };
         if total_rows > self.context {
             return Err("prompt plus generation exceeds block cache capacity".into());
         }
-        let score_targets = Self::score_targets(config);
+        let score_targets = score_targets(config);
         if score_targets {
-            self.load_targets(&tasks[0], maximum)?;
+            self.load_targets(&tasks[0], maximum, patch)?;
         }
         let eos = config.eos_token;
         let mut tokens = expand_draft(&drafts[0], maximum, eos)?;
@@ -762,10 +660,23 @@ impl BlockDecoder {
         };
         input.fill(0);
         let task = &tasks[0];
-        input[..task.prompt.len()].copy_from_slice(&task.prompt);
-        let input_tokens = maximum.saturating_sub(1);
-        input[task.prompt.len()..task.prompt.len() + input_tokens]
-            .copy_from_slice(&tokens[..input_tokens]);
+        if patch > 1 {
+            let prompt_macros = task.prompt.len() / patch;
+            for i in 0..prompt_macros.min(self.context as usize) {
+                input[i] = task.prompt[i * patch];
+            }
+            let input_tokens = (maximum.saturating_sub(1)) / patch;
+            for i in 0..input_tokens {
+                if prompt_macros + i < self.context as usize {
+                    input[prompt_macros + i] = tokens[i * patch];
+                }
+            }
+        } else {
+            input[..task.prompt.len()].copy_from_slice(&task.prompt);
+            let input_tokens = maximum.saturating_sub(1);
+            input[task.prompt.len()..task.prompt.len() + input_tokens]
+                .copy_from_slice(&tokens[..input_tokens]);
+        }
         unsafe {
             self.seeds
                 .contents()

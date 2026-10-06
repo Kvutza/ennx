@@ -17,14 +17,17 @@ pub(super) fn prepare_resources(
     architecture: ResidualArchitecture,
 ) -> Result<Resources, String> {
     let runtime = Runtime::shared()?;
-    let context = config
+    let patch = architecture.patch_size();
+    let raw_positions = config
         .tasks
         .iter()
         .map(|task| {
             task.prompt.len() + config.max_tokens as usize - usize::from(config.draft.is_none())
         })
         .max()
-        .ok_or("generation requires tasks")?
+        .ok_or("generation requires tasks")?;
+    let core_positions = raw_positions.div_ceil(patch);
+    let context = core_positions
         .next_power_of_two()
         .max(CONTEXT as usize) as u32;
     let visits = config
