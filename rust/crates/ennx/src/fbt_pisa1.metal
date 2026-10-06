@@ -11,6 +11,10 @@ using namespace metal;
 #define PISA_REUSE_SCORES
 #endif
 
+#ifndef PISA_NO_STAGE_SHARED_KV
+#define PISA_STAGE_SHARED_KV
+#endif
+
 // Loop unrolling directive in macro avoiding MSL lambda compiler restrictions
 #define PISA_FRAGMENTS(index, step) \
     _Pragma("unroll") \
