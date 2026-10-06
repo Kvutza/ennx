@@ -50,7 +50,7 @@ purpose = "pretrain"
 initialization = "megatron"
 max-tokens = 1048576
 temperature = 0.8
-corpus-prompt-tokens = 1048576
+corpus-prompt-tokens = 128
 
 [generation.verify]
 mode = "accepted-prefix"

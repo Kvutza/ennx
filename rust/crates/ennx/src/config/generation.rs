@@ -307,9 +307,9 @@ impl GenerationConfig {
         }
         if self
             .corpus_prompt_tokens
-            .is_some_and(|count| count == 0 || count > 4096)
+            .is_some_and(|count| count == 0 || count > crate::context::MAX_TOKENS)
         {
-            return Err("corpus_prompt_tokens must be in 1..4096".into());
+            return Err("corpus_prompt_tokens must be in 1..1048576".into());
         }
         if self.max_tokens == 0
             || self.max_tokens > crate::context::MAX_TOKENS
